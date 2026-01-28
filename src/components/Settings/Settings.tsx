@@ -22,12 +22,21 @@ export const Settings: React.FC = () => {
 
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState(settings.openaiApiKey || "");
+  const [googleClientId, setGoogleClientId] = useState(settings.googleClientId || "");
+  const [googleApiKey, setGoogleApiKey] = useState(settings.googleApiKey || "");
   const [isSaved, setIsSaved] = useState(false);
+  const [isGoogleSaved, setIsGoogleSaved] = useState(false);
 
   const handleSaveApiKey = () => {
     setApiKey(apiKeyInput);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  const handleSaveGoogleCredentials = () => {
+    updateSettings({ googleClientId, googleApiKey });
+    setIsGoogleSaved(true);
+    setTimeout(() => setIsGoogleSaved(false), 2000);
   };
 
   const toggleDefaultFormat = (format: VideoFormat) => {
@@ -133,6 +142,82 @@ export const Settings: React.FC = () => {
                     platform.openai.com
                   </a>
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Google Drive Integration */}
+          <Card variant="default">
+            <CardContent className="p-5">
+              <div className="flex items-center gap-4 mb-5">
+                <div className={cn(
+                  "w-10 h-10 rounded-lg flex items-center justify-center",
+                  "bg-[hsl(45_50%_15%/0.5)]"
+                )}>
+                  <svg className="w-5 h-5 text-[hsl(45_100%_60%)]" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M4.433 22.396l4.83-8.387H22l-4.833 8.387H4.433zm7.192-9.471L6.79 4.167h6.795l4.833 8.758h-6.793zm6.795-8.758L22 4.167l-4.833 8.387-3.58-6.387 4.833-2z" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-[hsl(var(--text))] font-[family-name:var(--font-display)]">
+                    Google Drive Integration
+                  </p>
+                  <p className="text-xs text-[hsl(var(--text-muted))]">
+                    Optional: Import audio files directly from Google Drive
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[hsl(var(--text-subtle))] uppercase tracking-wider mb-2">
+                    Google Client ID
+                  </label>
+                  <Input
+                    value={googleClientId}
+                    onChange={(e) => setGoogleClientId(e.target.value)}
+                    placeholder="your-client-id.apps.googleusercontent.com"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-[hsl(var(--text-subtle))] uppercase tracking-wider mb-2">
+                    Google API Key
+                  </label>
+                  <Input
+                    value={googleApiKey}
+                    onChange={(e) => setGoogleApiKey(e.target.value)}
+                    placeholder="AIza..."
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-2">
+                  <p className="text-xs text-[hsl(var(--text-subtle))] flex items-center gap-2">
+                    <InfoCircledIcon className="w-3.5 h-3.5" />
+                    Get credentials from{" "}
+                    <a
+                      href="https://console.cloud.google.com/apis/credentials"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[hsl(var(--cyan))] hover:underline"
+                    >
+                      Google Cloud Console
+                    </a>
+                  </p>
+                  <Button
+                    onClick={handleSaveGoogleCredentials}
+                    disabled={!googleClientId || !googleApiKey}
+                    variant={isGoogleSaved ? "secondary" : "primary"}
+                    size="sm"
+                  >
+                    {isGoogleSaved ? (
+                      <>
+                        <CheckIcon className="w-4 h-4" />
+                        Saved
+                      </>
+                    ) : (
+                      "Save"
+                    )}
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

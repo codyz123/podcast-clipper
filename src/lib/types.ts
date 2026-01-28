@@ -171,6 +171,8 @@ export interface ExportSettings {
 // Settings
 export interface AppSettings {
   openaiApiKey?: string;
+  googleClientId?: string;
+  googleApiKey?: string;
   youtubeOAuthCredentials?: OAuthCredentials;
   twitterApiKeys?: TwitterApiKeys;
   defaultTemplate: string;
