@@ -5,8 +5,12 @@ import {
   TrackPreviousIcon,
   TrackNextIcon,
   CheckIcon,
+  VideoIcon,
+  AspectRatioIcon,
+  LayersIcon,
 } from "@radix-ui/react-icons";
-import { Button, Card, CardContent, CardHeader, CardTitle, Progress } from "../ui";
+import { Button, Card, CardContent } from "../ui";
+import { Progress } from "../ui/Progress";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { VideoFormat, VIDEO_FORMATS } from "../../lib/types";
@@ -36,7 +40,6 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
 
   const formatConfig = VIDEO_FORMATS[selectedFormat];
 
-  // Audio playback handling
   useEffect(() => {
     if (audioRef.current && currentClip && currentProject?.audioPath) {
       audioRef.current.currentTime = currentClip.startTime;
@@ -80,25 +83,21 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
 
   const getCurrentWords = () => {
     if (!currentClip) return [];
-    
+
     const clipStart = currentClip.startTime;
     const absoluteTime = clipStart + currentTime;
-    
-    // Find words to display (show 3-4 words around current time)
     const wordsPerGroup = selectedTemplate?.subtitle?.wordsPerGroup || 3;
-    
-    // Find the current word index
+
     let currentWordIndex = currentClip.words.findIndex(
       (w) => w.start <= absoluteTime && w.end >= absoluteTime
     );
-    
+
     if (currentWordIndex === -1) {
       currentWordIndex = currentClip.words.findIndex((w) => w.start > absoluteTime);
       if (currentWordIndex > 0) currentWordIndex--;
     }
     if (currentWordIndex === -1) currentWordIndex = 0;
 
-    // Get group of words
     const groupStart = Math.floor(currentWordIndex / wordsPerGroup) * wordsPerGroup;
     return currentClip.words.slice(groupStart, groupStart + wordsPerGroup);
   };
@@ -111,7 +110,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
     const subtitle = selectedTemplate.subtitle;
 
     let backgroundStyle: React.CSSProperties = {};
-    
+
     if (bg.type === "solid") {
       backgroundStyle.backgroundColor = bg.color;
     } else if (bg.type === "gradient") {
@@ -120,10 +119,10 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
 
     return (
       <div
-        className="relative overflow-hidden rounded-lg"
+        className="relative overflow-hidden rounded-lg shadow-lg"
         style={{
           aspectRatio: `${formatConfig.width} / ${formatConfig.height}`,
-          maxHeight: "500px",
+          maxHeight: "420px",
           ...backgroundStyle,
         }}
       >
@@ -137,7 +136,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
           <p
             style={{
               fontFamily: subtitle.fontFamily,
-              fontSize: `${subtitle.fontSize * 0.4}px`, // Scale for preview
+              fontSize: `${subtitle.fontSize * 0.4}px`,
               fontWeight: subtitle.fontWeight,
               color: subtitle.color,
               textShadow: subtitle.shadowColor
@@ -153,174 +152,302 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
           </p>
         </div>
 
-        {/* Duration indicator */}
-        <div className="absolute bottom-4 left-4 right-4">
-          <Progress
-            value={(currentTime / (currentClip.endTime - currentClip.startTime)) * 100}
-            size="sm"
-          />
+        {/* Progress overlay */}
+        <div className="absolute bottom-3 left-3 right-3">
+          <div className="h-1 bg-white/20 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-white/80 rounded-full transition-all duration-100"
+              style={{ width: `${(currentTime / (currentClip.endTime - currentClip.startTime)) * 100}%` }}
+            />
+          </div>
         </div>
       </div>
     );
   };
 
   return (
-    <div className="p-8">
-      <div className="mb-8">
-        <h2 className="text-2xl font-bold text-[hsl(var(--foreground))]">
-          Preview & Edit
-        </h2>
-        <p className="text-[hsl(var(--muted-foreground))] mt-1">
-          Preview your clips with different formats and templates
-        </p>
-      </div>
+    <div className="min-h-full">
+      <div className="max-w-5xl mx-auto">
+        {/* Header */}
+        <div className="mb-8 sm:mb-10">
+          <div className={cn(
+            "inline-flex items-center gap-2 px-3 py-1 rounded-full mb-4",
+            "bg-[hsl(var(--surface))]",
+            "border border-[hsl(var(--glass-border))]"
+          )}>
+            <span className="text-xs font-semibold text-[hsl(var(--cyan))]">4</span>
+            <span className="text-xs font-medium text-[hsl(var(--text-subtle))]">
+              Step 4 of 5
+            </span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-[hsl(var(--text))] tracking-tight font-[family-name:var(--font-display)]">
+            Preview & Edit
+          </h1>
+          <p className="text-[hsl(var(--text-muted))] mt-2 text-sm">
+            Preview clips with different formats and templates
+          </p>
+        </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Preview Panel */}
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>
-                {currentClip?.name || "Select a clip"} - {formatConfig.name}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Hidden audio element */}
-              <audio ref={audioRef} src={currentProject?.audioPath} preload="auto" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Preview Panel */}
+          <div className="lg:col-span-2">
+            <Card className="animate-fadeIn">
+              <CardContent className="p-5">
+                {/* Hidden audio */}
+                <audio ref={audioRef} src={currentProject?.audioPath} preload="auto" />
 
-              {/* Video Preview */}
-              <div className="flex justify-center mb-4">{renderPreview()}</div>
+                {/* Clip Info */}
+                <div className="flex items-center justify-between mb-5 pb-4 border-b border-[hsl(var(--glass-border))]">
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "w-10 h-10 rounded-lg flex items-center justify-center",
+                      "bg-[hsl(185_50%_15%/0.5)]"
+                    )}>
+                      <VideoIcon className="w-5 h-5 text-[hsl(var(--cyan))]" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-[hsl(var(--text))]">
+                        {currentClip?.name || "Select a clip"}
+                      </p>
+                      <p className="text-xs text-[hsl(var(--text-muted))]">
+                        {formatConfig.name} • {formatConfig.aspectRatio}
+                      </p>
+                    </div>
+                  </div>
+                  <div className={cn(
+                    "px-2.5 py-1 rounded-full text-xs font-medium",
+                    "bg-[hsl(var(--surface))]",
+                    "text-[hsl(var(--text-subtle))]"
+                  )}>
+                    {selectedClipIndex + 1} / {clips.length}
+                  </div>
+                </div>
 
-              {/* Playback Controls */}
-              <div className="flex items-center justify-center gap-4">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelectedClipIndex(Math.max(0, selectedClipIndex - 1))}
-                  disabled={selectedClipIndex === 0}
-                >
-                  <TrackPreviousIcon className="w-5 h-5" />
-                </Button>
-                <Button onClick={togglePlayback} disabled={!currentClip}>
-                  {isPlaying ? (
-                    <PauseIcon className="w-5 h-5" />
-                  ) : (
-                    <PlayIcon className="w-5 h-5" />
+                {/* Video Preview */}
+                <div className={cn(
+                  "flex justify-center mb-5 p-4 rounded-lg",
+                  "bg-[hsl(var(--surface))]",
+                  "border border-[hsl(var(--glass-border))]"
+                )}>
+                  {renderPreview()}
+                </div>
+
+                {/* Playback Controls */}
+                <div className="flex flex-col items-center gap-4">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setSelectedClipIndex(Math.max(0, selectedClipIndex - 1))}
+                      disabled={selectedClipIndex === 0}
+                      className={cn(
+                        "w-9 h-9 rounded-lg flex items-center justify-center transition-colors",
+                        selectedClipIndex === 0
+                          ? "text-[hsl(var(--text-ghost))] cursor-not-allowed"
+                          : "text-[hsl(var(--text-subtle))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
+                      )}
+                    >
+                      <TrackPreviousIcon className="w-4 h-4" />
+                    </button>
+
+                    <Button
+                      onClick={togglePlayback}
+                      disabled={!currentClip}
+                      className="w-12 h-12 rounded-full p-0"
+                      glow={!isPlaying && !!currentClip}
+                    >
+                      {isPlaying ? (
+                        <PauseIcon className="w-5 h-5" />
+                      ) : (
+                        <PlayIcon className="w-5 h-5 ml-0.5" />
+                      )}
+                    </Button>
+
+                    <button
+                      onClick={() => setSelectedClipIndex(Math.min(clips.length - 1, selectedClipIndex + 1))}
+                      disabled={selectedClipIndex === clips.length - 1}
+                      className={cn(
+                        "w-9 h-9 rounded-lg flex items-center justify-center transition-colors",
+                        selectedClipIndex === clips.length - 1
+                          ? "text-[hsl(var(--text-ghost))] cursor-not-allowed"
+                          : "text-[hsl(var(--text-subtle))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
+                      )}
+                    >
+                      <TrackNextIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {currentClip && (
+                    <div className="flex items-center gap-3 w-full max-w-xs">
+                      <span className="font-mono text-xs text-[hsl(var(--text-subtle))] tabular-nums w-10">
+                        {formatDuration(currentTime)}
+                      </span>
+                      <div className="flex-1">
+                        <Progress
+                          value={(currentTime / (currentClip.endTime - currentClip.startTime)) * 100}
+                          variant="cyan"
+                          size="sm"
+                        />
+                      </div>
+                      <span className="font-mono text-xs text-[hsl(var(--text-muted))] tabular-nums w-10 text-right">
+                        {formatDuration(currentClip.endTime - currentClip.startTime)}
+                      </span>
+                    </div>
                   )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    setSelectedClipIndex(Math.min(clips.length - 1, selectedClipIndex + 1))
-                  }
-                  disabled={selectedClipIndex === clips.length - 1}
-                >
-                  <TrackNextIcon className="w-5 h-5" />
-                </Button>
-              </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
-              {currentClip && (
-                <p className="text-center text-sm text-[hsl(var(--muted-foreground))] mt-2">
-                  {formatDuration(currentTime)} /{" "}
-                  {formatDuration(currentClip.endTime - currentClip.startTime)}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          {/* Settings Panel */}
+          <div className="space-y-4">
+            {/* Format Selection */}
+            <Card variant="default" className="animate-fadeIn">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <AspectRatioIcon className="w-3.5 h-3.5 text-[hsl(var(--cyan))]" />
+                  <p className="text-xs font-semibold text-[hsl(var(--text))]">Format</p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {Object.values(VIDEO_FORMATS).map((format) => {
+                    const isSelected = selectedFormat === format.id;
+                    return (
+                      <button
+                        key={format.id}
+                        onClick={() => setSelectedFormat(format.id)}
+                        className={cn(
+                          "p-3 rounded-lg border text-left transition-colors",
+                          isSelected
+                            ? "border-[hsl(185_100%_50%/0.3)] bg-[hsl(185_50%_15%/0.3)]"
+                            : "border-[hsl(var(--glass-border))] bg-[hsl(var(--surface))] hover:border-[hsl(0_0%_100%/0.12)]"
+                        )}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-medium text-[hsl(var(--text))]">
+                            {format.name}
+                          </span>
+                          <div
+                            className={cn(
+                              "w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors",
+                              isSelected
+                                ? "bg-[hsl(var(--cyan))] border-[hsl(var(--cyan))]"
+                                : "border-[hsl(var(--glass-border))]"
+                            )}
+                          >
+                            {isSelected && <CheckIcon className="w-2 h-2 text-[hsl(260_30%_6%)]" />}
+                          </div>
+                        </div>
+                        <p className="text-[10px] text-[hsl(var(--text-muted))] font-mono">
+                          {format.aspectRatio}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Template Selection */}
+            <Card variant="default" className="animate-fadeIn" style={{ animationDelay: "50ms" }}>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <LayersIcon className="w-3.5 h-3.5 text-[hsl(var(--magenta))]" />
+                  <p className="text-xs font-semibold text-[hsl(var(--text))]">Template</p>
+                </div>
+                <div className="space-y-2">
+                  {templates.map((template) => {
+                    const isSelected = selectedTemplateId === template.id;
+                    return (
+                      <button
+                        key={template.id}
+                        onClick={() => setSelectedTemplateId(template.id)}
+                        className={cn(
+                          "w-full p-3 rounded-lg border text-left transition-colors flex items-center gap-3",
+                          isSelected
+                            ? "border-[hsl(185_100%_50%/0.3)] bg-[hsl(185_50%_15%/0.3)]"
+                            : "border-[hsl(var(--glass-border))] bg-[hsl(var(--surface))] hover:border-[hsl(0_0%_100%/0.12)]"
+                        )}
+                      >
+                        <div
+                          className="w-7 h-7 rounded-md border border-[hsl(var(--glass-border))] shrink-0"
+                          style={{
+                            background:
+                              template.background.type === "gradient"
+                                ? `linear-gradient(135deg, ${template.background.gradientColors?.[0] || "#000"}, ${template.background.gradientColors?.[1] || "#333"})`
+                                : template.background.color || "#000",
+                          }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-[hsl(var(--text))]">
+                            {template.name}
+                          </p>
+                          <p className="text-[10px] text-[hsl(var(--text-muted))] truncate">
+                            {template.subtitle.animation} animation
+                          </p>
+                        </div>
+                        {isSelected && (
+                          <CheckIcon className="w-3.5 h-3.5 text-[hsl(var(--cyan))] shrink-0" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Clips List */}
+            <Card variant="default" className="animate-fadeIn" style={{ animationDelay: "100ms" }}>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <VideoIcon className="w-3.5 h-3.5 text-[hsl(var(--success))]" />
+                    <p className="text-xs font-semibold text-[hsl(var(--text))]">Clips</p>
+                  </div>
+                  <span className="text-[10px] text-[hsl(var(--text-muted))]">
+                    {clips.length} total
+                  </span>
+                </div>
+                <div className="space-y-1.5 max-h-52 overflow-y-auto scrollbar-thin">
+                  {clips.map((clip, index) => {
+                    const isSelected = selectedClipIndex === index;
+                    return (
+                      <button
+                        key={clip.id}
+                        onClick={() => setSelectedClipIndex(index)}
+                        className={cn(
+                          "w-full p-2.5 rounded-lg border text-left transition-colors flex items-center gap-2.5",
+                          isSelected
+                            ? "border-[hsl(185_100%_50%/0.3)] bg-[hsl(185_50%_15%/0.3)]"
+                            : "border-[hsl(var(--glass-border))] bg-[hsl(var(--surface))] hover:border-[hsl(0_0%_100%/0.12)]"
+                        )}
+                      >
+                        <div className={cn(
+                          "w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-semibold shrink-0",
+                          isSelected
+                            ? "bg-[hsl(var(--cyan))] text-[hsl(260_30%_6%)]"
+                            : "bg-[hsl(var(--raised))] text-[hsl(var(--text-muted))]"
+                        )}>
+                          {index + 1}
+                        </div>
+                        <span className="text-xs font-medium text-[hsl(var(--text))] flex-1 truncate">
+                          {clip.name}
+                        </span>
+                        <span className="text-[10px] font-mono text-[hsl(var(--text-muted))]">
+                          {formatDuration(clip.endTime - clip.startTime)}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
-        {/* Settings Panel */}
-        <div className="space-y-4">
-          {/* Format Selection */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Format</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-2">
-                {Object.values(VIDEO_FORMATS).map((format) => (
-                  <button
-                    key={format.id}
-                    onClick={() => setSelectedFormat(format.id)}
-                    className={cn(
-                      "p-3 rounded-lg border text-left transition-colors",
-                      selectedFormat === format.id
-                        ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10"
-                        : "border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/50"
-                    )}
-                  >
-                    <p className="font-medium text-sm">{format.name}</p>
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                      {format.aspectRatio}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Template Selection */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Template</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {templates.map((template) => (
-                  <button
-                    key={template.id}
-                    onClick={() => setSelectedTemplateId(template.id)}
-                    className={cn(
-                      "w-full p-3 rounded-lg border text-left transition-colors flex items-center justify-between",
-                      selectedTemplateId === template.id
-                        ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10"
-                        : "border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/50"
-                    )}
-                  >
-                    <span className="font-medium text-sm">{template.name}</span>
-                    {selectedTemplateId === template.id && (
-                      <CheckIcon className="w-4 h-4 text-[hsl(var(--primary))]" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Clips List */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Clips ({clips.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2 max-h-60 overflow-y-auto">
-                {clips.map((clip, index) => (
-                  <button
-                    key={clip.id}
-                    onClick={() => setSelectedClipIndex(index)}
-                    className={cn(
-                      "w-full p-2 rounded-lg border text-left transition-colors",
-                      selectedClipIndex === index
-                        ? "border-[hsl(var(--primary))] bg-[hsl(var(--primary))]/10"
-                        : "border-[hsl(var(--border))] hover:border-[hsl(var(--primary))]/50"
-                    )}
-                  >
-                    <p className="font-medium text-sm">{clip.name}</p>
-                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                      {formatDuration(clip.endTime - clip.startTime)}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+        {/* Continue Button */}
+        <div className="flex justify-end mt-8 sm:mt-10">
+          <Button onClick={onComplete} glow>
+            Continue to Export
+          </Button>
         </div>
-      </div>
-
-      {/* Continue Button */}
-      <div className="flex justify-end mt-6">
-        <Button onClick={onComplete}>Continue to Export</Button>
       </div>
     </div>
   );

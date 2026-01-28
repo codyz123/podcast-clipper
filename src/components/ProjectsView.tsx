@@ -1,8 +1,17 @@
 import React, { useState } from "react";
-import { PlusIcon, TrashIcon, CalendarIcon } from "@radix-ui/react-icons";
+import {
+  PlusIcon,
+  TrashIcon,
+  SpeakerLoudIcon,
+  CheckIcon,
+  ScissorsIcon,
+  PlayIcon,
+} from "@radix-ui/react-icons";
 import { Button, Card, CardContent, Input } from "./ui";
+import { CircularProgress } from "./ui/Progress";
 import { useProjectStore } from "../stores/projectStore";
 import { formatDuration } from "../lib/formats";
+import { cn } from "../lib/utils";
 
 interface ProjectsViewProps {
   onProjectLoad: () => void;
@@ -39,105 +48,244 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
     return new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
-      year: "numeric",
     });
   };
 
+  const getProjectProgress = (project: typeof projects[0]) => {
+    let steps = 0;
+    if (project.audioPath) steps++;
+    if (project.transcript) steps++;
+    if (project.clips.length > 0) steps++;
+    return Math.round((steps / 3) * 100);
+  };
+
+  const getProjectStatus = (project: typeof projects[0]) => {
+    if (project.clips.length > 0) return { label: "Ready to export", color: "success" };
+    if (project.transcript) return { label: "Transcribed", color: "cyan" };
+    if (project.audioPath) return { label: "Audio loaded", color: "magenta" };
+    return { label: "New project", color: "ghost" };
+  };
+
   return (
-    <div className="p-8 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h2 className="text-2xl font-bold text-[hsl(var(--foreground))]">
-            Projects
-          </h2>
-          <p className="text-[hsl(var(--muted-foreground))] mt-1">
-            Select a project or create a new one
-          </p>
+    <div className="min-h-full w-full">
+      {/* Hero Section */}
+      <div className="w-full text-center mb-10 sm:mb-14">
+        <div className={cn(
+          "inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6",
+          "bg-[hsl(var(--surface))]",
+          "border border-[hsl(var(--glass-border))]"
+        )}>
+          <div className="w-1.5 h-1.5 rounded-full bg-[hsl(var(--cyan))]" />
+          <span className="text-xs font-medium text-[hsl(var(--text-muted))]">
+            {projects.length} project{projects.length !== 1 ? "s" : ""} in studio
+          </span>
         </div>
-        <Button onClick={() => setShowNewProject(true)}>
-          <PlusIcon className="w-4 h-4 mr-2" />
-          New Project
-        </Button>
+
+        <h1 className={cn(
+          "text-3xl sm:text-4xl font-bold tracking-tight mb-3",
+          "font-[family-name:var(--font-display)]",
+          "text-[hsl(var(--text))]"
+        )}>
+          Your Projects
+        </h1>
+        <p className="text-[hsl(var(--text-muted))] text-sm sm:text-base max-w-md mx-auto">
+          Transform podcast episodes into viral clips with AI-powered editing
+        </p>
       </div>
 
       {/* New Project Form */}
       {showNewProject && (
-        <Card className="mb-6">
-          <CardContent>
-            <h3 className="text-lg font-semibold mb-4">Create New Project</h3>
-            <div className="flex gap-3">
-              <Input
-                placeholder="Project name (e.g., Episode 42)"
-                value={newProjectName}
-                onChange={(e) => setNewProjectName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleCreateProject()}
-                autoFocus
-              />
-              <Button onClick={handleCreateProject} disabled={!newProjectName.trim()}>
-                Create
-              </Button>
-              <Button variant="ghost" onClick={() => setShowNewProject(false)}>
-                Cancel
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="w-full max-w-md mx-auto mb-8 sm:mb-10">
+          <Card variant="default" className="animate-scaleIn">
+            <CardContent className="p-5">
+              <h3 className="text-base font-semibold text-[hsl(var(--text))] mb-4 font-[family-name:var(--font-display)]">
+                Create New Project
+              </h3>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <Input
+                    placeholder="Project name..."
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleCreateProject()}
+                    autoFocus
+                  />
+                </div>
+                <Button onClick={handleCreateProject} disabled={!newProjectName.trim()}>
+                  Create
+                </Button>
+                <Button variant="ghost" onClick={() => setShowNewProject(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
-      {/* Projects List */}
-      {projects.length === 0 ? (
-        <Card className="text-center py-12">
-          <CardContent>
-            <div className="text-[hsl(var(--muted-foreground))]">
-              <p className="text-lg mb-2">No projects yet</p>
-              <p className="text-sm">Create a new project to get started</p>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Empty State */}
+      {projects.length === 0 && !showNewProject ? (
+        <div className="w-full text-center py-10 sm:py-16">
+          {/* Simple icon container */}
+          <div className={cn(
+            "w-20 h-20 mx-auto mb-6 rounded-2xl flex items-center justify-center",
+            "bg-[hsl(var(--surface))]",
+            "border border-[hsl(var(--glass-border))]"
+          )}>
+            <SpeakerLoudIcon className="w-8 h-8 text-[hsl(var(--text-ghost))]" />
+          </div>
+
+          <h3 className="text-xl sm:text-2xl font-bold text-[hsl(var(--text))] mb-2 font-[family-name:var(--font-display)]">
+            No projects yet
+          </h3>
+          <p className="text-sm text-[hsl(var(--text-muted))] mb-6 max-w-sm mx-auto">
+            Create your first project to start turning podcasts into viral clips
+          </p>
+          <Button onClick={() => setShowNewProject(true)} glow>
+            <PlusIcon className="w-4 h-4" />
+            <span>Create First Project</span>
+          </Button>
+        </div>
       ) : (
-        <div className="grid gap-4">
-          {projects.map((project) => (
-            <Card
-              key={project.id}
-              className={`cursor-pointer transition-all hover:border-[hsl(var(--primary))] ${
-                currentProject?.id === project.id
-                  ? "border-[hsl(var(--primary))] ring-1 ring-[hsl(var(--primary))]"
-                  : ""
-              }`}
-              onClick={() => handleLoadProject(project.id)}
-            >
-              <CardContent className="flex items-center justify-between">
-                <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">
-                    {project.name}
-                  </h3>
-                  <div className="flex items-center gap-4 mt-2 text-sm text-[hsl(var(--muted-foreground))]">
-                    <span className="flex items-center gap-1">
-                      <CalendarIcon className="w-4 h-4" />
-                      {formatDate(project.updatedAt)}
-                    </span>
-                    {project.audioDuration > 0 && (
-                      <span>{formatDuration(project.audioDuration)}</span>
+        <div className="w-full">
+          {/* Create Button */}
+          {!showNewProject && (
+            <div className="flex justify-center mb-6 sm:mb-8">
+              <Button onClick={() => setShowNewProject(true)} glow>
+                <PlusIcon className="w-4 h-4" />
+                <span>New Project</span>
+              </Button>
+            </div>
+          )}
+
+          {/* Project Grid */}
+          <div className="w-full max-w-4xl mx-auto">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+              {projects.map((project, index) => {
+                const isActive = currentProject?.id === project.id;
+                const progress = getProjectProgress(project);
+                const status = getProjectStatus(project);
+                const hasAudio = !!project.audioPath;
+                const hasClips = project.clips.length > 0;
+
+                return (
+                  <div
+                    key={project.id}
+                    onClick={() => handleLoadProject(project.id)}
+                    className={cn(
+                      "group relative cursor-pointer",
+                      "animate-fadeInUp"
                     )}
-                    {project.transcript && (
-                      <span className="text-green-500">Transcribed</span>
-                    )}
-                    {project.clips.length > 0 && (
-                      <span>{project.clips.length} clips</span>
-                    )}
+                    style={{ animationDelay: `${index * 40}ms` }}
+                  >
+                    <div className={cn(
+                      "relative h-full rounded-xl overflow-hidden transition-all duration-150",
+                      "bg-[hsl(var(--surface)/0.7)]",
+                      "backdrop-blur-lg",
+                      "border",
+                      isActive
+                        ? "border-[hsl(185_100%_50%/0.3)] shadow-lg"
+                        : "border-[hsl(var(--glass-border))]",
+                      "hover:border-[hsl(0_0%_100%/0.12)]",
+                      "hover:bg-[hsl(var(--raised)/0.9)]",
+                      "hover:-translate-y-0.5",
+                      "hover:shadow-lg"
+                    )}>
+                      {/* Subtle accent bar */}
+                      <div className={cn(
+                        "h-1",
+                        progress === 100
+                          ? "bg-[hsl(158_70%_48%/0.6)]"
+                          : progress > 0
+                            ? "bg-[hsl(185_100%_50%/0.5)]"
+                            : "bg-[hsl(var(--glass-border))]"
+                      )} />
+
+                      <div className="p-4">
+                        {/* Top row: Progress + Actions */}
+                        <div className="flex items-start justify-between mb-3">
+                          <CircularProgress
+                            value={progress}
+                            size={36}
+                            strokeWidth={3}
+                            showLabel
+                            variant={progress === 100 ? "gradient" : "cyan"}
+                          />
+
+                          <button
+                            onClick={(e) => handleDeleteProject(e, project.id)}
+                            className={cn(
+                              "p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity",
+                              "text-[hsl(var(--text-ghost))]",
+                              "hover:text-[hsl(var(--error))]",
+                              "hover:bg-[hsl(var(--error)/0.1)]"
+                            )}
+                          >
+                            <TrashIcon className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Project name */}
+                        <h3 className="text-base font-semibold text-[hsl(var(--text))] mb-0.5 font-[family-name:var(--font-display)] truncate">
+                          {project.name}
+                        </h3>
+
+                        {/* Date */}
+                        <p className="text-xs text-[hsl(var(--text-ghost))] mb-3">
+                          {formatDate(project.updatedAt)}
+                        </p>
+
+                        {/* Stats */}
+                        <div className="flex items-center gap-3 mb-3">
+                          {hasAudio && (
+                            <div className="flex items-center gap-1.5">
+                              <SpeakerLoudIcon className="w-3 h-3 text-[hsl(var(--text-subtle))]" />
+                              <span className="text-xs text-[hsl(var(--text-subtle))] font-mono">
+                                {formatDuration(project.audioDuration)}
+                              </span>
+                            </div>
+                          )}
+                          {hasClips && (
+                            <div className="flex items-center gap-1.5">
+                              <ScissorsIcon className="w-3 h-3 text-[hsl(var(--cyan))]" />
+                              <span className="text-xs text-[hsl(var(--cyan))] font-medium">
+                                {project.clips.length} clips
+                              </span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Status badge */}
+                        <div className="flex items-center justify-between">
+                          <div className={cn(
+                            "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-xs font-medium",
+                            status.color === "success" && "bg-[hsl(158_50%_15%/0.5)] text-[hsl(var(--success))]",
+                            status.color === "cyan" && "bg-[hsl(185_50%_15%/0.5)] text-[hsl(var(--cyan))]",
+                            status.color === "magenta" && "bg-[hsl(325_50%_15%/0.5)] text-[hsl(var(--magenta))]",
+                            status.color === "ghost" && "bg-[hsl(var(--surface)/0.5)] text-[hsl(var(--text-ghost))]"
+                          )}>
+                            {status.color !== "ghost" && (
+                              <CheckIcon className="w-2.5 h-2.5" />
+                            )}
+                            {status.label}
+                          </div>
+
+                          {/* Play button on hover */}
+                          <div className={cn(
+                            "w-6 h-6 rounded-full flex items-center justify-center",
+                            "bg-[hsl(185_100%_50%)]",
+                            "opacity-0 group-hover:opacity-100 transition-opacity"
+                          )}>
+                            <PlayIcon className="w-2.5 h-2.5 text-[hsl(260_30%_6%)] ml-0.5" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={(e) => handleDeleteProject(e, project.id)}
-                  className="text-[hsl(var(--destructive))] hover:bg-[hsl(var(--destructive))]/10"
-                >
-                  <TrashIcon className="w-4 h-4" />
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>

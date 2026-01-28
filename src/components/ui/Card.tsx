@@ -3,13 +3,82 @@ import { cn } from "../../lib/utils";
 
 interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
+  variant?: "default" | "glass" | "elevated" | "interactive" | "glow" | "ghost";
+  padding?: "none" | "sm" | "md" | "lg";
+  glow?: "cyan" | "magenta" | "none";
 }
 
-export const Card: React.FC<CardProps> = ({ children, className, ...props }) => {
+export const Card: React.FC<CardProps> = ({
+  children,
+  className,
+  variant = "default",
+  padding = "md",
+  glow = "none",
+  ...props
+}) => {
+  const variants = {
+    default: cn(
+      "bg-[hsl(var(--surface)/0.7)]",
+      "backdrop-blur-lg",
+      "border border-[hsl(var(--glass-border))]",
+      "shadow-lg shadow-black/20"
+    ),
+    glass: cn(
+      "bg-[hsl(var(--glass))]",
+      "backdrop-blur-xl",
+      "border border-[hsl(var(--glass-border))]",
+      "shadow-xl shadow-black/25"
+    ),
+    elevated: cn(
+      "bg-[hsl(var(--raised))]",
+      "border border-[hsl(0_0%_100%/0.08)]",
+      "shadow-xl shadow-black/30"
+    ),
+    interactive: cn(
+      "bg-[hsl(var(--surface)/0.6)]",
+      "backdrop-blur-lg",
+      "border border-[hsl(var(--glass-border))]",
+      "shadow-lg shadow-black/20",
+      "transition-all duration-150 ease-out",
+      "cursor-pointer",
+      "hover:bg-[hsl(var(--raised)/0.9)]",
+      "hover:border-[hsl(0_0%_100%/0.1)]",
+      "hover:shadow-xl hover:shadow-black/25",
+      "hover:-translate-y-0.5",
+      "active:translate-y-0"
+    ),
+    glow: cn(
+      "bg-[hsl(var(--surface)/0.7)]",
+      "backdrop-blur-lg",
+      "border border-[hsl(185_100%_50%/0.2)]",
+      "shadow-lg shadow-black/20"
+    ),
+    ghost: cn(
+      "bg-transparent",
+      "border border-[hsl(var(--glass-border))]"
+    ),
+  };
+
+  const paddings = {
+    none: "",
+    sm: "p-3",
+    md: "p-4",
+    lg: "p-6",
+  };
+
+  const glowStyles = {
+    none: "",
+    cyan: "ring-1 ring-[hsl(185_100%_50%/0.15)]",
+    magenta: "ring-1 ring-[hsl(325_100%_58%/0.15)]",
+  };
+
   return (
     <div
       className={cn(
-        "rounded-xl bg-[hsl(var(--card))] border border-[hsl(var(--border))] p-6",
+        "rounded-xl",
+        variants[variant],
+        paddings[padding],
+        glow !== "none" && glowStyles[glow],
         className
       )}
       {...props}
@@ -19,7 +88,11 @@ export const Card: React.FC<CardProps> = ({ children, className, ...props }) => 
   );
 };
 
-export const CardHeader: React.FC<CardProps> = ({
+interface CardSubComponentProps extends React.HTMLAttributes<HTMLDivElement> {
+  children: React.ReactNode;
+}
+
+export const CardHeader: React.FC<CardSubComponentProps> = ({
   children,
   className,
   ...props
@@ -31,7 +104,7 @@ export const CardHeader: React.FC<CardProps> = ({
   );
 };
 
-export const CardTitle: React.FC<CardProps> = ({
+export const CardTitle: React.FC<CardSubComponentProps> = ({
   children,
   className,
   ...props
@@ -39,7 +112,9 @@ export const CardTitle: React.FC<CardProps> = ({
   return (
     <h3
       className={cn(
-        "text-lg font-semibold text-[hsl(var(--card-foreground))]",
+        "text-base font-semibold tracking-tight",
+        "font-[family-name:var(--font-display)]",
+        "text-[hsl(var(--text))]",
         className
       )}
       {...props}
@@ -49,14 +124,18 @@ export const CardTitle: React.FC<CardProps> = ({
   );
 };
 
-export const CardDescription: React.FC<CardProps> = ({
+export const CardDescription: React.FC<CardSubComponentProps> = ({
   children,
   className,
   ...props
 }) => {
   return (
     <p
-      className={cn("text-sm text-[hsl(var(--muted-foreground))] mt-1", className)}
+      className={cn(
+        "text-sm leading-relaxed mt-1",
+        "text-[hsl(var(--text-muted))]",
+        className
+      )}
       {...props}
     >
       {children}
@@ -64,7 +143,7 @@ export const CardDescription: React.FC<CardProps> = ({
   );
 };
 
-export const CardContent: React.FC<CardProps> = ({
+export const CardContent: React.FC<CardSubComponentProps> = ({
   children,
   className,
   ...props
@@ -76,7 +155,7 @@ export const CardContent: React.FC<CardProps> = ({
   );
 };
 
-export const CardFooter: React.FC<CardProps> = ({
+export const CardFooter: React.FC<CardSubComponentProps> = ({
   children,
   className,
   ...props
@@ -84,7 +163,8 @@ export const CardFooter: React.FC<CardProps> = ({
   return (
     <div
       className={cn(
-        "mt-4 pt-4 border-t border-[hsl(var(--border))] flex items-center gap-2",
+        "mt-5 pt-4 flex items-center gap-3",
+        "border-t border-[hsl(var(--glass-border))]",
         className
       )}
       {...props}
