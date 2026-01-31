@@ -53,10 +53,7 @@ export const Card: React.FC<CardProps> = ({
       "border border-[hsl(185_100%_50%/0.2)]",
       "shadow-lg shadow-black/20"
     ),
-    ghost: cn(
-      "bg-transparent",
-      "border border-[hsl(var(--glass-border))]"
-    ),
+    ghost: cn("bg-transparent", "border border-[hsl(var(--glass-border))]"),
   };
 
   const paddings = {
@@ -92,11 +89,7 @@ interface CardSubComponentProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
 }
 
-export const CardHeader: React.FC<CardSubComponentProps> = ({
-  children,
-  className,
-  ...props
-}) => {
+export const CardHeader: React.FC<CardSubComponentProps> = ({ children, className, ...props }) => {
   return (
     <div className={cn("mb-4", className)} {...props}>
       {children}
@@ -104,11 +97,7 @@ export const CardHeader: React.FC<CardSubComponentProps> = ({
   );
 };
 
-export const CardTitle: React.FC<CardSubComponentProps> = ({
-  children,
-  className,
-  ...props
-}) => {
+export const CardTitle: React.FC<CardSubComponentProps> = ({ children, className, ...props }) => {
   return (
     <h3
       className={cn(
@@ -131,11 +120,7 @@ export const CardDescription: React.FC<CardSubComponentProps> = ({
 }) => {
   return (
     <p
-      className={cn(
-        "text-sm leading-relaxed mt-1",
-        "text-[hsl(var(--text-muted))]",
-        className
-      )}
+      className={cn("mt-1 text-sm leading-relaxed", "text-[hsl(var(--text-muted))]", className)}
       {...props}
     >
       {children}
@@ -143,11 +128,7 @@ export const CardDescription: React.FC<CardSubComponentProps> = ({
   );
 };
 
-export const CardContent: React.FC<CardSubComponentProps> = ({
-  children,
-  className,
-  ...props
-}) => {
+export const CardContent: React.FC<CardSubComponentProps> = ({ children, className, ...props }) => {
   return (
     <div className={cn("", className)} {...props}>
       {children}
@@ -155,15 +136,11 @@ export const CardContent: React.FC<CardSubComponentProps> = ({
   );
 };
 
-export const CardFooter: React.FC<CardSubComponentProps> = ({
-  children,
-  className,
-  ...props
-}) => {
+export const CardFooter: React.FC<CardSubComponentProps> = ({ children, className, ...props }) => {
   return (
     <div
       className={cn(
-        "mt-5 pt-4 flex items-center gap-3",
+        "mt-5 flex items-center gap-3 pt-4",
         "border-t border-[hsl(var(--glass-border))]",
         className
       )}

@@ -4,10 +4,16 @@ export interface Project {
   id: string;
   name: string;
   audioPath: string;
+  audioFileName?: string; // Original filename with extension (for transcription)
+  audioFingerprint?: string; // Hash of file content to identify unique files
   audioDuration: number;
   createdAt: string;
   updatedAt: string;
+  // Legacy: single transcript (for backward compatibility)
   transcript?: Transcript;
+  // New: multiple transcripts per file
+  transcripts: Transcript[];
+  activeTranscriptId?: string; // Which transcript is currently selected
   clips: Clip[];
   exportHistory: ExportRecord[];
 }
@@ -15,10 +21,12 @@ export interface Project {
 export interface Transcript {
   id: string;
   projectId: string;
+  audioFingerprint?: string; // Links transcript to specific audio file
   text: string;
   words: Word[];
   language: string;
   createdAt: string;
+  name?: string; // Optional user-given name for this transcript version
 }
 
 export interface Word {
@@ -170,7 +178,13 @@ export interface ExportSettings {
 
 // Settings
 export interface AppSettings {
+  // Backend settings (preferred)
+  backendUrl?: string; // e.g., "http://localhost:3001" or "https://podcast-clipper.railway.app"
+  accessCode?: string; // shared access code for authentication
+
+  // Legacy: direct API key (used when no backend configured)
   openaiApiKey?: string;
+
   googleClientId?: string;
   googleApiKey?: string;
   youtubeOAuthCredentials?: OAuthCredentials;

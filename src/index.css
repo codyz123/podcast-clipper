@@ -62,9 +62,9 @@
     --accent: var(--violet);
 
     /* Typography */
-    --font-display: 'Space Grotesk', system-ui, sans-serif;
-    --font-body: 'DM Sans', system-ui, sans-serif;
-    --font-mono: 'IBM Plex Mono', 'SF Mono', monospace;
+    --font-display: "Space Grotesk", system-ui, sans-serif;
+    --font-body: "DM Sans", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", "SF Mono", monospace;
 
     /* Spacing */
     --space-1: 4px;
@@ -132,16 +132,16 @@
       /* Large magenta orb - bottom left */
       radial-gradient(ellipse 70% 50% at 5% 95%, hsl(325 70% 12% / 0.6), transparent 50%),
       /* Cyan orb - top right */
-      radial-gradient(ellipse 50% 40% at 95% 5%, hsl(185 60% 10% / 0.5), transparent 45%),
+        radial-gradient(ellipse 50% 40% at 95% 5%, hsl(185 60% 10% / 0.5), transparent 45%),
       /* Violet wash - center */
-      radial-gradient(ellipse 80% 60% at 50% 50%, hsl(270 40% 8% / 0.4), transparent 60%),
+        radial-gradient(ellipse 80% 60% at 50% 50%, hsl(270 40% 8% / 0.4), transparent 60%),
       /* Base gradient */
-      linear-gradient(165deg, hsl(260 30% 6%), hsl(258 25% 4%) 50%, hsl(255 20% 3%));
+        linear-gradient(165deg, hsl(260 30% 6%), hsl(258 25% 4%) 50%, hsl(255 20% 3%));
   }
 
   /* Noise texture overlay for richness */
   #root::before {
-    content: '';
+    content: "";
     position: fixed;
     inset: 0;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -154,7 +154,12 @@
    * TYPOGRAPHY
    * ======================================== */
 
-  h1, h2, h3, h4, h5, h6 {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
     font-family: var(--font-display);
     font-weight: 600;
     letter-spacing: -0.025em;
@@ -162,14 +167,23 @@
     color: hsl(var(--text));
   }
 
-  h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.035em; }
-  h2 { font-size: 1.5rem; }
-  h3 { font-size: 1.125rem; }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.035em;
+  }
+  h2 {
+    font-size: 1.5rem;
+  }
+  h3 {
+    font-size: 1.125rem;
+  }
 }
 
 /* Keyframes - these don't need to be in a layer */
 @keyframes pulse-glow {
-  0%, 100% {
+  0%,
+  100% {
     box-shadow:
       0 0 0 1px hsl(185 100% 50% / 0.2),
       0 0 20px hsl(185 100% 50% / 0.2),
@@ -184,43 +198,86 @@
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes slideUp {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes slideDown {
-  from { opacity: 0; transform: translateY(-16px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.94); }
-  to { opacity: 1; transform: scale(1); }
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes blurIn {
-  from { opacity: 0; filter: blur(8px); transform: scale(0.97); }
-  to { opacity: 1; filter: blur(0); transform: scale(1); }
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
 }
 
 @keyframes shimmer {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(100%); }
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
 }
 
 @keyframes float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-8px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-8px);
+  }
 }
 
 @keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Component styles in @layer components so Tailwind utilities can override */
@@ -273,28 +330,60 @@
    * ANIMATIONS
    * ======================================== */
 
-  .animate-fadeIn { animation: fadeIn 200ms var(--ease-out) forwards; }
-  .animate-fadeInUp { animation: slideUp 300ms var(--ease-out) forwards; }
-  .animate-fadeInDown { animation: slideDown 300ms var(--ease-out) forwards; }
-  .animate-scaleIn { animation: scaleIn 300ms var(--ease-spring) forwards; }
-  .animate-blurIn { animation: blurIn 350ms var(--ease-out) forwards; }
-  .animate-float { animation: float 3.5s ease-in-out infinite; }
-  .animate-spin { animation: spin 1s linear infinite; }
-  .animate-spin-slow { animation: spin 8s linear infinite; }
+  .animate-fadeIn {
+    animation: fadeIn 200ms var(--ease-out) forwards;
+  }
+  .animate-fadeInUp {
+    animation: slideUp 300ms var(--ease-out) forwards;
+  }
+  .animate-fadeInDown {
+    animation: slideDown 300ms var(--ease-out) forwards;
+  }
+  .animate-scaleIn {
+    animation: scaleIn 300ms var(--ease-spring) forwards;
+  }
+  .animate-blurIn {
+    animation: blurIn 350ms var(--ease-out) forwards;
+  }
+  .animate-float {
+    animation: float 3.5s ease-in-out infinite;
+  }
+  .animate-spin {
+    animation: spin 1s linear infinite;
+  }
+  .animate-spin-slow {
+    animation: spin 8s linear infinite;
+  }
 
   /* Stagger children */
   .stagger > * {
     opacity: 0;
     animation: slideUp 300ms var(--ease-out) forwards;
   }
-  .stagger > *:nth-child(1) { animation-delay: 0ms; }
-  .stagger > *:nth-child(2) { animation-delay: 60ms; }
-  .stagger > *:nth-child(3) { animation-delay: 120ms; }
-  .stagger > *:nth-child(4) { animation-delay: 180ms; }
-  .stagger > *:nth-child(5) { animation-delay: 240ms; }
-  .stagger > *:nth-child(6) { animation-delay: 300ms; }
-  .stagger > *:nth-child(7) { animation-delay: 360ms; }
-  .stagger > *:nth-child(8) { animation-delay: 420ms; }
+  .stagger > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .stagger > *:nth-child(2) {
+    animation-delay: 60ms;
+  }
+  .stagger > *:nth-child(3) {
+    animation-delay: 120ms;
+  }
+  .stagger > *:nth-child(4) {
+    animation-delay: 180ms;
+  }
+  .stagger > *:nth-child(5) {
+    animation-delay: 240ms;
+  }
+  .stagger > *:nth-child(6) {
+    animation-delay: 300ms;
+  }
+  .stagger > *:nth-child(7) {
+    animation-delay: 360ms;
+  }
+  .stagger > *:nth-child(8) {
+    animation-delay: 420ms;
+  }
 
   /* ========================================
    * SCROLLBAR
@@ -324,14 +413,18 @@
   }
 
   .gradient-border::before {
-    content: '';
+    content: "";
     position: absolute;
     inset: 0;
     border-radius: inherit;
     padding: 1px;
     background: linear-gradient(135deg, hsl(var(--cyan) / 0.6), hsl(var(--magenta) / 0.4));
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
   }
@@ -357,7 +450,7 @@
   }
 
   .shimmer::after {
-    content: '';
+    content: "";
     position: absolute;
     inset: 0;
     background: linear-gradient(90deg, transparent, hsl(0 0% 100% / 0.06), transparent);
@@ -428,9 +521,24 @@
   }
 
   /* Line clamp */
-  .line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-  .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .line-clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .line-clamp-1 {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }
 
 /* Scrollbar and selection styles need to be outside layers for pseudo-element targeting */

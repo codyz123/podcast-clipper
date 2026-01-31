@@ -17,20 +17,38 @@ import { VideoFormat, VIDEO_FORMATS } from "../../lib/types";
 import { cn } from "../../lib/utils";
 
 export const Settings: React.FC = () => {
-  const { settings, updateSettings, setApiKey, templates, deleteTemplate, duplicateTemplate } =
-    useSettingsStore();
+  const {
+    settings,
+    updateSettings,
+    setApiKey,
+    setBackendConfig,
+    templates,
+    deleteTemplate,
+    duplicateTemplate,
+  } = useSettingsStore();
 
   const [showApiKey, setShowApiKey] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState(settings.openaiApiKey || "");
+  const [backendUrlInput, setBackendUrlInput] = useState(settings.backendUrl || "");
+  const [accessCodeInput, setAccessCodeInput] = useState(settings.accessCode || "");
   const [googleClientId, setGoogleClientId] = useState(settings.googleClientId || "");
   const [googleApiKey, setGoogleApiKey] = useState(settings.googleApiKey || "");
   const [isSaved, setIsSaved] = useState(false);
+  const [isBackendSaved, setIsBackendSaved] = useState(false);
   const [isGoogleSaved, setIsGoogleSaved] = useState(false);
+
+  const hasBackendConfig = !!(settings.backendUrl && settings.accessCode);
 
   const handleSaveApiKey = () => {
     setApiKey(apiKeyInput);
     setIsSaved(true);
     setTimeout(() => setIsSaved(false), 2000);
+  };
+
+  const handleSaveBackendConfig = () => {
+    setBackendConfig(backendUrlInput, accessCodeInput);
+    setIsBackendSaved(true);
+    setTimeout(() => setIsBackendSaved(false), 2000);
   };
 
   const handleSaveGoogleCredentials = () => {
@@ -49,49 +67,151 @@ export const Settings: React.FC = () => {
 
   return (
     <div className="min-h-full">
-      <div className="max-w-3xl mx-auto">
+      <div className="mx-auto max-w-3xl">
         {/* Header */}
         <div className="mb-8 sm:mb-10">
-          <div className="flex items-center gap-4 mb-4">
-            <div className={cn(
-              "w-11 h-11 rounded-lg flex items-center justify-center",
-              "bg-[hsl(var(--raised))]",
-              "border border-[hsl(var(--glass-border))]"
-            )}>
-              <GearIcon className="w-5 h-5 text-[hsl(var(--text-ghost))]" />
+          <div className="mb-4 flex items-center gap-4">
+            <div
+              className={cn(
+                "flex h-11 w-11 items-center justify-center rounded-lg",
+                "bg-[hsl(var(--raised))]",
+                "border border-[hsl(var(--glass-border))]"
+              )}
+            >
+              <GearIcon className="h-5 w-5 text-[hsl(var(--text-ghost))]" />
             </div>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-[hsl(var(--text))] tracking-tight font-[family-name:var(--font-display)]">
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
             Settings
           </h1>
-          <p className="text-[hsl(var(--text-muted))] mt-2 text-sm">
+          <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
             Configure API keys, export preferences, and templates
           </p>
         </div>
 
-        <div className="space-y-6 stagger">
-          {/* API Configuration */}
+        <div className="stagger space-y-6">
+          {/* Backend Configuration (Recommended) */}
           <Card variant="default">
             <CardContent className="p-5">
-              <div className="flex items-center gap-4 mb-5">
-                <div className={cn(
-                  "w-10 h-10 rounded-lg flex items-center justify-center",
-                  "bg-[hsl(185_50%_15%/0.5)]"
-                )}>
-                  <span className="text-xs font-bold text-[hsl(var(--cyan))] font-mono">AI</span>
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(158_50%_15%/0.5)]"
+                  )}
+                >
+                  <svg
+                    className="h-5 w-5 text-[hsl(var(--success))]"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                  >
+                    <rect x="2" y="6" width="20" height="12" rx="2" />
+                    <path d="M12 12a2 2 0 100-4 2 2 0 000 4z" />
+                    <path d="M6 12h.01M18 12h.01" />
+                  </svg>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-[hsl(var(--text))] font-[family-name:var(--font-display)]">
-                    API Configuration
+                <div className="flex-1">
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
+                    Backend Server
                   </p>
                   <p className="text-xs text-[hsl(var(--text-muted))]">
-                    Connect to OpenAI for transcription and analysis
+                    Connect to the shared backend (no API key needed)
+                  </p>
+                </div>
+                {hasBackendConfig && (
+                  <div
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-full px-2.5 py-1",
+                      "bg-[hsl(158_50%_15%/0.5)]",
+                      "border border-[hsl(var(--success)/0.3)]"
+                    )}
+                  >
+                    <CheckIcon className="h-3 w-3 text-[hsl(var(--success))]" />
+                    <span className="text-xs font-medium text-[hsl(var(--success))]">
+                      Connected
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-2 block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
+                    Backend URL
+                  </label>
+                  <Input
+                    value={backendUrlInput}
+                    onChange={(e) => setBackendUrlInput(e.target.value)}
+                    placeholder="http://localhost:3001"
+                  />
+                </div>
+                <div>
+                  <label className="mb-2 block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
+                    Access Code
+                  </label>
+                  <Input
+                    type="password"
+                    value={accessCodeInput}
+                    onChange={(e) => setAccessCodeInput(e.target.value)}
+                    placeholder="Enter access code"
+                  />
+                </div>
+                <div className="flex items-center justify-between pt-2">
+                  <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
+                    <InfoCircledIcon className="h-3.5 w-3.5" />
+                    Get access code from the app administrator
+                  </p>
+                  <Button
+                    onClick={handleSaveBackendConfig}
+                    disabled={!backendUrlInput || !accessCodeInput}
+                    variant={isBackendSaved ? "secondary" : "primary"}
+                    size="sm"
+                  >
+                    {isBackendSaved ? (
+                      <>
+                        <CheckIcon className="h-4 w-4" />
+                        Saved
+                      </>
+                    ) : (
+                      "Connect"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Direct API Configuration (Alternative) */}
+          <Card variant="default">
+            <CardContent className="p-5">
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(185_50%_15%/0.5)]"
+                  )}
+                >
+                  <span className="font-mono text-xs font-bold text-[hsl(var(--cyan))]">AI</span>
+                </div>
+                <div>
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
+                    Direct OpenAI API
+                    {hasBackendConfig && (
+                      <span className="ml-2 text-xs font-normal text-[hsl(var(--text-muted))]">
+                        (not needed if backend connected)
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-[hsl(var(--text-muted))]">
+                    Use your own OpenAI API key directly
                   </p>
                 </div>
               </div>
 
               <div className="space-y-3">
-                <label className="block text-xs font-semibold text-[hsl(var(--text-subtle))] uppercase tracking-wider">
+                <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                   OpenAI API Key
                 </label>
                 <div className="flex gap-3">
@@ -106,12 +226,12 @@ export const Settings: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[hsl(var(--text-ghost))] hover:text-[hsl(var(--text))] transition-colors"
+                      className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
                     >
                       {showApiKey ? (
-                        <EyeClosedIcon className="w-4 h-4" />
+                        <EyeClosedIcon className="h-4 w-4" />
                       ) : (
-                        <EyeOpenIcon className="w-4 h-4" />
+                        <EyeOpenIcon className="h-4 w-4" />
                       )}
                     </button>
                   </div>
@@ -122,7 +242,7 @@ export const Settings: React.FC = () => {
                   >
                     {isSaved ? (
                       <>
-                        <CheckIcon className="w-4 h-4" />
+                        <CheckIcon className="h-4 w-4" />
                         Saved
                       </>
                     ) : (
@@ -130,8 +250,8 @@ export const Settings: React.FC = () => {
                     )}
                   </Button>
                 </div>
-                <p className="text-xs text-[hsl(var(--text-subtle))] flex items-center gap-2">
-                  <InfoCircledIcon className="w-3.5 h-3.5" />
+                <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
+                  <InfoCircledIcon className="h-3.5 w-3.5" />
                   Get your API key from{" "}
                   <a
                     href="https://platform.openai.com/api-keys"
@@ -149,17 +269,23 @@ export const Settings: React.FC = () => {
           {/* Google Drive Integration */}
           <Card variant="default">
             <CardContent className="p-5">
-              <div className="flex items-center gap-4 mb-5">
-                <div className={cn(
-                  "w-10 h-10 rounded-lg flex items-center justify-center",
-                  "bg-[hsl(45_50%_15%/0.5)]"
-                )}>
-                  <svg className="w-5 h-5 text-[hsl(45_100%_60%)]" viewBox="0 0 24 24" fill="currentColor">
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(45_50%_15%/0.5)]"
+                  )}
+                >
+                  <svg
+                    className="h-5 w-5 text-[hsl(45_100%_60%)]"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
                     <path d="M4.433 22.396l4.83-8.387H22l-4.833 8.387H4.433zm7.192-9.471L6.79 4.167h6.795l4.833 8.758h-6.793zm6.795-8.758L22 4.167l-4.833 8.387-3.58-6.387 4.833-2z" />
                   </svg>
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-[hsl(var(--text))] font-[family-name:var(--font-display)]">
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
                     Google Drive Integration
                   </p>
                   <p className="text-xs text-[hsl(var(--text-muted))]">
@@ -170,7 +296,7 @@ export const Settings: React.FC = () => {
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs font-semibold text-[hsl(var(--text-subtle))] uppercase tracking-wider mb-2">
+                  <label className="mb-2 block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                     Google Client ID
                   </label>
                   <Input
@@ -180,7 +306,7 @@ export const Settings: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[hsl(var(--text-subtle))] uppercase tracking-wider mb-2">
+                  <label className="mb-2 block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                     Google API Key
                   </label>
                   <Input
@@ -190,8 +316,8 @@ export const Settings: React.FC = () => {
                   />
                 </div>
                 <div className="flex items-center justify-between pt-2">
-                  <p className="text-xs text-[hsl(var(--text-subtle))] flex items-center gap-2">
-                    <InfoCircledIcon className="w-3.5 h-3.5" />
+                  <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
+                    <InfoCircledIcon className="h-3.5 w-3.5" />
                     Get credentials from{" "}
                     <a
                       href="https://console.cloud.google.com/apis/credentials"
@@ -210,7 +336,7 @@ export const Settings: React.FC = () => {
                   >
                     {isGoogleSaved ? (
                       <>
-                        <CheckIcon className="w-4 h-4" />
+                        <CheckIcon className="h-4 w-4" />
                         Saved
                       </>
                     ) : (
@@ -225,15 +351,17 @@ export const Settings: React.FC = () => {
           {/* Default Export Formats */}
           <Card variant="default">
             <CardContent className="p-5">
-              <div className="flex items-center gap-4 mb-5">
-                <div className={cn(
-                  "w-10 h-10 rounded-lg flex items-center justify-center",
-                  "bg-[hsl(325_50%_15%/0.5)]"
-                )}>
-                  <VideoIcon className="w-5 h-5 text-[hsl(var(--magenta))]" />
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(325_50%_15%/0.5)]"
+                  )}
+                >
+                  <VideoIcon className="h-5 w-5 text-[hsl(var(--magenta))]" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-[hsl(var(--text))] font-[family-name:var(--font-display)]">
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
                     Default Export Formats
                   </p>
                   <p className="text-xs text-[hsl(var(--text-muted))]">
@@ -242,7 +370,7 @@ export const Settings: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                 {Object.values(VIDEO_FORMATS).map((format) => {
                   const isSelected = settings.defaultFormats?.includes(format.id);
                   return (
@@ -250,7 +378,7 @@ export const Settings: React.FC = () => {
                       key={format.id}
                       onClick={() => toggleDefaultFormat(format.id)}
                       className={cn(
-                        "p-3 rounded-lg text-left transition-colors",
+                        "rounded-lg p-3 text-left transition-colors",
                         "border",
                         isSelected
                           ? "border-[hsl(185_100%_50%/0.3)] bg-[hsl(185_50%_15%/0.3)]"
@@ -261,25 +389,25 @@ export const Settings: React.FC = () => {
                             )
                       )}
                     >
-                      <div className="flex items-center justify-between mb-1.5">
+                      <div className="mb-1.5 flex items-center justify-between">
                         <span className="text-xs font-semibold text-[hsl(var(--text))]">
                           {format.name}
                         </span>
                         <div
                           className={cn(
-                            "w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors",
+                            "flex h-3.5 w-3.5 items-center justify-center rounded-full border transition-colors",
                             isSelected
-                              ? "bg-[hsl(var(--cyan))] border-[hsl(var(--cyan))]"
+                              ? "border-[hsl(var(--cyan))] bg-[hsl(var(--cyan))]"
                               : "border-[hsl(var(--glass-border))]"
                           )}
                         >
-                          {isSelected && <CheckIcon className="w-2 h-2 text-[hsl(260_30%_6%)]" />}
+                          {isSelected && <CheckIcon className="h-2 w-2 text-[hsl(260_30%_6%)]" />}
                         </div>
                       </div>
-                      <p className="text-[10px] text-[hsl(var(--text-muted))] font-mono">
+                      <p className="font-mono text-[10px] text-[hsl(var(--text-muted))]">
                         {format.aspectRatio}
                       </p>
-                      <p className="text-[10px] text-[hsl(var(--text-ghost))] mt-0.5 truncate">
+                      <p className="mt-0.5 truncate text-[10px] text-[hsl(var(--text-ghost))]">
                         {format.useCases[0]}
                       </p>
                     </button>
@@ -292,15 +420,17 @@ export const Settings: React.FC = () => {
           {/* Clip Settings */}
           <Card variant="default">
             <CardContent className="p-5">
-              <div className="flex items-center gap-4 mb-5">
-                <div className={cn(
-                  "w-10 h-10 rounded-lg flex items-center justify-center",
-                  "bg-[hsl(270_50%_15%/0.5)]"
-                )}>
-                  <TimerIcon className="w-5 h-5 text-[hsl(var(--violet))]" />
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(270_50%_15%/0.5)]"
+                  )}
+                >
+                  <TimerIcon className="h-5 w-5 text-[hsl(var(--violet))]" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-[hsl(var(--text))] font-[family-name:var(--font-display)]">
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
                     Clip Settings
                   </p>
                   <p className="text-xs text-[hsl(var(--text-muted))]">
@@ -309,9 +439,9 @@ export const Settings: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
-                  <label className="block text-xs font-semibold text-[hsl(var(--text-subtle))] uppercase tracking-wider mb-2">
+                  <label className="mb-2 block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                     Default Clip Duration (sec)
                   </label>
                   <Input
@@ -325,12 +455,12 @@ export const Settings: React.FC = () => {
                       })
                     }
                   />
-                  <p className="text-xs text-[hsl(var(--text-muted))] mt-2">
+                  <p className="mt-2 text-xs text-[hsl(var(--text-muted))]">
                     Recommended: 15-45 seconds for social media
                   </p>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-[hsl(var(--text-subtle))] uppercase tracking-wider mb-2">
+                  <label className="mb-2 block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                     Auto-save Interval (sec)
                   </label>
                   <Input
@@ -344,7 +474,7 @@ export const Settings: React.FC = () => {
                       })
                     }
                   />
-                  <p className="text-xs text-[hsl(var(--text-muted))] mt-2">
+                  <p className="mt-2 text-xs text-[hsl(var(--text-muted))]">
                     How often to save your work automatically
                   </p>
                 </div>
@@ -355,15 +485,17 @@ export const Settings: React.FC = () => {
           {/* Templates */}
           <Card variant="default">
             <CardContent className="p-5">
-              <div className="flex items-center gap-4 mb-5">
-                <div className={cn(
-                  "w-10 h-10 rounded-lg flex items-center justify-center",
-                  "bg-[hsl(158_50%_15%/0.5)]"
-                )}>
-                  <LayersIcon className="w-5 h-5 text-[hsl(var(--success))]" />
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(158_50%_15%/0.5)]"
+                  )}
+                >
+                  <LayersIcon className="h-5 w-5 text-[hsl(var(--success))]" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-[hsl(var(--text))] font-[family-name:var(--font-display)]">
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
                     Video Templates
                   </p>
                   <p className="text-xs text-[hsl(var(--text-muted))]">
@@ -377,7 +509,7 @@ export const Settings: React.FC = () => {
                   <div
                     key={template.id}
                     className={cn(
-                      "group flex items-center justify-between p-3 rounded-lg transition-colors",
+                      "group flex items-center justify-between rounded-lg p-3 transition-colors",
                       "bg-[hsl(var(--surface))]",
                       "border border-[hsl(var(--glass-border))]",
                       "hover:border-[hsl(0_0%_100%/0.12)]"
@@ -385,7 +517,7 @@ export const Settings: React.FC = () => {
                   >
                     <div className="flex items-center gap-3">
                       <div
-                        className="w-10 h-10 rounded-lg border border-[hsl(var(--glass-border))] shrink-0"
+                        className="h-10 w-10 shrink-0 rounded-lg border border-[hsl(var(--glass-border))]"
                         style={{
                           background:
                             template.background.type === "gradient"
@@ -397,10 +529,10 @@ export const Settings: React.FC = () => {
                         <p className="text-xs font-semibold text-[hsl(var(--text))]">
                           {template.name}
                         </p>
-                        <div className="flex items-center gap-2 mt-0.5">
+                        <div className="mt-0.5 flex items-center gap-2">
                           <span
                             className={cn(
-                              "text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wider",
+                              "rounded px-1.5 py-0.5 text-[10px] font-medium tracking-wider uppercase",
                               template.isBuiltIn
                                 ? "bg-[hsl(var(--raised))] text-[hsl(var(--text-ghost))]"
                                 : "bg-[hsl(270_50%_15%/0.5)] text-[hsl(var(--violet))]"
@@ -414,29 +546,29 @@ export const Settings: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                    <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
                       <button
                         onClick={() => duplicateTemplate(template.id)}
                         className={cn(
-                          "p-2 rounded-lg transition-colors",
+                          "rounded-lg p-2 transition-colors",
                           "text-[hsl(var(--text-ghost))]",
                           "hover:text-[hsl(var(--text))]",
                           "hover:bg-[hsl(var(--raised))]"
                         )}
                       >
-                        <CopyIcon className="w-3.5 h-3.5" />
+                        <CopyIcon className="h-3.5 w-3.5" />
                       </button>
                       {!template.isBuiltIn && (
                         <button
                           onClick={() => deleteTemplate(template.id)}
                           className={cn(
-                            "p-2 rounded-lg transition-colors",
+                            "rounded-lg p-2 transition-colors",
                             "text-[hsl(var(--text-ghost))]",
                             "hover:text-[hsl(var(--error))]",
                             "hover:bg-[hsl(var(--error)/0.1)]"
                           )}
                         >
-                          <TrashIcon className="w-3.5 h-3.5" />
+                          <TrashIcon className="h-3.5 w-3.5" />
                         </button>
                       )}
                     </div>
@@ -451,18 +583,16 @@ export const Settings: React.FC = () => {
             <CardContent className="p-5">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm font-bold text-[hsl(var(--text))] font-[family-name:var(--font-display)]">
+                  <p className="font-[family-name:var(--font-display)] text-sm font-bold text-[hsl(var(--text))]">
                     Podcast Clipper
                   </p>
-                  <p className="text-xs text-[hsl(var(--text-muted))] mt-0.5">
-                    Version 0.1.0
-                  </p>
+                  <p className="mt-0.5 text-xs text-[hsl(var(--text-muted))]">Version 0.1.0</p>
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-[hsl(var(--text-muted))]">
-                    Built with Tauri, React & Remotion
+                    Built with React & Remotion
                   </p>
-                  <p className="text-xs text-[hsl(var(--text-ghost))] mt-0.5">
+                  <p className="mt-0.5 text-xs text-[hsl(var(--text-ghost))]">
                     AI powered by OpenAI Whisper & GPT-4
                   </p>
                 </div>

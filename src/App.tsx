@@ -9,16 +9,53 @@ import { ExportPanel } from "./components/ExportPanel/ExportPanel";
 import { Settings } from "./components/Settings/Settings";
 import { useProjectStore } from "./stores/projectStore";
 
-function App() {
-  const [currentView, setCurrentView] = useState<ViewType>("projects");
-  const { currentProject } = useProjectStore();
+// Keys for persisting navigation state
+const VIEW_STORAGE_KEY = "podcast-clipper-current-view";
+const PROJECT_ID_STORAGE_KEY = "podcast-clipper-current-project-id";
 
-  // Reset to projects view when project is cleared
+function App() {
+  const [currentView, setCurrentView] = useState<ViewType>(() => {
+    // Initialize from localStorage
+    const stored = localStorage.getItem(VIEW_STORAGE_KEY);
+    return (stored as ViewType) || "projects";
+  });
+  const [isRestoring, setIsRestoring] = useState(true);
+  const { currentProject, loadProject } = useProjectStore();
+
+  // Restore project on mount
   useEffect(() => {
-    if (!currentProject && currentView !== "projects" && currentView !== "settings") {
+    const storedProjectId = localStorage.getItem(PROJECT_ID_STORAGE_KEY);
+    if (storedProjectId) {
+      loadProject(storedProjectId);
+    }
+    setIsRestoring(false);
+  }, [loadProject]);
+
+  // Persist current view to localStorage
+  useEffect(() => {
+    localStorage.setItem(VIEW_STORAGE_KEY, currentView);
+  }, [currentView]);
+
+  // Persist current project ID to localStorage
+  useEffect(() => {
+    if (currentProject?.id) {
+      localStorage.setItem(PROJECT_ID_STORAGE_KEY, currentProject.id);
+    } else {
+      localStorage.removeItem(PROJECT_ID_STORAGE_KEY);
+    }
+  }, [currentProject?.id]);
+
+  // Reset to projects view when project is cleared (but not during restoration)
+  useEffect(() => {
+    if (
+      !isRestoring &&
+      !currentProject &&
+      currentView !== "projects" &&
+      currentView !== "settings"
+    ) {
       setCurrentView("projects");
     }
-  }, [currentProject, currentView]);
+  }, [currentProject, currentView, isRestoring]);
 
   const renderView = () => {
     switch (currentView) {

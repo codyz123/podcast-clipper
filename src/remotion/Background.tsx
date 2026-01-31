@@ -13,12 +13,13 @@ export const Background: React.FC<BackgroundProps> = ({ config }) => {
         return {
           backgroundColor: config.color || "#000000",
         };
-      case "gradient":
+      case "gradient": {
         const colors = config.gradientColors || ["#667eea", "#764ba2"];
         const direction = config.gradientDirection || 135;
         return {
           background: `linear-gradient(${direction}deg, ${colors.join(", ")})`,
         };
+      }
       case "image":
         return {
           backgroundImage: config.imagePath ? `url(${config.imagePath})` : undefined,

@@ -54,16 +54,14 @@ export const Progress: React.FC<ProgressProps> = ({
   return (
     <div className={cn("w-full", className)}>
       {showLabel && (
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-[hsl(var(--text-subtle))] font-[family-name:var(--font-display)]">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="font-[family-name:var(--font-display)] text-[11px] font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
             Progress
           </span>
           <span
             className={cn(
-              "text-[12px] font-mono font-semibold tabular-nums",
-              isComplete
-                ? "text-[hsl(var(--success))]"
-                : "text-[hsl(var(--text-muted))]"
+              "font-mono text-[12px] font-semibold tabular-nums",
+              isComplete ? "text-[hsl(var(--success))]" : "text-[hsl(var(--text-muted))]"
             )}
           >
             {Math.round(clampedValue)}%
@@ -72,7 +70,7 @@ export const Progress: React.FC<ProgressProps> = ({
       )}
       <div
         className={cn(
-          "w-full rounded-full overflow-hidden",
+          "w-full overflow-hidden rounded-full",
           "bg-[hsl(var(--surface))]",
           "border border-[hsl(var(--glass-border))]",
           sizes[size]
@@ -89,7 +87,7 @@ export const Progress: React.FC<ProgressProps> = ({
         >
           {animated && !isComplete && clampedValue > 0 && (
             <div
-              className="absolute inset-0 w-full h-full"
+              className="absolute inset-0 h-full w-full"
               style={{
                 background:
                   "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.4) 50%, transparent 100%)",
@@ -186,7 +184,7 @@ export const CircularProgress: React.FC<CircularProgressProps> = ({
         />
       </svg>
       {showLabel && (
-        <span className="absolute text-[11px] font-mono font-semibold text-[hsl(var(--text-muted))] tabular-nums">
+        <span className="absolute font-mono text-[11px] font-semibold text-[hsl(var(--text-muted))] tabular-nums">
           {Math.round(clampedValue)}%
         </span>
       )}
@@ -200,11 +198,7 @@ interface SpinnerProps {
   variant?: "cyan" | "magenta" | "white";
 }
 
-export const Spinner: React.FC<SpinnerProps> = ({
-  size = "md",
-  className,
-  variant = "cyan"
-}) => {
+export const Spinner: React.FC<SpinnerProps> = ({ size = "md", className, variant = "cyan" }) => {
   const sizes = {
     sm: "w-4 h-4",
     md: "w-5 h-5",
@@ -233,13 +227,7 @@ export const Spinner: React.FC<SpinnerProps> = ({
       fill="none"
       viewBox="0 0 24 24"
     >
-      <circle
-        cx="12"
-        cy="12"
-        r="10"
-        stroke={colors[variant].track}
-        strokeWidth="2.5"
-      />
+      <circle cx="12" cy="12" r="10" stroke={colors[variant].track} strokeWidth="2.5" />
       <path
         fill={colors[variant].spinner}
         d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
@@ -253,10 +241,7 @@ interface LoadingDotsProps {
   variant?: "cyan" | "magenta" | "white";
 }
 
-export const LoadingDots: React.FC<LoadingDotsProps> = ({
-  className,
-  variant = "cyan",
-}) => {
+export const LoadingDots: React.FC<LoadingDotsProps> = ({ className, variant = "cyan" }) => {
   const colors = {
     cyan: "bg-[hsl(185_100%_50%)]",
     magenta: "bg-[hsl(325_100%_58%)]",
@@ -268,11 +253,7 @@ export const LoadingDots: React.FC<LoadingDotsProps> = ({
       {[0, 1, 2].map((i) => (
         <div
           key={i}
-          className={cn(
-            "w-1.5 h-1.5 rounded-full",
-            colors[variant],
-            "animate-bounce"
-          )}
+          className={cn("h-1.5 w-1.5 rounded-full", colors[variant], "animate-bounce")}
           style={{
             animationDelay: `${i * 0.15}s`,
             animationDuration: "0.6s",

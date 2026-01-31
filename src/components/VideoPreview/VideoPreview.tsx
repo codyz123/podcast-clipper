@@ -109,7 +109,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
     const bg = selectedTemplate.background;
     const subtitle = selectedTemplate.subtitle;
 
-    let backgroundStyle: React.CSSProperties = {};
+    const backgroundStyle: React.CSSProperties = {};
 
     if (bg.type === "solid") {
       backgroundStyle.backgroundColor = bg.color;
@@ -130,7 +130,11 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
         <div
           className={cn(
             "absolute inset-x-0 flex items-center justify-center px-4",
-            subtitle.position === "top" ? "top-[20%]" : subtitle.position === "bottom" ? "bottom-[20%]" : "top-1/2 -translate-y-1/2"
+            subtitle.position === "top"
+              ? "top-[20%]"
+              : subtitle.position === "bottom"
+                ? "bottom-[20%]"
+                : "top-1/2 -translate-y-1/2"
           )}
         >
           <p
@@ -153,11 +157,13 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
         </div>
 
         {/* Progress overlay */}
-        <div className="absolute bottom-3 left-3 right-3">
-          <div className="h-1 bg-white/20 rounded-full overflow-hidden">
+        <div className="absolute right-3 bottom-3 left-3">
+          <div className="h-1 overflow-hidden rounded-full bg-white/20">
             <div
-              className="h-full bg-white/80 rounded-full transition-all duration-100"
-              style={{ width: `${(currentTime / (currentClip.endTime - currentClip.startTime)) * 100}%` }}
+              className="h-full rounded-full bg-white/80 transition-all duration-100"
+              style={{
+                width: `${(currentTime / (currentClip.endTime - currentClip.startTime)) * 100}%`,
+              }}
             />
           </div>
         </div>
@@ -167,28 +173,28 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
 
   return (
     <div className="min-h-full">
-      <div className="max-w-5xl mx-auto">
+      <div className="mx-auto max-w-5xl">
         {/* Header */}
         <div className="mb-8 sm:mb-10">
-          <div className={cn(
-            "inline-flex items-center gap-2 px-3 py-1 rounded-full mb-4",
-            "bg-[hsl(var(--surface))]",
-            "border border-[hsl(var(--glass-border))]"
-          )}>
+          <div
+            className={cn(
+              "mb-4 inline-flex items-center gap-2 rounded-full px-3 py-1",
+              "bg-[hsl(var(--surface))]",
+              "border border-[hsl(var(--glass-border))]"
+            )}
+          >
             <span className="text-xs font-semibold text-[hsl(var(--cyan))]">4</span>
-            <span className="text-xs font-medium text-[hsl(var(--text-subtle))]">
-              Step 4 of 5
-            </span>
+            <span className="text-xs font-medium text-[hsl(var(--text-subtle))]">Step 4 of 5</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-[hsl(var(--text))] tracking-tight font-[family-name:var(--font-display)]">
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
             Preview & Edit
           </h1>
-          <p className="text-[hsl(var(--text-muted))] mt-2 text-sm">
+          <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
             Preview clips with different formats and templates
           </p>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Preview Panel */}
           <div className="lg:col-span-2">
             <Card className="animate-fadeIn">
@@ -197,13 +203,15 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
                 <audio ref={audioRef} src={currentProject?.audioPath} preload="auto" />
 
                 {/* Clip Info */}
-                <div className="flex items-center justify-between mb-5 pb-4 border-b border-[hsl(var(--glass-border))]">
+                <div className="mb-5 flex items-center justify-between border-b border-[hsl(var(--glass-border))] pb-4">
                   <div className="flex items-center gap-3">
-                    <div className={cn(
-                      "w-10 h-10 rounded-lg flex items-center justify-center",
-                      "bg-[hsl(185_50%_15%/0.5)]"
-                    )}>
-                      <VideoIcon className="w-5 h-5 text-[hsl(var(--cyan))]" />
+                    <div
+                      className={cn(
+                        "flex h-10 w-10 items-center justify-center rounded-lg",
+                        "bg-[hsl(185_50%_15%/0.5)]"
+                      )}
+                    >
+                      <VideoIcon className="h-5 w-5 text-[hsl(var(--cyan))]" />
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-[hsl(var(--text))]">
@@ -214,21 +222,25 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
                       </p>
                     </div>
                   </div>
-                  <div className={cn(
-                    "px-2.5 py-1 rounded-full text-xs font-medium",
-                    "bg-[hsl(var(--surface))]",
-                    "text-[hsl(var(--text-subtle))]"
-                  )}>
+                  <div
+                    className={cn(
+                      "rounded-full px-2.5 py-1 text-xs font-medium",
+                      "bg-[hsl(var(--surface))]",
+                      "text-[hsl(var(--text-subtle))]"
+                    )}
+                  >
                     {selectedClipIndex + 1} / {clips.length}
                   </div>
                 </div>
 
                 {/* Video Preview */}
-                <div className={cn(
-                  "flex justify-center mb-5 p-4 rounded-lg",
-                  "bg-[hsl(var(--surface))]",
-                  "border border-[hsl(var(--glass-border))]"
-                )}>
+                <div
+                  className={cn(
+                    "mb-5 flex justify-center rounded-lg p-4",
+                    "bg-[hsl(var(--surface))]",
+                    "border border-[hsl(var(--glass-border))]"
+                  )}
+                >
                   {renderPreview()}
                 </div>
 
@@ -239,55 +251,59 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
                       onClick={() => setSelectedClipIndex(Math.max(0, selectedClipIndex - 1))}
                       disabled={selectedClipIndex === 0}
                       className={cn(
-                        "w-9 h-9 rounded-lg flex items-center justify-center transition-colors",
+                        "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
                         selectedClipIndex === 0
-                          ? "text-[hsl(var(--text-ghost))] cursor-not-allowed"
+                          ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
                           : "text-[hsl(var(--text-subtle))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
                       )}
                     >
-                      <TrackPreviousIcon className="w-4 h-4" />
+                      <TrackPreviousIcon className="h-4 w-4" />
                     </button>
 
                     <Button
                       onClick={togglePlayback}
                       disabled={!currentClip}
-                      className="w-12 h-12 rounded-full p-0"
+                      className="h-12 w-12 rounded-full p-0"
                       glow={!isPlaying && !!currentClip}
                     >
                       {isPlaying ? (
-                        <PauseIcon className="w-5 h-5" />
+                        <PauseIcon className="h-5 w-5" />
                       ) : (
-                        <PlayIcon className="w-5 h-5 ml-0.5" />
+                        <PlayIcon className="ml-0.5 h-5 w-5" />
                       )}
                     </Button>
 
                     <button
-                      onClick={() => setSelectedClipIndex(Math.min(clips.length - 1, selectedClipIndex + 1))}
+                      onClick={() =>
+                        setSelectedClipIndex(Math.min(clips.length - 1, selectedClipIndex + 1))
+                      }
                       disabled={selectedClipIndex === clips.length - 1}
                       className={cn(
-                        "w-9 h-9 rounded-lg flex items-center justify-center transition-colors",
+                        "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
                         selectedClipIndex === clips.length - 1
-                          ? "text-[hsl(var(--text-ghost))] cursor-not-allowed"
+                          ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
                           : "text-[hsl(var(--text-subtle))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
                       )}
                     >
-                      <TrackNextIcon className="w-4 h-4" />
+                      <TrackNextIcon className="h-4 w-4" />
                     </button>
                   </div>
 
                   {currentClip && (
-                    <div className="flex items-center gap-3 w-full max-w-xs">
-                      <span className="font-mono text-xs text-[hsl(var(--text-subtle))] tabular-nums w-10">
+                    <div className="flex w-full max-w-xs items-center gap-3">
+                      <span className="w-10 font-mono text-xs text-[hsl(var(--text-subtle))] tabular-nums">
                         {formatDuration(currentTime)}
                       </span>
                       <div className="flex-1">
                         <Progress
-                          value={(currentTime / (currentClip.endTime - currentClip.startTime)) * 100}
+                          value={
+                            (currentTime / (currentClip.endTime - currentClip.startTime)) * 100
+                          }
                           variant="cyan"
                           size="sm"
                         />
                       </div>
-                      <span className="font-mono text-xs text-[hsl(var(--text-muted))] tabular-nums w-10 text-right">
+                      <span className="w-10 text-right font-mono text-xs text-[hsl(var(--text-muted))] tabular-nums">
                         {formatDuration(currentClip.endTime - currentClip.startTime)}
                       </span>
                     </div>
@@ -302,8 +318,8 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
             {/* Format Selection */}
             <Card variant="default" className="animate-fadeIn">
               <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <AspectRatioIcon className="w-3.5 h-3.5 text-[hsl(var(--cyan))]" />
+                <div className="mb-4 flex items-center gap-2">
+                  <AspectRatioIcon className="h-3.5 w-3.5 text-[hsl(var(--cyan))]" />
                   <p className="text-xs font-semibold text-[hsl(var(--text))]">Format</p>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
@@ -314,28 +330,28 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
                         key={format.id}
                         onClick={() => setSelectedFormat(format.id)}
                         className={cn(
-                          "p-3 rounded-lg border text-left transition-colors",
+                          "rounded-lg border p-3 text-left transition-colors",
                           isSelected
                             ? "border-[hsl(185_100%_50%/0.3)] bg-[hsl(185_50%_15%/0.3)]"
                             : "border-[hsl(var(--glass-border))] bg-[hsl(var(--surface))] hover:border-[hsl(0_0%_100%/0.12)]"
                         )}
                       >
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="mb-1 flex items-center justify-between">
                           <span className="text-xs font-medium text-[hsl(var(--text))]">
                             {format.name}
                           </span>
                           <div
                             className={cn(
-                              "w-3.5 h-3.5 rounded-full border flex items-center justify-center transition-colors",
+                              "flex h-3.5 w-3.5 items-center justify-center rounded-full border transition-colors",
                               isSelected
-                                ? "bg-[hsl(var(--cyan))] border-[hsl(var(--cyan))]"
+                                ? "border-[hsl(var(--cyan))] bg-[hsl(var(--cyan))]"
                                 : "border-[hsl(var(--glass-border))]"
                             )}
                           >
-                            {isSelected && <CheckIcon className="w-2 h-2 text-[hsl(260_30%_6%)]" />}
+                            {isSelected && <CheckIcon className="h-2 w-2 text-[hsl(260_30%_6%)]" />}
                           </div>
                         </div>
-                        <p className="text-[10px] text-[hsl(var(--text-muted))] font-mono">
+                        <p className="font-mono text-[10px] text-[hsl(var(--text-muted))]">
                           {format.aspectRatio}
                         </p>
                       </button>
@@ -348,8 +364,8 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
             {/* Template Selection */}
             <Card variant="default" className="animate-fadeIn" style={{ animationDelay: "50ms" }}>
               <CardContent className="p-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <LayersIcon className="w-3.5 h-3.5 text-[hsl(var(--magenta))]" />
+                <div className="mb-4 flex items-center gap-2">
+                  <LayersIcon className="h-3.5 w-3.5 text-[hsl(var(--magenta))]" />
                   <p className="text-xs font-semibold text-[hsl(var(--text))]">Template</p>
                 </div>
                 <div className="space-y-2">
@@ -360,14 +376,14 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
                         key={template.id}
                         onClick={() => setSelectedTemplateId(template.id)}
                         className={cn(
-                          "w-full p-3 rounded-lg border text-left transition-colors flex items-center gap-3",
+                          "flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors",
                           isSelected
                             ? "border-[hsl(185_100%_50%/0.3)] bg-[hsl(185_50%_15%/0.3)]"
                             : "border-[hsl(var(--glass-border))] bg-[hsl(var(--surface))] hover:border-[hsl(0_0%_100%/0.12)]"
                         )}
                       >
                         <div
-                          className="w-7 h-7 rounded-md border border-[hsl(var(--glass-border))] shrink-0"
+                          className="h-7 w-7 shrink-0 rounded-md border border-[hsl(var(--glass-border))]"
                           style={{
                             background:
                               template.background.type === "gradient"
@@ -375,16 +391,16 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
                                 : template.background.color || "#000",
                           }}
                         />
-                        <div className="flex-1 min-w-0">
+                        <div className="min-w-0 flex-1">
                           <p className="text-xs font-medium text-[hsl(var(--text))]">
                             {template.name}
                           </p>
-                          <p className="text-[10px] text-[hsl(var(--text-muted))] truncate">
+                          <p className="truncate text-[10px] text-[hsl(var(--text-muted))]">
                             {template.subtitle.animation} animation
                           </p>
                         </div>
                         {isSelected && (
-                          <CheckIcon className="w-3.5 h-3.5 text-[hsl(var(--cyan))] shrink-0" />
+                          <CheckIcon className="h-3.5 w-3.5 shrink-0 text-[hsl(var(--cyan))]" />
                         )}
                       </button>
                     );
@@ -396,16 +412,16 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
             {/* Clips List */}
             <Card variant="default" className="animate-fadeIn" style={{ animationDelay: "100ms" }}>
               <CardContent className="p-4">
-                <div className="flex items-center justify-between mb-4">
+                <div className="mb-4 flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <VideoIcon className="w-3.5 h-3.5 text-[hsl(var(--success))]" />
+                    <VideoIcon className="h-3.5 w-3.5 text-[hsl(var(--success))]" />
                     <p className="text-xs font-semibold text-[hsl(var(--text))]">Clips</p>
                   </div>
                   <span className="text-[10px] text-[hsl(var(--text-muted))]">
                     {clips.length} total
                   </span>
                 </div>
-                <div className="space-y-1.5 max-h-52 overflow-y-auto scrollbar-thin">
+                <div className="scrollbar-thin max-h-52 space-y-1.5 overflow-y-auto">
                   {clips.map((clip, index) => {
                     const isSelected = selectedClipIndex === index;
                     return (
@@ -413,24 +429,26 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
                         key={clip.id}
                         onClick={() => setSelectedClipIndex(index)}
                         className={cn(
-                          "w-full p-2.5 rounded-lg border text-left transition-colors flex items-center gap-2.5",
+                          "flex w-full items-center gap-2.5 rounded-lg border p-2.5 text-left transition-colors",
                           isSelected
                             ? "border-[hsl(185_100%_50%/0.3)] bg-[hsl(185_50%_15%/0.3)]"
                             : "border-[hsl(var(--glass-border))] bg-[hsl(var(--surface))] hover:border-[hsl(0_0%_100%/0.12)]"
                         )}
                       >
-                        <div className={cn(
-                          "w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-semibold shrink-0",
-                          isSelected
-                            ? "bg-[hsl(var(--cyan))] text-[hsl(260_30%_6%)]"
-                            : "bg-[hsl(var(--raised))] text-[hsl(var(--text-muted))]"
-                        )}>
+                        <div
+                          className={cn(
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-semibold",
+                            isSelected
+                              ? "bg-[hsl(var(--cyan))] text-[hsl(260_30%_6%)]"
+                              : "bg-[hsl(var(--raised))] text-[hsl(var(--text-muted))]"
+                          )}
+                        >
                           {index + 1}
                         </div>
-                        <span className="text-xs font-medium text-[hsl(var(--text))] flex-1 truncate">
+                        <span className="flex-1 truncate text-xs font-medium text-[hsl(var(--text))]">
                           {clip.name}
                         </span>
-                        <span className="text-[10px] font-mono text-[hsl(var(--text-muted))]">
+                        <span className="font-mono text-[10px] text-[hsl(var(--text-muted))]">
                           {formatDuration(clip.endTime - clip.startTime)}
                         </span>
                       </button>
@@ -443,7 +461,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
         </div>
 
         {/* Continue Button */}
-        <div className="flex justify-end mt-8 sm:mt-10">
+        <div className="mt-8 flex justify-end sm:mt-10">
           <Button onClick={onComplete} glow>
             Continue to Export
           </Button>

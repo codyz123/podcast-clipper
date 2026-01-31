@@ -51,20 +51,20 @@ export async function retryWithBackoff<T>(
   baseDelay: number = 1000
 ): Promise<T> {
   let lastError: Error | undefined;
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       return await fn();
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      
+
       if (attempt < maxRetries - 1) {
         const delay = baseDelay * Math.pow(2, attempt);
         await sleep(delay);
       }
     }
   }
-  
+
   throw lastError;
 }
 
@@ -86,4 +86,37 @@ export function formatFileSize(bytes: number): string {
   const sizes = ["B", "KB", "MB", "GB"];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+/**
+ * Generate a fingerprint for a file using SHA-256 hash of content sample + metadata.
+ * Uses first 1MB + last 1MB + file size for efficiency with large files.
+ */
+export async function generateFileFingerprint(file: Blob): Promise<string> {
+  const SAMPLE_SIZE = 1024 * 1024; // 1MB
+
+  // For small files, hash the entire content
+  if (file.size <= SAMPLE_SIZE * 2) {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // For large files, sample first 1MB + last 1MB + size
+  const firstChunk = await file.slice(0, SAMPLE_SIZE).arrayBuffer();
+  const lastChunk = await file.slice(-SAMPLE_SIZE).arrayBuffer();
+
+  // Combine chunks with size as a separator
+  const sizeBuffer = new ArrayBuffer(8);
+  new DataView(sizeBuffer).setBigUint64(0, BigInt(file.size));
+
+  const combined = new Uint8Array(firstChunk.byteLength + lastChunk.byteLength + 8);
+  combined.set(new Uint8Array(firstChunk), 0);
+  combined.set(new Uint8Array(sizeBuffer), firstChunk.byteLength);
+  combined.set(new Uint8Array(lastChunk), firstChunk.byteLength + 8);
+
+  const hashBuffer = await crypto.subtle.digest("SHA-256", combined);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }

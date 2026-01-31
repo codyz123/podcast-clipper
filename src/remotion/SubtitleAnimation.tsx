@@ -8,10 +8,7 @@ interface SubtitleAnimationProps {
   config: SubtitleConfig;
 }
 
-export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({
-  words,
-  config,
-}) => {
+export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({ words, config }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
@@ -52,18 +49,14 @@ export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({
   const getAnimationStyle = (): React.CSSProperties => {
     switch (config.animation) {
       case "fade": {
-        const fadeInOpacity = interpolate(
-          frame,
-          [groupStartFrame - 5, groupStartFrame],
-          [0, 1],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-        );
-        const fadeOutOpacity = interpolate(
-          frame,
-          [groupEndFrame, groupEndFrame + 5],
-          [1, 0],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-        );
+        const fadeInOpacity = interpolate(frame, [groupStartFrame - 5, groupStartFrame], [0, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
+        const fadeOutOpacity = interpolate(frame, [groupEndFrame, groupEndFrame + 5], [1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
         return { opacity: Math.min(fadeInOpacity, fadeOutOpacity) };
       }
 
@@ -77,12 +70,10 @@ export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({
             stiffness: 200,
           },
         });
-        const fadeOutOpacity = interpolate(
-          frame,
-          [groupEndFrame, groupEndFrame + 5],
-          [1, 0],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-        );
+        const fadeOutOpacity = interpolate(frame, [groupEndFrame, groupEndFrame + 5], [1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
         return {
           transform: `scale(${scaleSpring})`,
           opacity: fadeOutOpacity,
@@ -96,12 +87,10 @@ export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({
           [0, 1],
           { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
         );
-        const fadeOutOpacity = interpolate(
-          frame,
-          [groupEndFrame, groupEndFrame + 5],
-          [1, 0],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-        );
+        const fadeOutOpacity = interpolate(frame, [groupEndFrame, groupEndFrame + 5], [1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
         return {
           clipPath: `inset(0 ${(1 - progress) * 100}% 0 0)`,
           opacity: fadeOutOpacity,
@@ -110,18 +99,14 @@ export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({
 
       case "karaoke":
       default: {
-        const fadeInOpacity = interpolate(
-          frame,
-          [groupStartFrame - 5, groupStartFrame],
-          [0, 1],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-        );
-        const fadeOutOpacity = interpolate(
-          frame,
-          [groupEndFrame, groupEndFrame + 5],
-          [1, 0],
-          { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-        );
+        const fadeInOpacity = interpolate(frame, [groupStartFrame - 5, groupStartFrame], [0, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
+        const fadeOutOpacity = interpolate(frame, [groupEndFrame, groupEndFrame + 5], [1, 0], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+        });
         return { opacity: Math.min(fadeInOpacity, fadeOutOpacity) };
       }
     }
@@ -130,12 +115,10 @@ export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({
   const getWordStyle = (word: WordTiming): React.CSSProperties => {
     if (config.animation === "karaoke") {
       const isActive = frame >= word.startFrame && frame <= word.endFrame;
-      const progress = interpolate(
-        frame,
-        [word.startFrame, word.endFrame],
-        [0, 1],
-        { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
-      );
+      const progress = interpolate(frame, [word.startFrame, word.endFrame], [0, 1], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+      });
 
       return {
         color: isActive ? "#FFD700" : config.color,

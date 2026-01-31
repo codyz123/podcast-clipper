@@ -1,10 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import {
-  AppSettings,
-  VideoFormat,
-  VideoTemplate,
-} from "../lib/types";
+import { AppSettings, VideoFormat, VideoTemplate } from "../lib/types";
 import { generateId } from "../lib/utils";
 
 // Default templates
@@ -94,12 +90,14 @@ const DEFAULT_TEMPLATES: VideoTemplate[] = [
 interface SettingsState {
   settings: AppSettings;
   templates: VideoTemplate[];
-  
+
   // Settings actions
   updateSettings: (updates: Partial<AppSettings>) => void;
   setApiKey: (key: string) => void;
   clearApiKey: () => void;
-  
+  setBackendConfig: (url: string, accessCode: string) => void;
+  clearBackendConfig: () => void;
+
   // Template actions
   addTemplate: (template: Omit<VideoTemplate, "id" | "isBuiltIn">) => VideoTemplate;
   updateTemplate: (templateId: string, updates: Partial<VideoTemplate>) => void;
@@ -108,10 +106,16 @@ interface SettingsState {
   getTemplate: (templateId: string) => VideoTemplate | undefined;
 }
 
+// Current settings version - increment when adding new required fields
+const SETTINGS_VERSION = 3;
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
       settings: {
+        // Backend config for local development
+        backendUrl: "http://localhost:3010",
+        accessCode: "podcast-friends",
         defaultTemplate: "minimal-dark",
         defaultFormats: ["9:16"] as VideoFormat[],
         defaultClipDuration: 30,
@@ -134,6 +138,18 @@ export const useSettingsStore = create<SettingsState>()(
       clearApiKey: () => {
         set((state) => ({
           settings: { ...state.settings, openaiApiKey: undefined },
+        }));
+      },
+
+      setBackendConfig: (url, accessCode) => {
+        set((state) => ({
+          settings: { ...state.settings, backendUrl: url, accessCode },
+        }));
+      },
+
+      clearBackendConfig: () => {
+        set((state) => ({
+          settings: { ...state.settings, backendUrl: undefined, accessCode: undefined },
         }));
       },
 
@@ -161,9 +177,7 @@ export const useSettingsStore = create<SettingsState>()(
 
       deleteTemplate: (templateId) => {
         set((state) => ({
-          templates: state.templates.filter(
-            (t) => t.id !== templateId || t.isBuiltIn
-          ),
+          templates: state.templates.filter((t) => t.id !== templateId || t.isBuiltIn),
         }));
       },
 
@@ -191,6 +205,21 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: "podcast-clipper-settings",
+      version: SETTINGS_VERSION,
+      migrate: (persistedState: any, version: number) => {
+        // Migration: update backend config
+        if (version < 3) {
+          return {
+            ...persistedState,
+            settings: {
+              ...persistedState.settings,
+              backendUrl: "http://localhost:3010",
+              accessCode: persistedState.settings?.accessCode || "podcast-friends",
+            },
+          };
+        }
+        return persistedState;
+      },
     }
   )
 );

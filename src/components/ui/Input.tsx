@@ -41,17 +41,19 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className="w-full">
         {label && (
-          <label className={cn(
-            "block text-[13px] font-medium mb-2",
-            "text-[hsl(var(--text))]",
-            "font-[family-name:var(--font-display)]"
-          )}>
+          <label
+            className={cn(
+              "mb-2 block text-[13px] font-medium",
+              "text-[hsl(var(--text))]",
+              "font-[family-name:var(--font-display)]"
+            )}
+          >
             {label}
           </label>
         )}
         <div className="relative">
           {icon && (
-            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[hsl(var(--text-subtle))]">
+            <div className="absolute top-1/2 left-3 -translate-y-1/2 text-[hsl(var(--text-subtle))]">
               {icon}
             </div>
           )}
@@ -59,7 +61,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             className={cn(
               // Base
-              "w-full h-10 px-3.5 text-sm",
+              "h-10 w-full px-3.5 text-sm",
               "rounded-xl",
               // Typography
               "text-[hsl(var(--text))]",
@@ -69,14 +71,15 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               // Transitions
               "transition-all duration-200 ease-out",
               // Disabled
-              "disabled:opacity-40 disabled:cursor-not-allowed",
+              "disabled:cursor-not-allowed disabled:opacity-40",
               // Error
-              error && cn(
-                "border-[hsl(var(--error)/0.6)]",
-                "focus:border-[hsl(var(--error))]",
-                "focus:ring-[hsl(var(--error)/0.15)]",
-                "focus:shadow-[0_0_20px_-5px_hsl(var(--error)/0.3)]"
-              ),
+              error &&
+                cn(
+                  "border-[hsl(var(--error)/0.6)]",
+                  "focus:border-[hsl(var(--error))]",
+                  "focus:ring-[hsl(var(--error)/0.15)]",
+                  "focus:shadow-[0_0_20px_-5px_hsl(var(--error)/0.3)]"
+                ),
               // Variant
               variants[variant],
               // Icon padding
@@ -90,9 +93,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           <p
             className={cn(
               "mt-2 text-[12px] font-medium",
-              error
-                ? "text-[hsl(var(--error))]"
-                : "text-[hsl(var(--text-subtle))]"
+              error ? "text-[hsl(var(--error))]" : "text-[hsl(var(--text-subtle))]"
             )}
           >
             {error || hint}
@@ -141,11 +142,13 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
     return (
       <div className="w-full">
         {label && (
-          <label className={cn(
-            "block text-[13px] font-medium mb-2",
-            "text-[hsl(var(--text))]",
-            "font-[family-name:var(--font-display)]"
-          )}>
+          <label
+            className={cn(
+              "mb-2 block text-[13px] font-medium",
+              "text-[hsl(var(--text))]",
+              "font-[family-name:var(--font-display)]"
+            )}
+          >
             {label}
           </label>
         )}
@@ -163,15 +166,16 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             // Transitions
             "transition-all duration-200 ease-out",
             // Disabled
-            "disabled:opacity-40 disabled:cursor-not-allowed",
+            "disabled:cursor-not-allowed disabled:opacity-40",
             // Resize
-            "resize-none min-h-[120px]",
+            "min-h-[120px] resize-none",
             // Error
-            error && cn(
-              "border-[hsl(var(--error)/0.6)]",
-              "focus:border-[hsl(var(--error))]",
-              "focus:ring-[hsl(var(--error)/0.15)]"
-            ),
+            error &&
+              cn(
+                "border-[hsl(var(--error)/0.6)]",
+                "focus:border-[hsl(var(--error))]",
+                "focus:ring-[hsl(var(--error)/0.15)]"
+              ),
             // Variant
             variants[variant],
             className
@@ -182,9 +186,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           <p
             className={cn(
               "mt-2 text-[12px] font-medium",
-              error
-                ? "text-[hsl(var(--error))]"
-                : "text-[hsl(var(--text-subtle))]"
+              error ? "text-[hsl(var(--error))]" : "text-[hsl(var(--text-subtle))]"
             )}
           >
             {error || hint}
@@ -197,7 +199,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
 
 Textarea.displayName = "Textarea";
 
-interface SearchInputProps extends Omit<InputProps, "icon" | "variant"> {}
+type SearchInputProps = Omit<InputProps, "icon" | "variant">;
 
 export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
   ({ className, ...props }, ref) => {
@@ -206,12 +208,7 @@ export const SearchInput = React.forwardRef<HTMLInputElement, SearchInputProps>(
         ref={ref}
         className={cn("pl-11", className)}
         icon={
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
+          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path
               strokeLinecap="round"
               strokeLinejoin="round"

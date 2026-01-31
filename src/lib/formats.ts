@@ -10,9 +10,7 @@ export function getAllFormats(): VideoFormatConfig[] {
 
 export function getFormatsForPlatform(platform: string): VideoFormatConfig[] {
   return getAllFormats().filter((f) =>
-    f.useCases.some((useCase) =>
-      useCase.toLowerCase().includes(platform.toLowerCase())
-    )
+    f.useCases.some((useCase) => useCase.toLowerCase().includes(platform.toLowerCase()))
   );
 }
 
@@ -34,11 +32,7 @@ export function parseTimestamp(timestamp: string): number {
   if (parts.length === 2) {
     const [mins, secsAndMs] = parts;
     const [secs, ms] = secsAndMs.split(".");
-    return (
-      parseInt(mins) * 60 +
-      parseInt(secs) +
-      (ms ? parseInt(ms) / 100 : 0)
-    );
+    return parseInt(mins) * 60 + parseInt(secs) + (ms ? parseInt(ms) / 100 : 0);
   }
   return 0;
 }
@@ -53,7 +47,7 @@ export function generateFilename(
   }
 ): string {
   const { podcast = "podcast", clipNumber = 1, format = "9:16", date = new Date() } = data;
-  
+
   return template
     .replace("{podcast}", sanitizeFilename(podcast))
     .replace("{clip#}", clipNumber.toString().padStart(2, "0"))

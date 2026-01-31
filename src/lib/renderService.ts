@@ -67,16 +67,8 @@ export const QUALITY_SETTINGS = {
 // Generate render props for Remotion
 export function generateRenderProps(request: RenderRequest) {
   const fps = 30;
-  const durationInFrames = calculateDurationInFrames(
-    request.startTime,
-    request.endTime,
-    fps
-  );
-  const wordTimings = wordsToFrameTiming(
-    request.words,
-    request.startTime,
-    fps
-  );
+  const durationInFrames = calculateDurationInFrames(request.startTime, request.endTime, fps);
+  const wordTimings = wordsToFrameTiming(request.words, request.startTime, fps);
 
   return {
     compositionId: getCompositionId(request.format),

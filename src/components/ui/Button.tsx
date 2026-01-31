@@ -92,28 +92,19 @@ export const Button: React.FC<ButtonProps> = ({
   };
 
   const glowStyles = glow
-    ? cn(
-        "shadow-[0_0_20px_hsl(185_100%_50%/0.3)]",
-        "hover:shadow-[0_0_25px_hsl(185_100%_50%/0.4)]"
-      )
+    ? cn("shadow-[0_0_20px_hsl(185_100%_50%/0.3)]", "hover:shadow-[0_0_25px_hsl(185_100%_50%/0.4)]")
     : "";
 
   return (
     <button
-      className={cn(
-        baseStyles,
-        variants[variant],
-        sizes[size],
-        glowStyles,
-        className
-      )}
+      className={cn(baseStyles, variants[variant], sizes[size], glowStyles, className)}
       disabled={disabled || isLoading}
       {...props}
     >
       {isLoading ? (
         <>
           <svg
-            className="animate-spin h-4 w-4"
+            className="h-4 w-4 animate-spin"
             xmlns="http://www.w3.org/2000/svg"
             fill="none"
             viewBox="0 0 24 24"
