@@ -33,9 +33,11 @@ export const Settings: React.FC = () => {
   const [accessCodeInput, setAccessCodeInput] = useState(settings.accessCode || "");
   const [googleClientId, setGoogleClientId] = useState(settings.googleClientId || "");
   const [googleApiKey, setGoogleApiKey] = useState(settings.googleApiKey || "");
+  const [pexelsApiKey, setPexelsApiKey] = useState(settings.pexelsApiKey || "");
   const [isSaved, setIsSaved] = useState(false);
   const [isBackendSaved, setIsBackendSaved] = useState(false);
   const [isGoogleSaved, setIsGoogleSaved] = useState(false);
+  const [isPexelsSaved, setIsPexelsSaved] = useState(false);
 
   const hasBackendConfig = !!(settings.backendUrl && settings.accessCode);
 
@@ -55,6 +57,12 @@ export const Settings: React.FC = () => {
     updateSettings({ googleClientId, googleApiKey });
     setIsGoogleSaved(true);
     setTimeout(() => setIsGoogleSaved(false), 2000);
+  };
+
+  const handleSavePexelsApiKey = () => {
+    updateSettings({ pexelsApiKey });
+    setIsPexelsSaved(true);
+    setTimeout(() => setIsPexelsSaved(false), 2000);
   };
 
   const toggleDefaultFormat = (format: VideoFormat) => {
@@ -344,6 +352,72 @@ export const Settings: React.FC = () => {
                     )}
                   </Button>
                 </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Pexels API (B-Roll) */}
+          <Card variant="default">
+            <CardContent className="p-5">
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(165_50%_15%/0.5)]"
+                  )}
+                >
+                  <VideoIcon className="h-5 w-5 text-[hsl(165_60%_50%)]" />
+                </div>
+                <div>
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
+                    Pexels API (B-Roll)
+                  </p>
+                  <p className="text-xs text-[hsl(var(--text-muted))]">
+                    Search and add stock videos to your clips
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
+                  Pexels API Key
+                </label>
+                <div className="flex gap-3">
+                  <div className="relative flex-1">
+                    <Input
+                      type="password"
+                      value={pexelsApiKey}
+                      onChange={(e) => setPexelsApiKey(e.target.value)}
+                      placeholder="Enter your Pexels API key"
+                    />
+                  </div>
+                  <Button
+                    onClick={handleSavePexelsApiKey}
+                    disabled={!pexelsApiKey}
+                    variant={isPexelsSaved ? "secondary" : "primary"}
+                  >
+                    {isPexelsSaved ? (
+                      <>
+                        <CheckIcon className="h-4 w-4" />
+                        Saved
+                      </>
+                    ) : (
+                      "Save Key"
+                    )}
+                  </Button>
+                </div>
+                <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
+                  <InfoCircledIcon className="h-3.5 w-3.5" />
+                  Get a free API key from{" "}
+                  <a
+                    href="https://www.pexels.com/api/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[hsl(var(--cyan))] hover:underline"
+                  >
+                    pexels.com/api
+                  </a>
+                </p>
               </div>
             </CardContent>
           </Card>

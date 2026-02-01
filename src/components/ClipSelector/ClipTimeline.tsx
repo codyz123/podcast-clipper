@@ -1,9 +1,158 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { cn } from "../../lib/utils";
 import { formatTimestamp } from "../../lib/formats";
+import { Word } from "../../lib/types";
 
 const BUFFER_SECONDS = 10; // Show 10 seconds before and after clip
 const ANIMATION_DURATION = 300; // ms
+
+// Stop words that are less important and can be omitted
+const STOP_WORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "but",
+  "in",
+  "on",
+  "at",
+  "to",
+  "for",
+  "of",
+  "with",
+  "by",
+  "from",
+  "as",
+  "is",
+  "was",
+  "are",
+  "were",
+  "been",
+  "be",
+  "have",
+  "has",
+  "had",
+  "do",
+  "does",
+  "did",
+  "will",
+  "would",
+  "could",
+  "should",
+  "may",
+  "might",
+  "must",
+  "shall",
+  "can",
+  "need",
+  "dare",
+  "ought",
+  "used",
+  "it",
+  "its",
+  "this",
+  "that",
+  "these",
+  "those",
+  "i",
+  "you",
+  "he",
+  "she",
+  "we",
+  "they",
+  "me",
+  "him",
+  "her",
+  "us",
+  "them",
+  "my",
+  "your",
+  "his",
+  "our",
+  "their",
+  "mine",
+  "yours",
+  "hers",
+  "ours",
+  "theirs",
+  "what",
+  "which",
+  "who",
+  "whom",
+  "whose",
+  "where",
+  "when",
+  "why",
+  "how",
+  "all",
+  "each",
+  "every",
+  "both",
+  "few",
+  "more",
+  "most",
+  "other",
+  "some",
+  "such",
+  "no",
+  "nor",
+  "not",
+  "only",
+  "own",
+  "same",
+  "so",
+  "than",
+  "too",
+  "very",
+  "just",
+  "also",
+  "now",
+  "here",
+  "there",
+  "then",
+  "once",
+  "if",
+  "because",
+  "unless",
+  "until",
+  "while",
+  "although",
+  "though",
+  "after",
+  "before",
+  "since",
+  "during",
+  "about",
+  "into",
+  "through",
+  "above",
+  "below",
+  "up",
+  "down",
+  "out",
+  "off",
+  "over",
+  "under",
+  "again",
+  "further",
+  "um",
+  "uh",
+  "like",
+  "yeah",
+  "okay",
+  "ok",
+  "well",
+  "right",
+  "actually",
+  "basically",
+  "literally",
+  "really",
+  "just",
+  "kind",
+  "sort",
+  "thing",
+]);
 
 interface ClipTimelineProps {
   startTime: number;
@@ -11,6 +160,7 @@ interface ClipTimelineProps {
   audioDuration: number;
   currentTime?: number;
   isPlaying?: boolean;
+  words?: Word[];
   onBoundaryChange: (newStart: number, newEnd: number) => void;
   onSeek?: (time: number) => void;
   disabled?: boolean;
@@ -22,6 +172,7 @@ export const ClipTimeline: React.FC<ClipTimelineProps> = ({
   audioDuration,
   currentTime = 0,
   isPlaying: _isPlaying = false,
+  words = [],
   onBoundaryChange,
   onSeek,
   disabled = false,
@@ -255,6 +406,58 @@ export const ClipTimeline: React.FC<ClipTimelineProps> = ({
           }}
         />
 
+        {/* Transcript words overlay */}
+        {words.length > 0 && (
+          <div className="pointer-events-none absolute inset-0 flex items-center overflow-hidden px-5">
+            <div className="relative h-full w-full">
+              {(() => {
+                // Filter and space out words to avoid overlap
+                const MIN_PERCENT_GAP = 5; // Minimum gap between words as percentage
+                let lastShownPercent = -Infinity;
+
+                return words.map((word, i) => {
+                  const wordMidpoint = (word.start + word.end) / 2;
+                  const wordPercent = ((wordMidpoint - visibleStart) / visibleDuration) * 100;
+
+                  // Only render words that are within the visible window
+                  if (wordPercent < -5 || wordPercent > 105) return null;
+
+                  // Highlight word at current playhead position
+                  const isActive = currentTime >= word.start && currentTime < word.end;
+                  const isStopWord = STOP_WORDS.has(word.text.toLowerCase().replace(/[^a-z]/g, ""));
+
+                  // Always show active word, otherwise check spacing and importance
+                  if (!isActive) {
+                    if (isStopWord && wordPercent - lastShownPercent < MIN_PERCENT_GAP * 1.5) {
+                      return null;
+                    }
+                    if (wordPercent - lastShownPercent < MIN_PERCENT_GAP) {
+                      return null;
+                    }
+                  }
+
+                  lastShownPercent = wordPercent;
+
+                  return (
+                    <span
+                      key={i}
+                      className={cn(
+                        "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-[9px] font-medium whitespace-nowrap",
+                        isActive
+                          ? "z-10 rounded bg-[hsl(var(--text))] px-1 py-0.5 text-[hsl(var(--bg-base))]"
+                          : "text-[hsl(var(--text-tertiary))] opacity-70"
+                      )}
+                      style={{ left: `${wordPercent}%` }}
+                    >
+                      {word.text}
+                    </span>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+        )}
+
         {/* Playhead */}
         {playheadPercent !== null && (
           <div
@@ -266,35 +469,45 @@ export const ClipTimeline: React.FC<ClipTimelineProps> = ({
         {/* Start handle */}
         <div
           className={cn(
-            "absolute top-1/2 z-20 h-8 w-4 -translate-y-1/2 cursor-ew-resize rounded",
-            "bg-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.8)]",
+            "group/handle absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize rounded",
             "flex items-center justify-center",
-            "transition-transform hover:scale-105",
-            "shadow-md",
-            dragging === "start" && "scale-105 bg-[hsl(var(--cyan)/0.8)]",
+            "transition-all duration-150",
+            dragging === "start" ? "h-8 w-4" : "h-8 w-1 hover:w-4",
             disabled && "cursor-not-allowed"
           )}
-          style={{ left: `calc(${clipStartPercent}% - 8px)` }}
+          style={{ left: `calc(${clipStartPercent}% - ${dragging === "start" ? 8 : 2}px)` }}
           onMouseDown={handleMouseDown("start")}
         >
-          <div className="h-4 w-0.5 rounded-full bg-[hsl(var(--bg-base))] opacity-60" />
+          <div
+            className={cn(
+              "h-full rounded transition-all duration-150",
+              dragging === "start"
+                ? "w-4 bg-[hsl(var(--cyan))] shadow-md"
+                : "w-1 bg-[hsl(var(--cyan)/0.8)] group-hover/handle:w-4 group-hover/handle:bg-[hsl(var(--cyan))] group-hover/handle:shadow-md"
+            )}
+          />
         </div>
 
         {/* End handle */}
         <div
           className={cn(
-            "absolute top-1/2 z-20 h-8 w-4 -translate-y-1/2 cursor-ew-resize rounded",
-            "bg-[hsl(var(--cyan))] hover:bg-[hsl(var(--cyan)/0.8)]",
+            "group/handle absolute top-1/2 z-20 -translate-y-1/2 cursor-ew-resize rounded",
             "flex items-center justify-center",
-            "transition-transform hover:scale-105",
-            "shadow-md",
-            dragging === "end" && "scale-105 bg-[hsl(var(--cyan)/0.8)]",
+            "transition-all duration-150",
+            dragging === "end" ? "h-8 w-4" : "h-8 w-1 hover:w-4",
             disabled && "cursor-not-allowed"
           )}
-          style={{ left: `calc(${clipEndPercent}% - 8px)` }}
+          style={{ left: `calc(${clipEndPercent}% - ${dragging === "end" ? 8 : 2}px)` }}
           onMouseDown={handleMouseDown("end")}
         >
-          <div className="h-4 w-0.5 rounded-full bg-[hsl(var(--bg-base))] opacity-60" />
+          <div
+            className={cn(
+              "h-full rounded transition-all duration-150",
+              dragging === "end"
+                ? "w-4 bg-[hsl(var(--cyan))] shadow-md"
+                : "w-1 bg-[hsl(var(--cyan)/0.8)] group-hover/handle:w-4 group-hover/handle:bg-[hsl(var(--cyan))] group-hover/handle:shadow-md"
+            )}
+          />
         </div>
 
         {/* Time markers at edges of visible window */}

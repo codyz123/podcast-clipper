@@ -39,22 +39,22 @@ export const Button: React.FC<ButtonProps> = ({
 
   const variants = {
     primary: cn(
-      // Clean cyan gradient
-      "bg-gradient-to-b from-[hsl(185_100%_50%)] to-[hsl(185_90%_42%)]",
-      "text-[hsl(260_30%_4%)]",
-      "border border-[hsl(185_100%_60%/0.2)]",
+      // Primary accent color (uses brand color when set)
+      "bg-[hsl(var(--cyan))]",
+      "text-[hsl(var(--bg-base))]",
+      "border border-[hsl(var(--cyan)/0.3)]",
       "shadow-sm",
-      "hover:from-[hsl(185_100%_55%)] hover:to-[hsl(185_90%_47%)]",
+      "hover:bg-[hsl(var(--cyan)/0.85)]",
       "hover:shadow-md",
       "focus-visible:ring-[hsl(var(--cyan))]"
     ),
     secondary: cn(
-      // Clean magenta gradient
-      "bg-gradient-to-b from-[hsl(325_80%_50%)] to-[hsl(325_80%_42%)]",
+      // Secondary accent color (uses brand color when set)
+      "bg-[hsl(var(--magenta))]",
       "text-white",
-      "border border-[hsl(325_100%_60%/0.2)]",
+      "border border-[hsl(var(--magenta)/0.3)]",
       "shadow-sm",
-      "hover:from-[hsl(325_80%_55%)] hover:to-[hsl(325_80%_47%)]",
+      "hover:bg-[hsl(var(--magenta)/0.85)]",
       "hover:shadow-md",
       "focus-visible:ring-[hsl(var(--magenta))]"
     ),
@@ -92,7 +92,7 @@ export const Button: React.FC<ButtonProps> = ({
   };
 
   const glowStyles = glow
-    ? cn("shadow-[0_0_20px_hsl(185_100%_50%/0.3)]", "hover:shadow-[0_0_25px_hsl(185_100%_50%/0.4)]")
+    ? cn("shadow-[0_0_20px_hsl(var(--cyan)/0.3)]", "hover:shadow-[0_0_25px_hsl(var(--cyan)/0.4)]")
     : "";
 
   return (

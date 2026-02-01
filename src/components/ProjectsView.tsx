@@ -10,6 +10,7 @@ import {
 import { Button, Card, CardContent, Input } from "./ui";
 import { CircularProgress } from "./ui/Progress";
 import { useProjectStore } from "../stores/projectStore";
+import { useWorkspaceStore } from "../stores/workspaceStore";
 import { formatDuration } from "../lib/formats";
 import { cn } from "../lib/utils";
 
@@ -19,8 +20,11 @@ interface ProjectsViewProps {
 
 export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => {
   const { projects, currentProject, loadProject, deleteProject, createProject } = useProjectStore();
+  const { podcastMetadata } = useWorkspaceStore();
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+
+  const podcastName = podcastMetadata.name || "My Podcast";
 
   const handleCreateProject = () => {
     if (newProjectName.trim()) {
@@ -78,7 +82,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
         >
           <div className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--cyan))]" />
           <span className="text-xs font-medium text-[hsl(var(--text-muted))]">
-            {projects.length} project{projects.length !== 1 ? "s" : ""} in studio
+            {projects.length} episode{projects.length !== 1 ? "s" : ""} in studio
           </span>
         </div>
 
@@ -89,10 +93,10 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
             "text-[hsl(var(--text))]"
           )}
         >
-          Your Projects
+          Episodes
         </h1>
         <p className="mx-auto max-w-md text-sm text-[hsl(var(--text-muted))] sm:text-base">
-          Transform podcast episodes into viral clips with AI-powered editing
+          {podcastName}
         </p>
       </div>
 
@@ -148,7 +152,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
           </p>
           <Button onClick={() => setShowNewProject(true)} glow>
             <PlusIcon className="h-4 w-4" />
-            <span>Create First Project</span>
+            <span>Create First Episode</span>
           </Button>
         </div>
       ) : (
@@ -158,7 +162,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
             <div className="mb-6 flex justify-center sm:mb-8">
               <Button onClick={() => setShowNewProject(true)} glow>
                 <PlusIcon className="h-4 w-4" />
-                <span>New Project</span>
+                <span>New Episode</span>
               </Button>
             </div>
           )}
@@ -187,7 +191,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
                         "backdrop-blur-lg",
                         "border",
                         isActive
-                          ? "border-[hsl(185_100%_50%/0.3)] shadow-lg"
+                          ? "border-[hsl(var(--cyan)/0.3)] shadow-lg"
                           : "border-[hsl(var(--glass-border))]",
                         "hover:border-[hsl(0_0%_100%/0.12)]",
                         "hover:bg-[hsl(var(--raised)/0.9)]",
@@ -202,7 +206,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
                           progress === 100
                             ? "bg-[hsl(158_70%_48%/0.6)]"
                             : progress > 0
-                              ? "bg-[hsl(185_100%_50%/0.5)]"
+                              ? "bg-[hsl(var(--cyan)/0.5)]"
                               : "bg-[hsl(var(--glass-border))]"
                         )}
                       />
@@ -269,7 +273,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
                               status.color === "success" &&
                                 "bg-[hsl(158_50%_15%/0.5)] text-[hsl(var(--success))]",
                               status.color === "cyan" &&
-                                "bg-[hsl(185_50%_15%/0.5)] text-[hsl(var(--cyan))]",
+                                "bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]",
                               status.color === "magenta" &&
                                 "bg-[hsl(325_50%_15%/0.5)] text-[hsl(var(--magenta))]",
                               status.color === "ghost" &&
@@ -284,11 +288,11 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
                           <div
                             className={cn(
                               "flex h-6 w-6 items-center justify-center rounded-full",
-                              "bg-[hsl(185_100%_50%)]",
+                              "bg-[hsl(var(--cyan))]",
                               "opacity-0 transition-opacity group-hover:opacity-100"
                             )}
                           >
-                            <PlayIcon className="ml-0.5 h-2.5 w-2.5 text-[hsl(260_30%_6%)]" />
+                            <PlayIcon className="ml-0.5 h-2.5 w-2.5 text-[hsl(var(--bg-base))]" />
                           </div>
                         </div>
                       </div>

@@ -210,6 +210,7 @@ export const ClipCard: React.FC<ClipCardProps> = ({
           audioDuration={audioDuration}
           currentTime={currentTime}
           isPlaying={isPlaying}
+          words={clip.words}
           onBoundaryChange={handleBoundaryChange}
           onSeek={onSeek}
         />

@@ -9,6 +9,16 @@ export interface Project {
   audioDuration: number;
   createdAt: string;
   updatedAt: string;
+
+  // Episode metadata
+  description?: string;
+  episodeNumber?: number;
+  seasonNumber?: number;
+  publishDate?: string;
+  showNotes?: string;
+  explicit?: boolean;
+  guests?: Guest[];
+
   // Legacy: single transcript (for backward compatibility)
   transcript?: Transcript;
   // New: multiple transcripts per file
@@ -16,6 +26,14 @@ export interface Project {
   activeTranscriptId?: string; // Which transcript is currently selected
   clips: Clip[];
   exportHistory: ExportRecord[];
+}
+
+export interface Guest {
+  id: string;
+  name: string;
+  bio?: string;
+  website?: string;
+  twitter?: string;
 }
 
 export interface Transcript {
@@ -47,6 +65,13 @@ export interface Clip {
   clippabilityScore?: ClippabilityScore;
   isManual: boolean; // true if user-selected, false if AI-suggested
   createdAt: string;
+
+  // Multi-track editor data (added in video editor phase)
+  tracks?: Track[];
+  captionStyle?: CaptionStyle;
+  format?: VideoFormat;
+  generatedAssets?: GeneratedAsset[];
+  hookAnalysis?: HookAnalysis;
 }
 
 export interface ClippabilityScore {
@@ -185,6 +210,9 @@ export interface AppSettings {
   // Legacy: direct API key (used when no backend configured)
   openaiApiKey?: string;
 
+  // Pexels API for B-roll search
+  pexelsApiKey?: string;
+
   googleClientId?: string;
   googleApiKey?: string;
   youtubeOAuthCredentials?: OAuthCredentials;
@@ -208,4 +236,210 @@ export interface TwitterApiKeys {
   apiSecret: string;
   accessToken: string;
   accessTokenSecret: string;
+}
+
+// ============ Multi-Track Editor Types ============
+
+export type TrackType =
+  | "podcast-audio" // Primary audio (locked, one per clip)
+  | "music" // Background music with auto-ducking
+  | "sfx" // Sound effects
+  | "video-overlay" // B-roll, animations, AI-generated visuals
+  | "text-graphics" // Lower thirds, titles, callouts
+  | "captions"; // Auto-generated animated captions
+
+export interface Track {
+  id: string;
+  type: TrackType;
+  name: string;
+  order: number; // Compositing order (higher = on top)
+  locked: boolean;
+  muted: boolean;
+  volume: number; // 0-1 for audio tracks
+  opacity: number; // 0-1 for video tracks
+  clips: TrackClip[];
+  // For caption tracks
+  captionStyle?: CaptionStyle;
+  // Fade settings (applied to entire track)
+  fadeIn?: number; // Duration in seconds
+  fadeOut?: number; // Duration in seconds
+}
+
+export interface TrackClip {
+  id: string;
+  trackId: string;
+  startTime: number; // Position on timeline (seconds)
+  duration: number;
+  sourceStart?: number; // For trimmed clips
+  sourceEnd?: number;
+
+  // Type-specific data
+  type: "audio" | "video" | "image" | "animation" | "text" | "caption";
+  assetId?: string; // Reference to asset in IndexedDB
+  assetUrl?: string; // URL for external assets (b-roll, etc.)
+  animationConfig?: AnimationConfig;
+  textConfig?: TextOverlayConfig;
+
+  // Fade settings (per-clip)
+  fadeIn?: number; // Duration in seconds
+  fadeOut?: number; // Duration in seconds
+}
+
+// Volume automation keyframe for audio ducking
+export interface VolumeKeyframe {
+  time: number; // Seconds from clip start
+  volume: number; // 0-1
+}
+
+// Caption styling with viral presets
+export type CaptionPreset = "hormozi" | "mrBeast" | "tiktok-default" | "clean-minimal";
+export type CaptionAnimation = "word-by-word" | "karaoke" | "bounce" | "typewriter";
+
+export interface CaptionStyle {
+  animation: CaptionAnimation;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  primaryColor: string;
+  highlightColor: string; // For active word
+  backgroundColor?: string; // Caption box background
+  position: "bottom" | "center" | "top";
+  wordsPerLine: number;
+  preset?: CaptionPreset;
+}
+
+// Built-in caption presets
+export const CAPTION_PRESETS: Record<CaptionPreset, Omit<CaptionStyle, "preset">> = {
+  hormozi: {
+    animation: "word-by-word",
+    fontFamily: "Montserrat",
+    fontSize: 48,
+    fontWeight: 800,
+    primaryColor: "#FFFFFF",
+    highlightColor: "#FFD700",
+    backgroundColor: "rgba(0,0,0,0.7)",
+    position: "center",
+    wordsPerLine: 4,
+  },
+  mrBeast: {
+    animation: "bounce",
+    fontFamily: "Impact",
+    fontSize: 56,
+    fontWeight: 700,
+    primaryColor: "#FFFFFF",
+    highlightColor: "#FF0000",
+    backgroundColor: undefined,
+    position: "center",
+    wordsPerLine: 3,
+  },
+  "tiktok-default": {
+    animation: "karaoke",
+    fontFamily: "Arial",
+    fontSize: 40,
+    fontWeight: 600,
+    primaryColor: "#FFFFFF",
+    highlightColor: "#00F5FF",
+    backgroundColor: "rgba(0,0,0,0.5)",
+    position: "bottom",
+    wordsPerLine: 5,
+  },
+  "clean-minimal": {
+    animation: "typewriter",
+    fontFamily: "Inter",
+    fontSize: 36,
+    fontWeight: 500,
+    primaryColor: "#FFFFFF",
+    highlightColor: "#FFFFFF",
+    backgroundColor: undefined,
+    position: "bottom",
+    wordsPerLine: 6,
+  },
+};
+
+// ============ AI Animation Types ============
+
+export type AnimationType =
+  | "motion-graphics" // Animated text, shapes, icons
+  | "ai-image" // DALL-E generated illustrations
+  | "b-roll" // Stock video from Pexels
+  | "ai-video"; // Runway/Pika (future)
+
+export type AnimationStyle = "minimal" | "bold" | "playful" | "professional";
+export type AnimationPosition = "fullscreen" | "lower-third" | "corner" | "custom";
+
+export interface AnimationConfig {
+  type: AnimationType;
+  prompt?: string; // For AI generation
+  style?: AnimationStyle;
+  keywords?: string[]; // Extracted from transcript
+  generatedAssetUrl?: string; // Cached result
+  generatedAssetId?: string; // Key in IndexedDB
+
+  // Motion graphics specific
+  templateId?: string;
+  textContent?: string;
+  iconName?: string;
+
+  // Positioning
+  position: AnimationPosition;
+  customPosition?: { x: number; y: number; width: number; height: number };
+}
+
+// Text overlay configuration
+export interface TextOverlayConfig {
+  text: string;
+  fontFamily: string;
+  fontSize: number;
+  fontWeight: number;
+  color: string;
+  backgroundColor?: string;
+  position: { x: number; y: number };
+  animation: "none" | "fade-in" | "slide-up" | "pop";
+}
+
+// Motion graphics template definition
+export type MotionTemplateCategory = "text" | "icon" | "stats" | "quote" | "list" | "progress";
+
+export interface MotionTemplate {
+  id: string;
+  name: string;
+  category: MotionTemplateCategory;
+  lottieData?: object; // Pre-built Lottie animation
+  customizable: {
+    text?: boolean;
+    colors?: boolean;
+    duration?: boolean;
+    icon?: boolean;
+  };
+}
+
+// AI-suggested visual elements
+export interface VisualSuggestion {
+  id: string;
+  timestamp: number; // When to show in clip (seconds)
+  duration: number;
+  type: AnimationType;
+  prompt: string;
+  keywords: string[];
+  confidence: number; // 0-1, how confident AI is this will help
+  applied: boolean; // Has user added this to timeline?
+}
+
+// Generated asset reference (stored in IndexedDB)
+export interface GeneratedAsset {
+  id: string;
+  type: "ai-image" | "thumbnail" | "b-roll";
+  prompt?: string;
+  blobKey: string; // Key in IndexedDB ASSETS_STORE
+  thumbnailUrl?: string; // Data URL for preview
+  createdAt: string;
+}
+
+// Hook analysis result
+export interface HookAnalysis {
+  score: number; // 1-10
+  strengths: string[];
+  weaknesses: string[];
+  suggestions: string[];
+  predictedRetention: number; // Estimated % who watch past 3s
 }

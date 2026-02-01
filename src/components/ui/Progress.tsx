@@ -30,25 +30,19 @@ export const Progress: React.FC<ProgressProps> = ({
   };
 
   const variants = {
-    cyan: cn(
-      "bg-gradient-to-r from-[hsl(185_100%_45%)] via-[hsl(185_100%_50%)] to-[hsl(185_100%_55%)]"
-    ),
-    magenta: cn(
-      "bg-gradient-to-r from-[hsl(325_90%_50%)] via-[hsl(325_100%_58%)] to-[hsl(325_100%_65%)]"
-    ),
+    cyan: cn("bg-[hsl(var(--cyan))]"),
+    magenta: cn("bg-[hsl(var(--magenta))]"),
     gradient: cn(
-      "bg-gradient-to-r from-[hsl(185_100%_50%)] via-[hsl(270_80%_60%)] to-[hsl(325_100%_58%)]"
+      "bg-gradient-to-r from-[hsl(var(--cyan))] via-[hsl(var(--violet))] to-[hsl(var(--magenta))]"
     ),
-    success: cn(
-      "bg-gradient-to-r from-[hsl(158_60%_40%)] via-[hsl(158_70%_48%)] to-[hsl(158_80%_55%)]"
-    ),
+    success: cn("bg-[hsl(var(--success))]"),
   };
 
   const glowColors = {
-    cyan: "shadow-[0_0_12px_hsl(185_100%_50%/0.5),0_0_24px_hsl(185_100%_50%/0.25)]",
-    magenta: "shadow-[0_0_12px_hsl(325_100%_58%/0.5),0_0_24px_hsl(325_100%_58%/0.25)]",
-    gradient: "shadow-[0_0_12px_hsl(270_80%_60%/0.5),0_0_24px_hsl(270_80%_60%/0.25)]",
-    success: "shadow-[0_0_12px_hsl(158_70%_48%/0.5),0_0_24px_hsl(158_70%_48%/0.25)]",
+    cyan: "shadow-[0_0_12px_hsl(var(--cyan)/0.5),0_0_24px_hsl(var(--cyan)/0.25)]",
+    magenta: "shadow-[0_0_12px_hsl(var(--magenta)/0.5),0_0_24px_hsl(var(--magenta)/0.25)]",
+    gradient: "shadow-[0_0_12px_hsl(var(--violet)/0.5),0_0_24px_hsl(var(--violet)/0.25)]",
+    success: "shadow-[0_0_12px_hsl(var(--success)/0.5),0_0_24px_hsl(var(--success)/0.25)]",
   };
 
   return (
@@ -132,9 +126,9 @@ export const CircularProgress: React.FC<CircularProgressProps> = ({
   };
 
   const glowFilters = {
-    cyan: "drop-shadow(0 0 6px hsl(185 100% 50% / 0.6))",
-    magenta: "drop-shadow(0 0 6px hsl(325 100% 58% / 0.6))",
-    gradient: "drop-shadow(0 0 6px hsl(270 80% 60% / 0.6))",
+    cyan: "drop-shadow(0 0 6px hsl(var(--cyan) / 0.6))",
+    magenta: "drop-shadow(0 0 6px hsl(var(--magenta) / 0.6))",
+    gradient: "drop-shadow(0 0 6px hsl(var(--violet) / 0.6))",
   };
 
   return (
@@ -243,8 +237,8 @@ interface LoadingDotsProps {
 
 export const LoadingDots: React.FC<LoadingDotsProps> = ({ className, variant = "cyan" }) => {
   const colors = {
-    cyan: "bg-[hsl(185_100%_50%)]",
-    magenta: "bg-[hsl(325_100%_58%)]",
+    cyan: "bg-[hsl(var(--cyan))]",
+    magenta: "bg-[hsl(var(--magenta))]",
     white: "bg-[hsl(0_0%_90%)]",
   };
 

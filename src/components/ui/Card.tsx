@@ -50,7 +50,7 @@ export const Card: React.FC<CardProps> = ({
     glow: cn(
       "bg-[hsl(var(--surface)/0.7)]",
       "backdrop-blur-lg",
-      "border border-[hsl(185_100%_50%/0.2)]",
+      "border border-[hsl(var(--cyan)/0.2)]",
       "shadow-lg shadow-black/20"
     ),
     ghost: cn("bg-transparent", "border border-[hsl(var(--glass-border))]"),
@@ -65,8 +65,8 @@ export const Card: React.FC<CardProps> = ({
 
   const glowStyles = {
     none: "",
-    cyan: "ring-1 ring-[hsl(185_100%_50%/0.15)]",
-    magenta: "ring-1 ring-[hsl(325_100%_58%/0.15)]",
+    cyan: "ring-1 ring-[hsl(var(--cyan)/0.15)]",
+    magenta: "ring-1 ring-[hsl(var(--magenta)/0.15)]",
   };
 
   return (

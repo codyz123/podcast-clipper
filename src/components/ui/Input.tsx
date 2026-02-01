@@ -20,9 +20,9 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         "border border-[hsl(var(--glass-border))]",
         // Focus
         "focus:bg-[hsl(var(--surface)/0.7)]",
-        "focus:border-[hsl(185_100%_50%/0.5)]",
-        "focus:ring-2 focus:ring-[hsl(185_100%_50%/0.15)]",
-        "focus:shadow-[0_0_20px_-5px_hsl(185_100%_50%/0.3)]"
+        "focus:border-[hsl(var(--cyan)/0.5)]",
+        "focus:ring-2 focus:ring-[hsl(var(--cyan)/0.15)]",
+        "focus:shadow-[0_0_20px_-5px_hsl(var(--cyan)/0.3)]"
       ),
       ghost: cn(
         "bg-transparent",
@@ -33,8 +33,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
       filled: cn(
         "bg-[hsl(var(--raised))]",
         "border border-[hsl(0_0%_100%/0.08)]",
-        "focus:border-[hsl(185_100%_50%/0.5)]",
-        "focus:ring-2 focus:ring-[hsl(185_100%_50%/0.15)]"
+        "focus:border-[hsl(var(--cyan)/0.5)]",
+        "focus:ring-2 focus:ring-[hsl(var(--cyan)/0.15)]"
       ),
     };
 
@@ -121,9 +121,9 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         "backdrop-blur-sm",
         "border border-[hsl(var(--glass-border))]",
         "focus:bg-[hsl(var(--surface)/0.7)]",
-        "focus:border-[hsl(185_100%_50%/0.5)]",
-        "focus:ring-2 focus:ring-[hsl(185_100%_50%/0.15)]",
-        "focus:shadow-[0_0_20px_-5px_hsl(185_100%_50%/0.3)]"
+        "focus:border-[hsl(var(--cyan)/0.5)]",
+        "focus:ring-2 focus:ring-[hsl(var(--cyan)/0.15)]",
+        "focus:shadow-[0_0_20px_-5px_hsl(var(--cyan)/0.3)]"
       ),
       ghost: cn(
         "bg-transparent",
@@ -134,8 +134,8 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
       filled: cn(
         "bg-[hsl(var(--raised))]",
         "border border-[hsl(0_0%_100%/0.08)]",
-        "focus:border-[hsl(185_100%_50%/0.5)]",
-        "focus:ring-2 focus:ring-[hsl(185_100%_50%/0.15)]"
+        "focus:border-[hsl(var(--cyan)/0.5)]",
+        "focus:ring-2 focus:ring-[hsl(var(--cyan)/0.15)]"
       ),
     };
 

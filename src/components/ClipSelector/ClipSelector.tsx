@@ -1,12 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { MagicWandIcon, PlusIcon, ScissorsIcon, Cross2Icon } from "@radix-ui/react-icons";
+import {
+  MagicWandIcon,
+  PlusIcon,
+  ScissorsIcon,
+  Cross2Icon,
+  ChevronRightIcon,
+  Pencil2Icon,
+} from "@radix-ui/react-icons";
 import { Button, Card, CardContent, Input } from "../ui";
 import { Progress, Spinner } from "../ui/Progress";
 import { useProjectStore, getAudioBlob } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { ClippabilityScore, Word } from "../../lib/types";
 import { retryWithBackoff, cn } from "../../lib/utils";
-import { ClipCard } from "./ClipCard";
+import { ClipEditor } from "./ClipEditor";
+import { ClipStackItem } from "./ClipStackItem";
 
 interface ClipSelectorProps {
   onComplete: () => void;
@@ -32,10 +40,15 @@ export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [acceptedClips, setAcceptedClips] = useState<Set<string>>(new Set());
+  const [activeClipIndex, setActiveClipIndex] = useState(0);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [viewMode, setViewMode] = useState<"editor" | "finder">("editor");
   const audioRef = useRef<HTMLAudioElement>(null);
 
   const clips = currentProject?.clips || [];
   const transcript = currentProject?.transcript;
+  const activeClip = clips[activeClipIndex] || null;
 
   // Load audio from IndexedDB
   useEffect(() => {
@@ -66,35 +79,69 @@ export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
     return () => audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
   }, [audioUrl]);
 
-  // Handle playback and auto-stop at clip end
+  // Handle playback end events
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !audioUrl) return;
-
-    const playingClip = clips.find((c) => c.id === playingClipId);
-
-    const handleTimeUpdate = () => {
-      setCurrentTime(audio.currentTime);
-
-      // Stop at clip end
-      if (playingClip && audio.currentTime >= playingClip.endTime) {
-        audio.pause();
-        setPlayingClipId(null);
-      }
-    };
 
     const handleEnded = () => {
       setPlayingClipId(null);
     };
 
-    audio.addEventListener("timeupdate", handleTimeUpdate);
     audio.addEventListener("ended", handleEnded);
+    return () => audio.removeEventListener("ended", handleEnded);
+  }, [audioUrl]);
+
+  // Smooth playhead animation using requestAnimationFrame
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !playingClipId || isScrubbing) return;
+
+    const playingClip = clips.find((c) => c.id === playingClipId);
+    let animationId: number;
+
+    const updatePlayhead = () => {
+      if (!audio.paused) {
+        setCurrentTime(audio.currentTime);
+
+        // Stop at clip end
+        if (playingClip && audio.currentTime >= playingClip.endTime) {
+          audio.pause();
+          setPlayingClipId(null);
+          return;
+        }
+
+        animationId = requestAnimationFrame(updatePlayhead);
+      }
+    };
+
+    animationId = requestAnimationFrame(updatePlayhead);
 
     return () => {
-      audio.removeEventListener("timeupdate", handleTimeUpdate);
-      audio.removeEventListener("ended", handleEnded);
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
     };
-  }, [playingClipId, clips, audioUrl]);
+  }, [playingClipId, clips, isScrubbing]);
+
+  // Reset active clip index when clips change
+  useEffect(() => {
+    if (activeClipIndex >= clips.length && clips.length > 0) {
+      setActiveClipIndex(clips.length - 1);
+    }
+  }, [clips.length, activeClipIndex]);
+
+  // Initialize currentTime when active clip changes
+  useEffect(() => {
+    if (activeClip && audioRef.current) {
+      const audio = audioRef.current;
+      // Only reset if not currently in this clip's range
+      if (audio.currentTime < activeClip.startTime || audio.currentTime > activeClip.endTime) {
+        audio.currentTime = activeClip.startTime;
+        setCurrentTime(activeClip.startTime);
+      }
+    }
+  }, [activeClip?.id]);
 
   const playClip = useCallback(
     (clipId: string) => {
@@ -139,7 +186,6 @@ export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
       setCurrentTime(time);
 
       // If currently playing this clip, continue playing from new position
-      // If not playing, just update the position (play will start from here)
       if (playingClipId === clipId) {
         audio.play();
       }
@@ -147,8 +193,35 @@ export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
     [playingClipId]
   );
 
+  const handleScrubStart = useCallback(() => {
+    setIsScrubbing(true);
+    // Pause during scrubbing for better UX
+    if (audioRef.current && playingClipId) {
+      audioRef.current.pause();
+    }
+  }, [playingClipId]);
+
+  const handleScrubEnd = useCallback(() => {
+    setIsScrubbing(false);
+  }, []);
+
+  const handleMuteToggle = useCallback(() => {
+    setIsMuted((prev) => !prev);
+    if (audioRef.current) {
+      audioRef.current.muted = !isMuted;
+    }
+  }, [isMuted]);
+
   const acceptClip = useCallback((clipId: string) => {
-    setAcceptedClips((prev) => new Set([...prev, clipId]));
+    setAcceptedClips((prev) => {
+      const next = new Set(prev);
+      if (next.has(clipId)) {
+        next.delete(clipId);
+      } else {
+        next.add(clipId);
+      }
+      return next;
+    });
   }, []);
 
   const handleBoundaryChange = useCallback(
@@ -168,6 +241,17 @@ export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
       updateClip(clipId, { transcript: newTranscript });
     },
     [updateClip]
+  );
+
+  const handleRemoveClip = useCallback(
+    (clipId: string) => {
+      removeClip(clipId);
+      // Adjust active index if needed
+      if (activeClipIndex >= clips.length - 1 && activeClipIndex > 0) {
+        setActiveClipIndex(activeClipIndex - 1);
+      }
+    },
+    [removeClip, activeClipIndex, clips.length]
   );
 
   // Check if backend is configured
@@ -309,42 +393,61 @@ Return ONLY valid JSON in this exact format (no other text):
 
       setProgress(90);
 
-      for (const segment of analysis.segments || []) {
-        const startTime = segment.start_time;
-        const endTime = segment.end_time;
+      const segments = analysis.segments || [];
+      const startingClipNumber = clips.length + 1;
+      segments.forEach(
+        (
+          segment: {
+            start_time: number;
+            end_time: number;
+            text?: string;
+            explanation?: string;
+            scores: {
+              hook: number;
+              clarity: number;
+              emotion: number;
+              quotable: number;
+              completeness: number;
+            };
+          },
+          index: number
+        ) => {
+          const startTime = segment.start_time;
+          const endTime = segment.end_time;
 
-        const segmentWords = transcript.words.filter(
-          (w) => w.start >= startTime && w.end <= endTime
-        );
+          const segmentWords = transcript.words.filter(
+            (w) => w.start >= startTime && w.end <= endTime
+          );
 
-        const scores = segment.scores;
-        const clippabilityScore: ClippabilityScore = {
-          hook: scores.hook,
-          clarity: scores.clarity,
-          emotion: scores.emotion,
-          quotable: scores.quotable,
-          completeness: scores.completeness,
-          overall:
-            (scores.hook +
-              scores.clarity +
-              scores.emotion +
-              scores.quotable +
-              scores.completeness) /
-            5,
-          explanation: segment.explanation,
-        };
+          const scores = segment.scores;
+          const clippabilityScore: ClippabilityScore = {
+            hook: scores.hook,
+            clarity: scores.clarity,
+            emotion: scores.emotion,
+            quotable: scores.quotable,
+            completeness: scores.completeness,
+            overall:
+              (scores.hook +
+                scores.clarity +
+                scores.emotion +
+                scores.quotable +
+                scores.completeness) /
+              5,
+            explanation: segment.explanation || "",
+          };
 
-        addClip({
-          projectId: currentProject!.id,
-          name: `Clip ${clips.length + 1}`,
-          startTime,
-          endTime,
-          transcript: segment.text || segmentWords.map((w) => w.text).join(" "),
-          words: segmentWords,
-          clippabilityScore,
-          isManual: false,
-        });
-      }
+          addClip({
+            projectId: currentProject!.id,
+            name: `Clip ${startingClipNumber + index}`,
+            startTime,
+            endTime,
+            transcript: segment.text || segmentWords.map((w) => w.text).join(" "),
+            words: segmentWords,
+            clippabilityScore,
+            isManual: false,
+          });
+        }
+      );
 
       setProgress(100);
     } catch (err) {
@@ -371,9 +474,10 @@ Return ONLY valid JSON in this exact format (no other text):
 
     const segmentWords = transcript.words.filter((w) => w.start >= start && w.end <= end);
 
+    const clipNumber = clips.length + 1;
     addClip({
       projectId: currentProject!.id,
-      name: `Clip ${clips.length + 1}`,
+      name: `Clip ${clipNumber}`,
       startTime: start,
       endTime: end,
       transcript: segmentWords.map((w) => w.text).join(" "),
@@ -385,6 +489,9 @@ Return ONLY valid JSON in this exact format (no other text):
     setManualEnd("");
     setIsManualMode(false);
     setError(null);
+
+    // Select the new clip
+    setActiveClipIndex(clips.length);
   };
 
   const progressMessages: Record<number, string> = {
@@ -405,221 +512,173 @@ Return ONLY valid JSON in this exact format (no other text):
     return "Starting...";
   };
 
-  return (
-    <div className="min-h-full">
-      <div className="mx-auto max-w-4xl">
-        {/* Header */}
-        <div className="mb-8">
-          <div
-            className={cn(
-              "mb-4 inline-flex items-center gap-2 rounded-full px-3 py-1",
-              "bg-[hsl(var(--surface))]",
-              "border border-[hsl(var(--glass-border))]"
-            )}
-          >
-            <span className="text-xs font-semibold text-[hsl(var(--cyan))]">3</span>
-            <span className="text-xs font-medium text-[hsl(var(--text-subtle))]">Step 3 of 5</span>
-          </div>
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
-            Select Clips
-          </h1>
-          <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
-            {clips.length > 0
-              ? `${clips.length} clip${clips.length !== 1 ? "s" : ""} selected`
-              : "Use AI to find viral moments or manually select segments"}
-          </p>
-        </div>
-
-        {/* AI Analysis Card */}
-        <Card variant="default" className="animate-fadeIn mb-5">
-          <CardContent className="p-4 sm:p-5">
-            <div className="mb-4 flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--magenta)/0.15)]">
-                <MagicWandIcon className="h-4 w-4 text-[hsl(var(--magenta))]" />
-              </div>
-              <div>
-                <p className="text-sm font-medium text-[hsl(var(--text))]">AI Clip Finder</p>
-                <p className="text-xs text-[hsl(var(--text-subtle))]">
-                  GPT-4 analyzes your transcript for viral-worthy moments
-                </p>
-              </div>
+  // If no clips, show the finder UI
+  if (clips.length === 0) {
+    return (
+      <div className="min-h-full">
+        <div className="mx-auto max-w-4xl">
+          {/* Header */}
+          <div className="mb-8">
+            <div
+              className={cn(
+                "mb-4 inline-flex items-center gap-2 rounded-full px-3 py-1",
+                "bg-[hsl(var(--surface))]",
+                "border border-[hsl(var(--glass-border))]"
+              )}
+            >
+              <span className="text-xs font-semibold text-[hsl(var(--cyan))]">3</span>
+              <span className="text-xs font-medium text-[hsl(var(--text-subtle))]">
+                Step 3 of 5
+              </span>
             </div>
+            <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
+              Select Clips
+            </h1>
+            <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
+              Use AI to find viral moments or manually select segments
+            </p>
+          </div>
 
-            {isAnalyzing ? (
-              <div className="py-6">
-                <div className="mx-auto max-w-xs text-center">
-                  <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-[hsl(var(--magenta)/0.1)]">
-                    <Spinner className="text-[hsl(var(--magenta))]" />
-                  </div>
-                  <Progress value={progress} variant="cyan" className="mb-2" size="sm" />
-                  <p className="text-sm text-[hsl(var(--text-muted))]">{getProgressMessage()}</p>
+          {/* AI Analysis Card */}
+          <Card variant="default" className="animate-fadeIn mb-5">
+            <CardContent className="p-4 sm:p-5">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--magenta)/0.15)]">
+                  <MagicWandIcon className="h-4 w-4 text-[hsl(var(--magenta))]" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-[hsl(var(--text))]">AI Clip Finder</p>
+                  <p className="text-xs text-[hsl(var(--text-subtle))]">
+                    GPT-4 analyzes your transcript for viral-worthy moments
+                  </p>
                 </div>
               </div>
-            ) : (
-              <>
-                <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
-                      Keywords
-                    </label>
-                    <Input
-                      placeholder="AI, tips, funny..."
-                      value={keywords}
-                      onChange={(e) => setKeywords(e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
-                      Duration (sec)
-                    </label>
-                    <Input
-                      type="number"
-                      min={10}
-                      max={60}
-                      value={clipDuration}
-                      onChange={(e) => setClipDuration(parseInt(e.target.value) || 30)}
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
-                      Clip Count
-                    </label>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={clipCount}
-                      onChange={(e) => setClipCount(parseInt(e.target.value) || 5)}
-                    />
+
+              {isAnalyzing ? (
+                <div className="py-6">
+                  <div className="mx-auto max-w-xs text-center">
+                    <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-lg bg-[hsl(var(--magenta)/0.1)]">
+                      <Spinner className="text-[hsl(var(--magenta))]" />
+                    </div>
+                    <Progress value={progress} variant="cyan" className="mb-2" size="sm" />
+                    <p className="text-sm text-[hsl(var(--text-muted))]">{getProgressMessage()}</p>
                   </div>
                 </div>
+              ) : (
+                <>
+                  <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
+                        Keywords
+                      </label>
+                      <Input
+                        placeholder="AI, tips, funny..."
+                        value={keywords}
+                        onChange={(e) => setKeywords(e.target.value)}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
+                        Duration (sec)
+                      </label>
+                      <Input
+                        type="number"
+                        min={10}
+                        max={60}
+                        value={clipDuration}
+                        onChange={(e) => setClipDuration(parseInt(e.target.value) || 30)}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
+                        Clip Count
+                      </label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={10}
+                        value={clipCount}
+                        onChange={(e) => setClipCount(parseInt(e.target.value) || 5)}
+                      />
+                    </div>
+                  </div>
 
-                <div className="flex gap-2">
-                  <Button onClick={analyzeClippability} glow>
-                    <MagicWandIcon className="h-3.5 w-3.5" />
-                    Find Best Clips
-                  </Button>
-                  <Button variant="ghost" onClick={() => setIsManualMode(!isManualMode)}>
+                  <div className="flex gap-2">
+                    <Button onClick={analyzeClippability} glow>
+                      <MagicWandIcon className="h-3.5 w-3.5" />
+                      Find Best Clips
+                    </Button>
+                    <Button variant="ghost" onClick={() => setIsManualMode(!isManualMode)}>
+                      <PlusIcon className="h-3.5 w-3.5" />
+                      Manual
+                    </Button>
+                  </div>
+                </>
+              )}
+
+              {error && (
+                <div className="mt-4 rounded-lg border border-[hsl(var(--error)/0.15)] bg-[hsl(var(--error)/0.1)] p-3">
+                  <p className="text-sm text-[hsl(var(--error))]">{error}</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Manual Selection */}
+          {isManualMode && (
+            <Card className="animate-fadeInDown mb-6">
+              <CardContent className="p-5">
+                <div className="mb-4 flex items-center justify-between">
+                  <p className="text-[13px] font-medium text-[hsl(var(--text-primary))]">
+                    Manual Clip Selection
+                  </p>
+                  <button
+                    onClick={() => setIsManualMode(false)}
+                    className="rounded p-1 text-[hsl(var(--text-tertiary))] transition-colors hover:bg-[hsl(var(--bg-surface))]"
+                  >
+                    <Cross2Icon className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <label className="mb-1.5 block text-[11px] font-medium tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
+                      Start (sec)
+                    </label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      placeholder="0.0"
+                      value={manualStart}
+                      onChange={(e) => setManualStart(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="mb-1.5 block text-[11px] font-medium tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
+                      End (sec)
+                    </label>
+                    <Input
+                      type="number"
+                      step="0.1"
+                      placeholder="30.0"
+                      value={manualEnd}
+                      onChange={(e) => setManualEnd(e.target.value)}
+                    />
+                  </div>
+                  <Button onClick={addManualClip}>
                     <PlusIcon className="h-3.5 w-3.5" />
-                    Manual
+                    Add
                   </Button>
                 </div>
-              </>
-            )}
+              </CardContent>
+            </Card>
+          )}
 
-            {error && (
-              <div className="mt-4 rounded-lg border border-[hsl(var(--error)/0.15)] bg-[hsl(var(--error)/0.1)] p-3">
-                <p className="text-sm text-[hsl(var(--error))]">{error}</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          {/* Hidden audio element */}
+          {audioUrl && (
+            <audio ref={audioRef} src={audioUrl} preload="metadata" className="hidden" />
+          )}
 
-        {/* Manual Selection */}
-        {isManualMode && (
-          <Card className="animate-fadeInDown mb-6">
-            <CardContent className="p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <p className="text-[13px] font-medium text-[hsl(var(--text-primary))]">
-                  Manual Clip Selection
-                </p>
-                <button
-                  onClick={() => setIsManualMode(false)}
-                  className="rounded p-1 text-[hsl(var(--text-tertiary))] transition-colors hover:bg-[hsl(var(--bg-surface))]"
-                >
-                  <Cross2Icon className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="flex items-end gap-3">
-                <div className="flex-1">
-                  <label className="mb-1.5 block text-[11px] font-medium tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
-                    Start (sec)
-                  </label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    placeholder="0.0"
-                    value={manualStart}
-                    onChange={(e) => setManualStart(e.target.value)}
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="mb-1.5 block text-[11px] font-medium tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
-                    End (sec)
-                  </label>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    placeholder="30.0"
-                    value={manualEnd}
-                    onChange={(e) => setManualEnd(e.target.value)}
-                  />
-                </div>
-                <Button onClick={addManualClip}>
-                  <PlusIcon className="h-3.5 w-3.5" />
-                  Add
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Hidden audio element */}
-        {audioUrl && <audio ref={audioRef} src={audioUrl} preload="metadata" className="hidden" />}
-
-        {/* Clips List */}
-        {clips.length > 0 && (
-          <Card className="animate-scaleIn mb-6">
-            <CardContent className="p-5">
-              {/* Header */}
-              <div className="mb-4 flex items-center justify-between border-b border-[hsl(var(--border-subtle))] pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[hsl(var(--success)/0.1)]">
-                    <ScissorsIcon className="h-4 w-4 text-[hsl(var(--success))]" />
-                  </div>
-                  <div>
-                    <p className="text-[13px] font-medium text-[hsl(var(--text-primary))]">
-                      Selected Clips
-                    </p>
-                    <p className="text-[12px] text-[hsl(var(--text-secondary))]">
-                      {clips.length} clip{clips.length !== 1 ? "s" : ""} ready for preview
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Clips */}
-              <div className="space-y-3">
-                {clips.map((clip, index) => (
-                  <ClipCard
-                    key={clip.id}
-                    clip={clip}
-                    index={index}
-                    isPlaying={playingClipId === clip.id}
-                    isAccepted={acceptedClips.has(clip.id)}
-                    currentTime={currentTime}
-                    audioDuration={audioDuration || 1}
-                    transcriptWords={transcript?.words || []}
-                    onPlay={() => playClip(clip.id)}
-                    onPause={() => pauseClip(clip.id)}
-                    onSeek={(time) => seekClip(clip.id, time)}
-                    onAccept={() => acceptClip(clip.id)}
-                    onReject={() => removeClip(clip.id)}
-                    onBoundaryChange={(newStart, newEnd, newWords) =>
-                      handleBoundaryChange(clip.id, newStart, newEnd, newWords)
-                    }
-                    onTranscriptEdit={(newTranscript) =>
-                      handleTranscriptEdit(clip.id, newTranscript)
-                    }
-                  />
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Empty State */}
-        {clips.length === 0 && !isAnalyzing && (
+          {/* Empty State */}
           <div className="py-12 text-center">
             <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-surface))]">
               <ScissorsIcon className="h-6 w-6 text-[hsl(var(--text-tertiary))]" />
@@ -631,14 +690,305 @@ Return ONLY valid JSON in this exact format (no other text):
               Use the AI finder above or add clips manually
             </p>
           </div>
-        )}
-
-        {/* Continue Button */}
-        <div className="mt-8 flex justify-end sm:mt-10">
-          <Button onClick={onComplete} disabled={clips.length === 0} glow={clips.length > 0}>
-            Continue to Preview
-          </Button>
         </div>
+      </div>
+    );
+  }
+
+  // Main editor view with clips
+  return (
+    <div className="flex h-full flex-col">
+      {/* Hidden audio element */}
+      {audioUrl && (
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="metadata"
+          muted={isMuted}
+          className="hidden"
+        />
+      )}
+
+      {/* Main content area */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Clip stack sidebar */}
+        <div className="flex w-72 shrink-0 flex-col border-r border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-base))]">
+          {/* Sidebar header */}
+          <div className="flex items-center justify-between border-b border-[hsl(var(--border-subtle))] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <ScissorsIcon className="h-4 w-4 text-[hsl(var(--cyan))]" />
+              <span className="text-sm font-medium text-[hsl(var(--text))]">
+                {clips.length} Clip{clips.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsManualMode(true)}
+              className="h-7 px-2"
+            >
+              <PlusIcon className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+
+          {/* Manual selection inline */}
+          {isManualMode && (
+            <div className="border-b border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-surface))] p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[10px] font-medium tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
+                  Add Manual Clip
+                </span>
+                <button
+                  onClick={() => setIsManualMode(false)}
+                  className="rounded p-0.5 text-[hsl(var(--text-tertiary))] hover:bg-[hsl(var(--bg-elevated))]"
+                >
+                  <Cross2Icon className="h-3 w-3" />
+                </button>
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  step="0.1"
+                  placeholder="Start"
+                  value={manualStart}
+                  onChange={(e) => setManualStart(e.target.value)}
+                  className="h-7 text-xs"
+                />
+                <Input
+                  type="number"
+                  step="0.1"
+                  placeholder="End"
+                  value={manualEnd}
+                  onChange={(e) => setManualEnd(e.target.value)}
+                  className="h-7 text-xs"
+                />
+                <Button onClick={addManualClip} size="sm" className="h-7 px-2">
+                  <PlusIcon className="h-3 w-3" />
+                </Button>
+              </div>
+              {error && <p className="mt-1.5 text-[10px] text-[hsl(var(--error))]">{error}</p>}
+            </div>
+          )}
+
+          {/* Clip list */}
+          <div className="flex-1 overflow-y-auto p-2">
+            <div className="space-y-1.5">
+              {clips.map((clip, index) => (
+                <ClipStackItem
+                  key={clip.id}
+                  clip={clip}
+                  index={index}
+                  isActive={index === activeClipIndex}
+                  isAccepted={acceptedClips.has(clip.id)}
+                  onClick={() => setActiveClipIndex(index)}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* View mode toggle */}
+          <div className="border-t border-[hsl(var(--border-subtle))] p-2">
+            <div className="flex rounded-lg bg-[hsl(var(--bg-surface))] p-1">
+              <button
+                onClick={() => setViewMode("editor")}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                  viewMode === "editor"
+                    ? "bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text))] shadow-sm"
+                    : "text-[hsl(var(--text-tertiary))] hover:text-[hsl(var(--text-secondary))]"
+                )}
+              >
+                <Pencil2Icon className="h-3.5 w-3.5" />
+                Edit
+              </button>
+              <button
+                onClick={() => setViewMode("finder")}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-all",
+                  viewMode === "finder"
+                    ? "bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text))] shadow-sm"
+                    : "text-[hsl(var(--text-tertiary))] hover:text-[hsl(var(--text-secondary))]"
+                )}
+              >
+                <MagicWandIcon className="h-3.5 w-3.5" />
+                Find
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Main content - Editor or Finder */}
+        <div className="flex-1 overflow-hidden bg-[hsl(var(--bg-elevated))]">
+          {viewMode === "editor" && activeClip && (
+            <ClipEditor
+              clip={activeClip}
+              index={activeClipIndex}
+              totalClips={clips.length}
+              isPlaying={playingClipId === activeClip.id}
+              isAccepted={acceptedClips.has(activeClip.id)}
+              isMuted={isMuted}
+              currentTime={currentTime}
+              audioDuration={audioDuration || 1}
+              transcriptWords={transcript?.words || []}
+              onPlay={() => playClip(activeClip.id)}
+              onPause={() => pauseClip(activeClip.id)}
+              onSeek={(time) => seekClip(activeClip.id, time)}
+              onAccept={() => acceptClip(activeClip.id)}
+              onReject={() => handleRemoveClip(activeClip.id)}
+              onBoundaryChange={(newStart, newEnd, newWords) =>
+                handleBoundaryChange(activeClip.id, newStart, newEnd, newWords)
+              }
+              onTranscriptEdit={(newTranscript) =>
+                handleTranscriptEdit(activeClip.id, newTranscript)
+              }
+              onPrevClip={() => setActiveClipIndex(Math.max(0, activeClipIndex - 1))}
+              onNextClip={() => setActiveClipIndex(Math.min(clips.length - 1, activeClipIndex + 1))}
+              onScrubStart={handleScrubStart}
+              onScrubEnd={handleScrubEnd}
+              onMuteToggle={handleMuteToggle}
+            />
+          )}
+
+          {viewMode === "finder" && (
+            <div className="flex h-full flex-col p-6">
+              <div className="mx-auto w-full max-w-2xl">
+                <div className="mb-6">
+                  <h2 className="text-xl font-semibold text-[hsl(var(--text))]">Find More Clips</h2>
+                  <p className="mt-1 text-sm text-[hsl(var(--text-muted))]">
+                    Use AI to discover additional viral-worthy moments
+                  </p>
+                </div>
+
+                <Card variant="default" className="mb-5">
+                  <CardContent className="p-5">
+                    {isAnalyzing ? (
+                      <div className="py-8">
+                        <div className="mx-auto max-w-xs text-center">
+                          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-[hsl(var(--magenta)/0.1)]">
+                            <Spinner className="text-[hsl(var(--magenta))]" />
+                          </div>
+                          <Progress value={progress} variant="cyan" className="mb-2" size="sm" />
+                          <p className="text-sm text-[hsl(var(--text-muted))]">
+                            {getProgressMessage()}
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                          <div>
+                            <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
+                              Keywords (optional)
+                            </label>
+                            <Input
+                              placeholder="AI, tips, funny..."
+                              value={keywords}
+                              onChange={(e) => setKeywords(e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
+                              Target Duration
+                            </label>
+                            <Input
+                              type="number"
+                              min={10}
+                              max={60}
+                              value={clipDuration}
+                              onChange={(e) => setClipDuration(parseInt(e.target.value) || 30)}
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
+                              Number of Clips
+                            </label>
+                            <Input
+                              type="number"
+                              min={1}
+                              max={10}
+                              value={clipCount}
+                              onChange={(e) => setClipCount(parseInt(e.target.value) || 5)}
+                            />
+                          </div>
+                        </div>
+
+                        <Button onClick={analyzeClippability} glow className="w-full">
+                          <MagicWandIcon className="h-4 w-4" />
+                          Find {clipCount} Best Clips
+                        </Button>
+                      </>
+                    )}
+
+                    {error && (
+                      <div className="mt-4 rounded-lg border border-[hsl(var(--error)/0.15)] bg-[hsl(var(--error)/0.1)] p-3">
+                        <p className="text-sm text-[hsl(var(--error))]">{error}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Manual clip option */}
+                <Card variant="default">
+                  <CardContent className="p-5">
+                    <div className="mb-4">
+                      <h3 className="text-sm font-medium text-[hsl(var(--text))]">
+                        Manual Selection
+                      </h3>
+                      <p className="mt-0.5 text-xs text-[hsl(var(--text-muted))]">
+                        Add a clip by specifying start and end times
+                      </p>
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
+                          Start (seconds)
+                        </label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          placeholder="0.0"
+                          value={manualStart}
+                          onChange={(e) => setManualStart(e.target.value)}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
+                          End (seconds)
+                        </label>
+                        <Input
+                          type="number"
+                          step="0.1"
+                          placeholder="30.0"
+                          value={manualEnd}
+                          onChange={(e) => setManualEnd(e.target.value)}
+                        />
+                      </div>
+                      <Button onClick={addManualClip}>
+                        <PlusIcon className="h-4 w-4" />
+                        Add Clip
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Bottom bar */}
+      <div className="flex items-center justify-between border-t border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-base))] px-6 py-4">
+        <div className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]">
+          <span className="font-medium text-[hsl(var(--text))]">{acceptedClips.size}</span>
+          <span>of</span>
+          <span className="font-medium text-[hsl(var(--text))]">{clips.length}</span>
+          <span>clips accepted</span>
+        </div>
+
+        <Button onClick={onComplete} disabled={clips.length === 0} glow={clips.length > 0}>
+          Continue to Preview
+          <ChevronRightIcon className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );
