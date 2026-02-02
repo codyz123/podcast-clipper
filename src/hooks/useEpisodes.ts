@@ -522,7 +522,6 @@ export function useEpisodes() {
     await fetchEpisodes();
 
     // Mark migration as complete
-    const MIGRATION_FLAG = "podcastomatic-migrated-to-db";
     localStorage.setItem(MIGRATION_FLAG, new Date().toISOString());
 
     // Clear localStorage projects to prevent duplicate migrations
