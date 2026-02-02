@@ -3,13 +3,103 @@ import { persist } from "zustand/middleware";
 import { Project, Transcript, Clip, RenderJob, VideoFormat, ExportRecord } from "../lib/types";
 import { generateId } from "../lib/utils";
 
+// ============ One-time Migration: Rename from podcast-clipper to podcastomatic ============
+// This migrates localStorage keys from old names to new names
+(function migrateFromOldName() {
+  if (typeof window === "undefined") return;
+
+  const RENAME_FLAG = "podcastomatic-renamed-from-clipper";
+  if (localStorage.getItem(RENAME_FLAG)) return;
+
+  // Migrate localStorage keys
+  const keyMappings = [
+    ["podcast-clipper-projects", "podcastomatic-projects"],
+    ["podcast-clipper-settings", "podcastomatic-settings"],
+    ["podcast-clipper-workspace", "podcastomatic-workspace"],
+    ["podcast-clipper-current-view", "podcastomatic-current-view"],
+    ["podcast-clipper-current-project-id", "podcastomatic-current-project-id"],
+    ["podcast-clipper-current-section", "podcastomatic-current-section"],
+    ["podcast-clipper-current-stage", "podcastomatic-current-stage"],
+    ["podcast-clipper-planning-substage", "podcastomatic-planning-substage"],
+  ];
+
+  for (const [oldKey, newKey] of keyMappings) {
+    const oldData = localStorage.getItem(oldKey);
+    if (oldData && !localStorage.getItem(newKey)) {
+      console.log(`[Migration] Copying ${oldKey} -> ${newKey}`);
+      localStorage.setItem(newKey, oldData);
+    }
+  }
+
+  // Migrate IndexedDB databases
+  const dbMappings = [
+    ["podcast-clipper-data", "podcastomatic-data"],
+    ["podcast-clipper-assets", "podcastomatic-assets"],
+  ];
+
+  for (const [oldDb, newDb] of dbMappings) {
+    // Check if old DB exists and copy data
+    const request = indexedDB.open(oldDb);
+    request.onsuccess = () => {
+      const oldDatabase = request.result;
+      const storeNames = Array.from(oldDatabase.objectStoreNames);
+      if (storeNames.length === 0) {
+        oldDatabase.close();
+        return;
+      }
+
+      console.log(`[Migration] Copying IndexedDB ${oldDb} -> ${newDb}`);
+
+      // Open/create new database with same version
+      const newRequest = indexedDB.open(newDb, oldDatabase.version);
+      newRequest.onupgradeneeded = (event) => {
+        const newDatabase = (event.target as IDBOpenDBRequest).result;
+        for (const storeName of storeNames) {
+          if (!newDatabase.objectStoreNames.contains(storeName)) {
+            newDatabase.createObjectStore(storeName);
+          }
+        }
+      };
+      newRequest.onsuccess = () => {
+        const newDatabase = newRequest.result;
+        for (const storeName of storeNames) {
+          if (!newDatabase.objectStoreNames.contains(storeName)) continue;
+          const oldTx = oldDatabase.transaction(storeName, "readonly");
+          const oldStore = oldTx.objectStore(storeName);
+          const getAllRequest = oldStore.getAll();
+          const getAllKeysRequest = oldStore.getAllKeys();
+
+          Promise.all([
+            new Promise((res) => {
+              getAllRequest.onsuccess = () => res(getAllRequest.result);
+            }),
+            new Promise((res) => {
+              getAllKeysRequest.onsuccess = () => res(getAllKeysRequest.result);
+            }),
+          ]).then(([values, keys]) => {
+            const newTx = newDatabase.transaction(storeName, "readwrite");
+            const newStore = newTx.objectStore(storeName);
+            (keys as IDBValidKey[]).forEach((key, i) => {
+              newStore.put((values as unknown[])[i], key);
+            });
+          });
+        }
+        oldDatabase.close();
+        newDatabase.close();
+      };
+    };
+  }
+
+  localStorage.setItem(RENAME_FLAG, "true");
+})();
+
 // ============ One-time Migration: Clear bloated localStorage ============
 // This runs before the store initializes to fix quota issues
 (function migrateLocalStorage() {
   if (typeof window === "undefined") return;
 
-  const STORAGE_KEY = "podcast-clipper-projects";
-  const MIGRATION_FLAG = "podcast-clipper-migrated-v4";
+  const STORAGE_KEY = "podcastomatic-projects";
+  const MIGRATION_FLAG = "podcastomatic-migrated-v4";
 
   // Only run migration once
   if (localStorage.getItem(MIGRATION_FLAG)) return;
@@ -41,7 +131,7 @@ import { generateId } from "../lib/utils";
 })();
 
 // IndexedDB storage for large data (audio blobs, transcripts)
-const DB_NAME = "podcast-clipper-data";
+const DB_NAME = "podcastomatic-data";
 const DB_VERSION = 2;
 const AUDIO_STORE = "audio-blobs";
 const TRANSCRIPT_STORE = "transcripts";
@@ -49,27 +139,27 @@ const TRANSCRIPT_STORE = "transcripts";
 // In-memory cache for quick access
 declare global {
   interface Window {
-    __podcastClipperAudioBlobs?: Map<string, Blob>;
-    __podcastClipperTranscripts?: Map<string, Transcript[]>;
+    __podcastomaticAudioBlobs?: Map<string, Blob>;
+    __podcastomaticTranscripts?: Map<string, Transcript[]>;
   }
 }
 
 const getAudioMemoryCache = (): Map<string, Blob> => {
   if (typeof window !== "undefined") {
-    if (!window.__podcastClipperAudioBlobs) {
-      window.__podcastClipperAudioBlobs = new Map();
+    if (!window.__podcastomaticAudioBlobs) {
+      window.__podcastomaticAudioBlobs = new Map();
     }
-    return window.__podcastClipperAudioBlobs;
+    return window.__podcastomaticAudioBlobs;
   }
   return new Map();
 };
 
 const getTranscriptMemoryCache = (): Map<string, Transcript[]> => {
   if (typeof window !== "undefined") {
-    if (!window.__podcastClipperTranscripts) {
-      window.__podcastClipperTranscripts = new Map();
+    if (!window.__podcastomaticTranscripts) {
+      window.__podcastomaticTranscripts = new Map();
     }
-    return window.__podcastClipperTranscripts;
+    return window.__podcastomaticTranscripts;
   }
   return new Map();
 };
@@ -95,6 +185,26 @@ const openDB = (): Promise<IDBDatabase> => {
   });
 };
 
+// Legacy database name for fallback reads
+const LEGACY_DB_NAME = "podcast-clipper-data";
+
+const openLegacyDB = (): Promise<IDBDatabase | null> => {
+  return new Promise((resolve) => {
+    const request = indexedDB.open(LEGACY_DB_NAME);
+    request.onerror = () => resolve(null);
+    request.onsuccess = () => {
+      const db = request.result;
+      // Check if the store exists
+      if (db.objectStoreNames.contains(AUDIO_STORE)) {
+        resolve(db);
+      } else {
+        db.close();
+        resolve(null);
+      }
+    };
+  });
+};
+
 // ============ Audio Blob Storage (IndexedDB) ============
 
 export const getAudioBlob = async (projectId: string): Promise<Blob | undefined> => {
@@ -102,27 +212,54 @@ export const getAudioBlob = async (projectId: string): Promise<Blob | undefined>
   const cached = getAudioMemoryCache().get(projectId);
   if (cached) return cached;
 
-  // Fall back to IndexedDB
+  // Try new database first
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    const blob = await new Promise<Blob | undefined>((resolve, reject) => {
       const transaction = db.transaction(AUDIO_STORE, "readonly");
       const store = transaction.objectStore(AUDIO_STORE);
       const request = store.get(projectId);
 
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const blob = request.result as Blob | undefined;
-        if (blob) {
-          getAudioMemoryCache().set(projectId, blob);
-        }
-        resolve(blob);
-      };
+      request.onsuccess = () => resolve(request.result as Blob | undefined);
     });
+
+    if (blob) {
+      getAudioMemoryCache().set(projectId, blob);
+      return blob;
+    }
   } catch (err) {
     console.error("Failed to get audio from IndexedDB:", err);
-    return undefined;
   }
+
+  // Fallback to legacy database
+  try {
+    const legacyDb = await openLegacyDB();
+    if (!legacyDb) return undefined;
+
+    const blob = await new Promise<Blob | undefined>((resolve, reject) => {
+      const transaction = legacyDb.transaction(AUDIO_STORE, "readonly");
+      const store = transaction.objectStore(AUDIO_STORE);
+      const request = store.get(projectId);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result as Blob | undefined);
+    });
+
+    legacyDb.close();
+
+    if (blob) {
+      console.log("[Migration] Found audio in legacy DB, caching...");
+      getAudioMemoryCache().set(projectId, blob);
+      // Also save to new database for future use
+      setAudioBlob(projectId, blob);
+      return blob;
+    }
+  } catch (err) {
+    console.error("Failed to get audio from legacy IndexedDB:", err);
+  }
+
+  return undefined;
 };
 
 export const setAudioBlob = async (projectId: string, blob: Blob): Promise<void> => {
@@ -168,24 +305,60 @@ export const getTranscriptsFromDB = async (projectId: string): Promise<Transcrip
   const cached = getTranscriptMemoryCache().get(projectId);
   if (cached) return cached;
 
+  // Try new database first
   try {
     const db = await openDB();
-    return new Promise((resolve, reject) => {
+    const transcripts = await new Promise<Transcript[]>((resolve, reject) => {
       const transaction = db.transaction(TRANSCRIPT_STORE, "readonly");
       const store = transaction.objectStore(TRANSCRIPT_STORE);
       const request = store.get(projectId);
 
       request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const transcripts = (request.result as Transcript[]) || [];
-        getTranscriptMemoryCache().set(projectId, transcripts);
-        resolve(transcripts);
-      };
+      request.onsuccess = () => resolve((request.result as Transcript[]) || []);
     });
+
+    if (transcripts.length > 0) {
+      getTranscriptMemoryCache().set(projectId, transcripts);
+      return transcripts;
+    }
   } catch (err) {
     console.error("Failed to get transcripts from IndexedDB:", err);
-    return [];
   }
+
+  // Fallback to legacy database
+  try {
+    const legacyDb = await openLegacyDB();
+    if (!legacyDb) return [];
+
+    // Check if transcript store exists
+    if (!legacyDb.objectStoreNames.contains(TRANSCRIPT_STORE)) {
+      legacyDb.close();
+      return [];
+    }
+
+    const transcripts = await new Promise<Transcript[]>((resolve, reject) => {
+      const transaction = legacyDb.transaction(TRANSCRIPT_STORE, "readonly");
+      const store = transaction.objectStore(TRANSCRIPT_STORE);
+      const request = store.get(projectId);
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as Transcript[]) || []);
+    });
+
+    legacyDb.close();
+
+    if (transcripts.length > 0) {
+      console.log("[Migration] Found transcripts in legacy DB, caching...");
+      getTranscriptMemoryCache().set(projectId, transcripts);
+      // Also save to new database for future use
+      saveTranscriptsToDB(projectId, transcripts);
+      return transcripts;
+    }
+  } catch (err) {
+    console.error("Failed to get transcripts from legacy IndexedDB:", err);
+  }
+
+  return [];
 };
 
 export const saveTranscriptsToDB = async (
@@ -710,7 +883,7 @@ export const useProjectStore = create<ProjectState>()(
       },
     }),
     {
-      name: "podcast-clipper-projects",
+      name: "podcastomatic-projects",
       version: 4,
       partialize: (state) => ({
         // Strip transcripts from projects - they're stored in IndexedDB

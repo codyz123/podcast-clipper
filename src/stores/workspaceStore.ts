@@ -113,7 +113,7 @@ export const useWorkspaceStore = create<WorkspaceState>()(
       },
     }),
     {
-      name: "podcast-clipper-workspace",
+      name: "podcastomatic-workspace",
       version: 2,
       onRehydrateStorage: () => (state) => {
         // Apply brand colors when store is rehydrated from localStorage

@@ -5,7 +5,7 @@
 
 import { GeneratedAsset } from "../../lib/types";
 
-const DB_NAME = "podcast-clipper-assets";
+const DB_NAME = "podcastomatic-assets";
 const DB_VERSION = 1;
 const BLOBS_STORE = "asset-blobs";
 const METADATA_STORE = "asset-metadata";

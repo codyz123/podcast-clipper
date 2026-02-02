@@ -2,7 +2,7 @@
 
 ## Overview
 
-Podcast Clipper is a web app for creating short video clips from podcast audio. It's designed for a small, trusted group of podcast collaborators (3-7 people).
+Podcastomatic is a web app for creating short video clips from podcast audio. It's designed for a small, trusted group of podcast collaborators (3-7 people).
 
 ## Current State (Phase 1)
 
@@ -123,7 +123,7 @@ Recommend **Option A** for simplicity.
 ## File Structure (Proposed)
 
 ```
-podcast-clipper/
+podcastomatic/
 ├── src/                    # Frontend (existing)
 ├── server/                 # Backend (new)
 │   ├── index.ts

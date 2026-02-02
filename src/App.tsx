@@ -8,22 +8,26 @@ import { AudioImport } from "./components/AudioImport/AudioImport";
 import { TranscriptEditor } from "./components/TranscriptEditor/TranscriptEditor";
 import { ClipSelector } from "./components/ClipSelector/ClipSelector";
 import { VideoEditor } from "./components/VideoEditor";
-import { ExportPanel } from "./components/ExportPanel/ExportPanel";
+import { PublishPanel } from "./components/PublishPanel";
 import { Settings } from "./components/Settings/Settings";
 import { PlaceholderPage } from "./components/PlaceholderPage";
 import { PodcastInfoPage } from "./components/PodcastInfo/PodcastInfoPage";
 import { ConnectionsPage } from "./components/Connections/ConnectionsPage";
+import { OAuthCallback } from "./pages/OAuthCallback";
 import { useProjectStore } from "./stores/projectStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
 import { applyBrandColors } from "./lib/colorExtractor";
 import { EpisodeStage, PlanningSubStage } from "./components/EpisodePipeline/EpisodePipeline";
 
+// Check if we're on the OAuth callback page
+const isOAuthCallback = window.location.pathname.startsWith("/oauth/callback");
+
 // Keys for persisting navigation state
-const VIEW_STORAGE_KEY = "podcast-clipper-current-view";
-const PROJECT_ID_STORAGE_KEY = "podcast-clipper-current-project-id";
-const SECTION_STORAGE_KEY = "podcast-clipper-current-section";
-const STAGE_STORAGE_KEY = "podcast-clipper-current-stage";
-const PLANNING_SUBSTAGE_STORAGE_KEY = "podcast-clipper-planning-substage";
+const VIEW_STORAGE_KEY = "podcastomatic-current-view";
+const PROJECT_ID_STORAGE_KEY = "podcastomatic-current-project-id";
+const SECTION_STORAGE_KEY = "podcastomatic-current-section";
+const STAGE_STORAGE_KEY = "podcastomatic-current-stage";
+const PLANNING_SUBSTAGE_STORAGE_KEY = "podcastomatic-planning-substage";
 
 // Map ViewType to MarketingSubStage
 const viewToMarketingSubStage: Record<string, MarketingSubStage> = {
@@ -262,7 +266,7 @@ function App() {
           />
         );
       case "export":
-        return <ExportPanel />;
+        return <PublishPanel />;
       case "publish":
         return (
           <div className="flex h-full items-center justify-center">
@@ -291,6 +295,11 @@ function App() {
 
   // Get episodes list for dropdown
   const episodesList = projects.map((p) => ({ id: p.id, name: p.name }));
+
+  // Render OAuth callback page if on that route
+  if (isOAuthCallback) {
+    return <OAuthCallback />;
+  }
 
   return (
     <AppShell

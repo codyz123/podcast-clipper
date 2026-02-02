@@ -73,19 +73,6 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
     <div className="min-h-full w-full">
       {/* Hero Section */}
       <div className="mb-10 w-full text-center sm:mb-14">
-        <div
-          className={cn(
-            "mb-6 inline-flex items-center gap-2 rounded-full px-3 py-1.5",
-            "bg-[hsl(var(--surface))]",
-            "border border-[hsl(var(--glass-border))]"
-          )}
-        >
-          <div className="h-1.5 w-1.5 rounded-full bg-[hsl(var(--cyan))]" />
-          <span className="text-xs font-medium text-[hsl(var(--text-muted))]">
-            {projects.length} episode{projects.length !== 1 ? "s" : ""} in studio
-          </span>
-        </div>
-
         <h1
           className={cn(
             "mb-3 text-3xl font-bold tracking-tight sm:text-4xl",

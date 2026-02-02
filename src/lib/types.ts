@@ -1,4 +1,4 @@
-// Core types for the Podcast Clipper app
+// Core types for the Podcastomatic app
 
 export interface Project {
   id: string;
@@ -204,7 +204,7 @@ export interface ExportSettings {
 // Settings
 export interface AppSettings {
   // Backend settings (preferred)
-  backendUrl?: string; // e.g., "http://localhost:3001" or "https://podcast-clipper.railway.app"
+  backendUrl?: string; // e.g., "http://localhost:3001" or "https://podcastomatic.railway.app"
   accessCode?: string; // shared access code for authentication
 
   // Legacy: direct API key (used when no backend configured)
@@ -277,8 +277,13 @@ export interface TrackClip {
   type: "audio" | "video" | "image" | "animation" | "text" | "caption";
   assetId?: string; // Reference to asset in IndexedDB
   assetUrl?: string; // URL for external assets (b-roll, etc.)
+  assetSource?: "lottie" | "giphy" | "tenor"; // Source of animation asset
   animationConfig?: AnimationConfig;
   textConfig?: TextOverlayConfig;
+
+  // Position on screen (percentage 0-100)
+  positionX?: number; // Default 50 (center)
+  positionY?: number; // Default 50 (center)
 
   // Fade settings (per-clip)
   fadeIn?: number; // Duration in seconds
@@ -303,7 +308,9 @@ export interface CaptionStyle {
   primaryColor: string;
   highlightColor: string; // For active word
   backgroundColor?: string; // Caption box background
-  position: "bottom" | "center" | "top";
+  position: "bottom" | "center" | "top"; // Legacy position (kept for compatibility)
+  positionX?: number; // Horizontal position as percentage (0-100), 50 = center
+  positionY?: number; // Vertical position as percentage (0-100), 50 = center
   wordsPerLine: number;
   preset?: CaptionPreset;
 }
@@ -319,6 +326,8 @@ export const CAPTION_PRESETS: Record<CaptionPreset, Omit<CaptionStyle, "preset">
     highlightColor: "#FFD700",
     backgroundColor: "rgba(0,0,0,0.7)",
     position: "center",
+    positionX: 50,
+    positionY: 50,
     wordsPerLine: 4,
   },
   mrBeast: {
@@ -330,6 +339,8 @@ export const CAPTION_PRESETS: Record<CaptionPreset, Omit<CaptionStyle, "preset">
     highlightColor: "#FF0000",
     backgroundColor: undefined,
     position: "center",
+    positionX: 50,
+    positionY: 50,
     wordsPerLine: 3,
   },
   "tiktok-default": {
@@ -341,6 +352,8 @@ export const CAPTION_PRESETS: Record<CaptionPreset, Omit<CaptionStyle, "preset">
     highlightColor: "#00F5FF",
     backgroundColor: "rgba(0,0,0,0.5)",
     position: "bottom",
+    positionX: 50,
+    positionY: 75,
     wordsPerLine: 5,
   },
   "clean-minimal": {
@@ -352,6 +365,8 @@ export const CAPTION_PRESETS: Record<CaptionPreset, Omit<CaptionStyle, "preset">
     highlightColor: "#FFFFFF",
     backgroundColor: undefined,
     position: "bottom",
+    positionX: 50,
+    positionY: 75,
     wordsPerLine: 6,
   },
 };
