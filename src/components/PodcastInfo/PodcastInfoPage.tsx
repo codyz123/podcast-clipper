@@ -10,33 +10,13 @@ import {
   CheckIcon,
   TrashIcon,
 } from "@radix-ui/react-icons";
-import { cn } from "../../lib/utils";
+import { cn, debounce } from "../../lib/utils";
 import { useWorkspaceStore, PodcastMetadata } from "../../stores/workspaceStore";
 import { extractBrandColors, parseBrandColorsFromStorage } from "../../lib/colorExtractor";
 import { usePodcast } from "../../hooks/usePodcast";
 import { useAuthStore } from "../../stores/authStore";
-import { useSettingsStore } from "../../stores/settingsStore";
+import { getApiBase } from "../../lib/api";
 import { ConfirmationDialog } from "../ui/ConfirmationDialog";
-
-// Simple debounce implementation
-function debounce<T extends (...args: Parameters<T>) => void>(
-  fn: T,
-  delay: number
-): T & { cancel: () => void } {
-  let timeoutId: ReturnType<typeof setTimeout> | null = null;
-  const debounced = (...args: Parameters<T>) => {
-    if (timeoutId) clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => fn(...args), delay);
-  };
-  debounced.cancel = () => {
-    if (timeoutId) clearTimeout(timeoutId);
-  };
-  return debounced as T & { cancel: () => void };
-}
-
-function getApiBase(): string {
-  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3001";
-}
 
 // Categories based on Apple Podcasts categories
 const PODCAST_CATEGORIES = [

@@ -3,18 +3,75 @@ import {
   PlusIcon,
   TrashIcon,
   SpeakerLoudIcon,
-  CheckIcon,
-  PlayIcon,
+  PersonIcon,
+  CalendarIcon,
+  ChevronRightIcon,
   ReloadIcon,
 } from "@radix-ui/react-icons";
 import { Button, Card, CardContent, Input } from "./ui";
-import { CircularProgress } from "./ui/Progress";
-import { useEpisodes, Episode } from "../hooks/useEpisodes";
+import { StageProgressBar } from "./ui/StageProgressBar";
+import { useEpisodes, Episode, EpisodeWithDetails } from "../hooks/useEpisodes";
 import { useProjectStore } from "../stores/projectStore";
+import { Project, Transcript, Clip } from "../lib/types";
 import { useAuthStore } from "../stores/authStore";
 import { formatDuration } from "../lib/formats";
 import { cn } from "../lib/utils";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
+
+// Convert database episode to Project format for projectStore
+function episodeToProject(episode: EpisodeWithDetails): Project {
+  // Convert transcripts
+  const transcripts: Transcript[] = episode.transcripts.map((t) => ({
+    id: t.id,
+    projectId: episode.id,
+    audioFingerprint: t.audioFingerprint,
+    text: t.text,
+    words: t.words,
+    language: t.language || "en",
+    createdAt: t.createdAt,
+    name: t.name,
+  }));
+
+  // Convert clips
+  const clips: Clip[] = episode.clips.map((c) => ({
+    id: c.id,
+    projectId: episode.id,
+    name: c.name,
+    startTime: c.startTime,
+    endTime: c.endTime,
+    transcript: c.transcript || "",
+    words: c.words,
+    clippabilityScore: c.clippabilityScore,
+    isManual: c.isManual || false,
+    createdAt: c.createdAt,
+    tracks: c.tracks as Project["clips"][0]["tracks"],
+    captionStyle: c.captionStyle as Project["clips"][0]["captionStyle"],
+    format: c.format as Project["clips"][0]["format"],
+  }));
+
+  return {
+    id: episode.id,
+    name: episode.name,
+    audioPath: episode.audioBlobUrl || "",
+    audioFileName: episode.audioFileName,
+    audioDuration: episode.audioDuration || 0,
+    createdAt: episode.createdAt,
+    updatedAt: episode.updatedAt,
+    description: episode.description,
+    episodeNumber: episode.episodeNumber,
+    seasonNumber: episode.seasonNumber,
+    publishDate: episode.publishDate,
+    showNotes: episode.showNotes,
+    explicit: episode.explicit,
+    guests: episode.guests,
+    stageStatus: episode.stageStatus,
+    transcript: transcripts[0], // Legacy: first transcript
+    transcripts,
+    activeTranscriptId: transcripts[0]?.id,
+    clips,
+    exportHistory: [],
+  };
+}
 
 interface ProjectsViewProps {
   onProjectLoad: () => void;
@@ -22,7 +79,7 @@ interface ProjectsViewProps {
 
 export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => {
   const { episodes, isLoading, createEpisode, fetchEpisode, deleteEpisode } = useEpisodes();
-  const { currentProject, loadProject } = useProjectStore();
+  const { setCurrentProject } = useProjectStore();
   const { podcasts, currentPodcastId } = useAuthStore();
 
   const [showNewProject, setShowNewProject] = useState(false);
@@ -44,18 +101,24 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
       if (episode) {
         setNewProjectName("");
         setShowNewProject(false);
-        // Load the new episode and navigate
-        await fetchEpisode(episode.id);
-        loadProject(episode.id);
-        onProjectLoad();
+        // Fetch full episode details and convert to Project
+        const fullEpisode = await fetchEpisode(episode.id);
+        if (fullEpisode) {
+          const project = episodeToProject(fullEpisode);
+          setCurrentProject(project);
+          onProjectLoad();
+        }
       }
     }
   };
 
   const handleLoadProject = async (episodeId: string) => {
-    await fetchEpisode(episodeId);
-    loadProject(episodeId);
-    onProjectLoad();
+    const episode = await fetchEpisode(episodeId);
+    if (episode) {
+      const project = episodeToProject(episode);
+      setCurrentProject(project);
+      onProjectLoad();
+    }
   };
 
   const handleDeleteProject = async () => {
@@ -70,24 +133,19 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
     }
   };
 
-  const formatDate = (dateString: string) => {
+  const formatPublishDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
       month: "short",
       day: "numeric",
+      year: "numeric",
     });
   };
 
-  const getProjectProgress = (episode: Episode) => {
-    let steps = 0;
-    if (episode.audioBlobUrl) steps++;
-    // We'd need to fetch episode details to know about transcripts/clips
-    // For now, show progress based on audio
-    return Math.round((steps / 3) * 100);
-  };
-
-  const getProjectStatus = (episode: Episode) => {
-    if (episode.audioBlobUrl) return { label: "Audio loaded", color: "magenta" };
-    return { label: "New episode", color: "ghost" };
+  const getGuestName = (episode: Episode): string | null => {
+    if (episode.guests && episode.guests.length > 0) {
+      return episode.guests[0].name;
+    }
+    return null;
   };
 
   return (
@@ -190,129 +248,132 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
               </div>
             )}
 
-            {/* Project Grid */}
+            {/* Episode Rows */}
             <div className="mx-auto w-full max-w-4xl">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-5 lg:grid-cols-3">
+              {/* Header Row */}
+              <div
+                className={cn(
+                  "mb-2 hidden items-center gap-4 px-4 text-xs font-medium tracking-wider uppercase sm:flex",
+                  "text-[hsl(var(--text-ghost))]"
+                )}
+              >
+                <div className="w-[280px]">Episode</div>
+                <div className="w-[120px]">Guest</div>
+                <div className="w-[100px]">Published</div>
+                <div className="flex-1">Progress</div>
+                <div className="w-[60px]" />
+              </div>
+
+              {/* Episode List */}
+              <div className="flex flex-col gap-2">
                 {episodes.map((episode, index) => {
-                  const isActive = currentProject?.id === episode.id;
-                  const progress = getProjectProgress(episode);
-                  const status = getProjectStatus(episode);
+                  const guestName = getGuestName(episode);
                   const hasAudio = !!episode.audioBlobUrl;
 
                   return (
                     <div
                       key={episode.id}
                       onClick={() => handleLoadProject(episode.id)}
-                      className={cn("group relative cursor-pointer", "animate-fadeInUp")}
-                      style={{ animationDelay: `${index * 40}ms` }}
+                      className={cn("group cursor-pointer", "animate-fadeInUp")}
+                      style={{ animationDelay: `${index * 30}ms` }}
                     >
                       <div
                         className={cn(
-                          "relative h-full overflow-hidden rounded-xl transition-all duration-150",
-                          "bg-[hsl(var(--surface)/0.7)]",
-                          "backdrop-blur-lg",
-                          "border",
-                          isActive
-                            ? "border-[hsl(var(--cyan)/0.3)] shadow-lg"
-                            : "border-[hsl(var(--glass-border))]",
-                          "hover:border-[hsl(0_0%_100%/0.12)]",
-                          "hover:bg-[hsl(var(--raised)/0.9)]",
-                          "hover:-translate-y-0.5",
-                          "hover:shadow-lg"
+                          "flex items-center gap-4 rounded-lg px-4 py-3 transition-all duration-150",
+                          "bg-[hsl(var(--surface)/0.5)]",
+                          "border border-transparent",
+                          "hover:border-[hsl(var(--glass-border))]",
+                          "hover:bg-[hsl(var(--surface)/0.8)]"
                         )}
                       >
-                        {/* Subtle accent bar */}
-                        <div
-                          className={cn(
-                            "h-1",
-                            progress === 100
-                              ? "bg-[hsl(158_70%_48%/0.6)]"
-                              : progress > 0
-                                ? "bg-[hsl(var(--cyan)/0.5)]"
-                                : "bg-[hsl(var(--glass-border))]"
-                          )}
-                        />
-
-                        <div className="p-4">
-                          {/* Top row: Progress + Actions */}
-                          <div className="mb-3 flex items-start justify-between">
-                            <CircularProgress
-                              value={progress}
-                              size={36}
-                              strokeWidth={3}
-                              showLabel
-                              variant={progress === 100 ? "gradient" : "cyan"}
-                            />
-
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget(episode);
-                              }}
-                              className={cn(
-                                "rounded-lg p-1.5 opacity-0 transition-opacity group-hover:opacity-100",
-                                "text-[hsl(var(--text-ghost))]",
-                                "hover:text-[hsl(var(--error))]",
-                                "hover:bg-[hsl(var(--error)/0.1)]"
-                              )}
-                            >
-                              <TrashIcon className="h-3.5 w-3.5" />
-                            </button>
-                          </div>
-
-                          {/* Project name */}
-                          <h3 className="mb-0.5 truncate font-[family-name:var(--font-display)] text-base font-semibold text-[hsl(var(--text))]">
+                        {/* Episode Name + Duration */}
+                        <div className="w-[280px] min-w-0 flex-shrink-0">
+                          <h3 className="truncate font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
                             {episode.name}
                           </h3>
-
-                          {/* Date */}
-                          <p className="mb-3 text-xs text-[hsl(var(--text-ghost))]">
-                            {formatDate(episode.updatedAt)}
-                          </p>
-
-                          {/* Stats */}
-                          <div className="mb-3 flex items-center gap-3">
-                            {hasAudio && episode.audioDuration && (
-                              <div className="flex items-center gap-1.5">
-                                <SpeakerLoudIcon className="h-3 w-3 text-[hsl(var(--text-subtle))]" />
-                                <span className="font-mono text-xs text-[hsl(var(--text-subtle))]">
-                                  {formatDuration(episode.audioDuration)}
-                                </span>
-                              </div>
+                          <div className="mt-0.5 flex items-center gap-2 text-xs text-[hsl(var(--text-ghost))]">
+                            {hasAudio && episode.audioDuration ? (
+                              <span className="flex items-center gap-1">
+                                <SpeakerLoudIcon className="h-3 w-3" />
+                                {formatDuration(episode.audioDuration)}
+                              </span>
+                            ) : (
+                              <span>No audio</span>
                             )}
                           </div>
-
-                          {/* Status badge */}
-                          <div className="flex items-center justify-between">
-                            <div
-                              className={cn(
-                                "inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium",
-                                status.color === "success" &&
-                                  "bg-[hsl(158_50%_15%/0.5)] text-[hsl(var(--success))]",
-                                status.color === "cyan" &&
-                                  "bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]",
-                                status.color === "magenta" &&
-                                  "bg-[hsl(325_50%_15%/0.5)] text-[hsl(var(--magenta))]",
-                                status.color === "ghost" &&
-                                  "bg-[hsl(var(--surface)/0.5)] text-[hsl(var(--text-ghost))]"
-                              )}
-                            >
-                              {status.color !== "ghost" && <CheckIcon className="h-2.5 w-2.5" />}
-                              {status.label}
-                            </div>
-
-                            {/* Play button on hover */}
-                            <div
-                              className={cn(
-                                "flex h-6 w-6 items-center justify-center rounded-full",
-                                "bg-[hsl(var(--cyan))]",
-                                "opacity-0 transition-opacity group-hover:opacity-100"
-                              )}
-                            >
-                              <PlayIcon className="ml-0.5 h-2.5 w-2.5 text-[hsl(var(--bg-base))]" />
-                            </div>
-                          </div>
                         </div>
+
+                        {/* Guest */}
+                        <div className="hidden w-[120px] flex-shrink-0 sm:block">
+                          {guestName ? (
+                            <span className="flex items-center gap-1.5 text-xs text-[hsl(var(--text-muted))]">
+                              <PersonIcon className="h-3 w-3 text-[hsl(var(--text-ghost))]" />
+                              <span className="truncate">{guestName}</span>
+                            </span>
+                          ) : (
+                            <span className="text-xs text-[hsl(var(--text-ghost))]">—</span>
+                          )}
+                        </div>
+
+                        {/* Published Date */}
+                        <div className="hidden w-[100px] flex-shrink-0 sm:block">
+                          {episode.publishDate ? (
+                            <span className="flex items-center gap-1.5 text-xs text-[hsl(var(--text-muted))]">
+                              <CalendarIcon className="h-3 w-3 text-[hsl(var(--text-ghost))]" />
+                              <span>{formatPublishDate(episode.publishDate)}</span>
+                            </span>
+                          ) : (
+                            <span className="text-xs text-[hsl(var(--text-ghost))]">—</span>
+                          )}
+                        </div>
+
+                        {/* Stage Progress Bar */}
+                        <div className="hidden flex-1 sm:block">
+                          <StageProgressBar stageStatus={episode.stageStatus} />
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex w-[60px] items-center justify-end gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTarget(episode);
+                            }}
+                            className={cn(
+                              "rounded-md p-1.5 opacity-0 transition-all group-hover:opacity-100",
+                              "text-[hsl(var(--text-ghost))]",
+                              "hover:text-[hsl(var(--error))]",
+                              "hover:bg-[hsl(var(--error)/0.1)]"
+                            )}
+                          >
+                            <TrashIcon className="h-3.5 w-3.5" />
+                          </button>
+                          <ChevronRightIcon
+                            className={cn(
+                              "h-4 w-4 transition-all",
+                              "text-[hsl(var(--text-ghost))]",
+                              "group-hover:text-[hsl(var(--text-muted))]",
+                              "group-hover:translate-x-0.5"
+                            )}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Mobile: Show guest, date, and progress below */}
+                      <div className="mt-2 flex flex-wrap items-center gap-3 px-4 pb-2 sm:hidden">
+                        {guestName && (
+                          <span className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))]">
+                            <PersonIcon className="h-3 w-3" />
+                            {guestName}
+                          </span>
+                        )}
+                        {episode.publishDate && (
+                          <span className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))]">
+                            <CalendarIcon className="h-3 w-3" />
+                            {formatPublishDate(episode.publishDate)}
+                          </span>
+                        )}
+                        <StageProgressBar stageStatus={episode.stageStatus} compact />
                       </div>
                     </div>
                   );

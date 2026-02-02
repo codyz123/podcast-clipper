@@ -1,37 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuthStore } from "../stores/authStore";
-import { useSettingsStore } from "../stores/settingsStore";
 import type { PodcastDetails } from "../lib/authTypes";
-
-function getApiBase(): string {
-  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3001";
-}
-
-// Helper to make authenticated requests with automatic token refresh
-async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const { accessToken, refreshAccessToken, logout } = useAuthStore.getState();
-
-  const headers = new Headers(options.headers);
-  if (accessToken) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-
-  let res = await fetch(url, { ...options, headers });
-
-  // If 401, try to refresh token and retry
-  if (res.status === 401) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      const newToken = useAuthStore.getState().accessToken;
-      headers.set("Authorization", `Bearer ${newToken}`);
-      res = await fetch(url, { ...options, headers });
-    } else {
-      logout();
-    }
-  }
-
-  return res;
-}
+import { getApiBase, authFetch } from "../lib/api";
 
 export function usePodcast() {
   const { currentPodcastId, setPodcasts } = useAuthStore();

@@ -22,11 +22,14 @@ import {
   FileTextIcon,
 } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
-import { EpisodeStage } from "../EpisodePipeline/EpisodePipeline";
+import { EpisodeStage, StageStatus } from "../EpisodePipeline/EpisodePipeline";
 import { UserMenu } from "../Auth/UserMenu";
+import { StageStatusIndicator } from "./StageStatusIndicator";
 
-// Marketing sub-stages (workflow steps)
-export type MarketingSubStage = "import" | "transcript" | "clips" | "editor" | "export";
+// Sub-stage types for each workflow
+export type ProductionSubStage = "import" | "record";
+export type PostProductionSubStage = "transcript";
+export type MarketingSubStage = "clips" | "editor" | "export" | "text-content";
 
 interface Episode {
   id: string;
@@ -49,8 +52,8 @@ interface SubStageOption {
 const stageOptions: StageOption[] = [
   { id: "info", label: "Episode Info", icon: InfoCircledIcon },
   { id: "planning", label: "Planning", icon: Pencil1Icon },
-  { id: "production", label: "Production", icon: SpeakerLoudIcon, disabled: true },
-  { id: "post-production", label: "Post", icon: MixerHorizontalIcon, disabled: true },
+  { id: "production", label: "Production", icon: SpeakerLoudIcon },
+  { id: "post-production", label: "Post", icon: MixerHorizontalIcon },
   { id: "distribution", label: "Distribution", icon: RocketIcon, disabled: true },
   { id: "marketing", label: "Marketing", icon: Share1Icon },
 ];
@@ -61,17 +64,27 @@ const planningSubStages: SubStageOption[] = [
   { id: "notes", label: "Notes", icon: FileTextIcon },
 ];
 
-const marketingSubStages: SubStageOption[] = [
+const productionSubStages: SubStageOption[] = [
   { id: "import", label: "Import", icon: UploadIcon },
+  { id: "record", label: "Record", icon: SpeakerLoudIcon },
+];
+
+const postProductionSubStages: SubStageOption[] = [
   { id: "transcript", label: "Transcribe", icon: TextIcon },
+];
+
+const marketingSubStages: SubStageOption[] = [
   { id: "clips", label: "Clips", icon: ScissorsIcon },
   { id: "editor", label: "Editor", icon: VideoIcon },
   { id: "export", label: "Publish", icon: DownloadIcon },
+  { id: "text-content", label: "Text Content", icon: FileTextIcon },
 ];
 
 // Get sub-stages for a given stage
 const getSubStagesForStage = (stage: EpisodeStage): SubStageOption[] => {
   if (stage === "planning") return planningSubStages;
+  if (stage === "production") return productionSubStages;
+  if (stage === "post-production") return postProductionSubStages;
   if (stage === "marketing") return marketingSubStages;
   return [];
 };
@@ -90,6 +103,9 @@ interface AppShellProps {
   // Sub-stage navigation
   activeSubStage?: string;
   onSubStageChange?: (subStage: string) => void;
+  // Stage status
+  stageStatus?: StageStatus;
+  onStageStatusClick?: () => void;
 }
 
 export const AppShell: React.FC<AppShellProps> = ({
@@ -103,6 +119,8 @@ export const AppShell: React.FC<AppShellProps> = ({
   onStageChange,
   activeSubStage,
   onSubStageChange,
+  stageStatus,
+  onStageStatusClick,
 }) => {
   const [megaDropdownOpen, setMegaDropdownOpen] = useState(false);
   const [hoveredStage, setHoveredStage] = useState<EpisodeStage | null>(null);
@@ -379,6 +397,18 @@ export const AppShell: React.FC<AppShellProps> = ({
 
         {/* Right: Notifications + Account */}
         <div className="flex items-center gap-1">
+          {/* Stage Status Indicator - only show when in a workflow stage */}
+          {activeStage && activeStage !== "info" && onStageStatusClick && (
+            <>
+              <StageStatusIndicator
+                status={stageStatus || "not-started"}
+                stageName={activeStage}
+                onClick={onStageStatusClick}
+              />
+              <div className="h-4 w-px bg-[hsl(var(--border-subtle))]" />
+            </>
+          )}
+
           {/* Notifications */}
           <button
             className={cn(

@@ -7,10 +7,12 @@ import {
   CheckIcon,
   FileIcon,
 } from "@radix-ui/react-icons";
+import * as musicMetadata from "music-metadata-browser";
 import { Button, Card, CardContent } from "../ui";
 import { Progress } from "../ui/Progress";
 import { useProjectStore, setAudioBlob, clearAudioBlob } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useEpisodes } from "../../hooks/useEpisodes";
 import { formatDuration } from "../../lib/formats";
 import { cn, generateFileFingerprint } from "../../lib/utils";
 import WaveSurfer from "wavesurfer.js";
@@ -27,7 +29,9 @@ interface AudioImportProps {
 export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
   const { currentProject, updateProject, getTranscriptsForFingerprint } = useProjectStore();
   const { settings } = useSettingsStore();
+  const { uploadAudio } = useEpisodes();
   const [existingTranscriptsCount, setExistingTranscriptsCount] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
@@ -303,8 +307,8 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
         await setAudioBlob(currentProject.id, file);
       }
 
-      // Get duration using HTML5 Audio element (more format support than Web Audio API)
-      const getDurationFromAudio = (): Promise<number> => {
+      // Get duration using HTML5 Audio element
+      const getDurationFromHtml5Audio = (): Promise<number> => {
         return new Promise((resolve) => {
           const audio = new Audio();
           audio.preload = "metadata";
@@ -319,19 +323,55 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
           };
 
           audio.onerror = () => {
-            console.warn("HTML5 Audio could not load file for duration detection");
             resolve(0);
           };
 
           // Timeout fallback
-          setTimeout(() => resolve(0), 5000);
+          setTimeout(() => resolve(0), 3000);
 
           audio.src = blobUrl;
         });
       };
 
-      // Try to get duration immediately
-      const audioDuration = await getDurationFromAudio();
+      // Get duration using Web Audio API (better for some formats)
+      const getDurationFromWebAudio = async (): Promise<number> => {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const audioContext = new AudioContext();
+          const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+          await audioContext.close();
+          return audioBuffer.duration;
+        } catch (err) {
+          console.warn("Web Audio API could not decode file:", err);
+          return 0;
+        }
+      };
+
+      // Get duration using music-metadata-browser (handles AIFF, FLAC, and many formats)
+      const getDurationFromMetadata = async (): Promise<number> => {
+        try {
+          // Add timeout to prevent hanging indefinitely
+          const timeoutPromise = new Promise<number>((_, reject) =>
+            setTimeout(() => reject(new Error("Metadata parse timeout")), 10000)
+          );
+          const metadataPromise = musicMetadata.parseBlob(file).then((m) => m.format.duration || 0);
+          return await Promise.race([metadataPromise, timeoutPromise]);
+        } catch (err) {
+          console.warn("music-metadata-browser could not parse file:", err);
+          return 0;
+        }
+      };
+
+      // Try HTML5 Audio first, then Web Audio API, then music-metadata as final fallback
+      let audioDuration = await getDurationFromHtml5Audio();
+      if (audioDuration === 0) {
+        console.log("HTML5 Audio failed, trying Web Audio API for duration...");
+        audioDuration = await getDurationFromWebAudio();
+      }
+      if (audioDuration === 0) {
+        console.log("Web Audio API failed, trying music-metadata for duration...");
+        audioDuration = await getDurationFromMetadata();
+      }
 
       // Check if this is a different file than before
       const isNewFile = currentProject?.audioFingerprint !== fingerprint;
@@ -360,6 +400,29 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
       }
 
       updateProject(updates);
+
+      // Upload audio to backend (async, don't block UI)
+      if (currentProject?.id) {
+        setIsUploading(true);
+        uploadAudio(currentProject.id, file, audioDuration)
+          .then((updatedEpisode) => {
+            if (updatedEpisode?.audioBlobUrl) {
+              // Update local state with the backend URL and duration from server
+              updateProject({
+                audioPath: updatedEpisode.audioBlobUrl,
+                audioDuration: updatedEpisode.audioDuration || audioDuration,
+              });
+              console.log("[AudioImport] Uploaded to backend:", updatedEpisode.audioBlobUrl);
+            }
+          })
+          .catch((err) => {
+            console.error("[AudioImport] Backend upload failed:", err);
+            // Keep local blob URL as fallback
+          })
+          .finally(() => {
+            setIsUploading(false);
+          });
+      }
 
       // Try to load WaveSurfer for waveform visualization
 
@@ -615,6 +678,9 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
                   </p>
                   <p className="mt-0.5 text-xs text-[hsl(var(--text-muted))]">
                     {currentProject?.name}
+                    {isUploading && (
+                      <span className="ml-2 text-[hsl(var(--cyan))]">• Syncing to cloud...</span>
+                    )}
                   </p>
                 </div>
                 <Button

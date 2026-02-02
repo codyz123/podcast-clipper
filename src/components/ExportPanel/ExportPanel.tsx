@@ -1,15 +1,13 @@
 import React, { useState } from "react";
 import {
-  DownloadIcon,
   CheckIcon,
   ExternalLinkIcon,
-  RocketIcon,
   CheckCircledIcon,
   Share1Icon,
   VideoIcon,
 } from "@radix-ui/react-icons";
-import { Button, Card, CardContent } from "../ui";
-import { Progress, Spinner } from "../ui/Progress";
+import { Card, CardContent } from "../ui";
+import { Progress } from "../ui/Progress";
 import { useProjectStore } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { VideoFormat, VIDEO_FORMATS, Clip } from "../../lib/types";
@@ -17,16 +15,13 @@ import { formatDuration } from "../../lib/formats";
 import { cn } from "../../lib/utils";
 
 export const ExportPanel: React.FC = () => {
-  const { currentProject, renderQueue, addRenderJob, updateRenderJob } = useProjectStore();
+  const { currentProject, renderQueue } = useProjectStore();
   const { settings } = useSettingsStore();
 
   const [selectedFormats, setSelectedFormats] = useState<VideoFormat[]>(settings.defaultFormats);
-  const [selectedTemplateId] = useState(settings.defaultTemplate);
   const [selectedClipIds, setSelectedClipIds] = useState<string[]>(
     currentProject?.clips.map((c) => c.id) || []
   );
-  const [isExporting, setIsExporting] = useState(false);
-
   const projectClips = currentProject?.clips || [];
 
   const toggleFormat = (format: VideoFormat) => {
@@ -47,39 +42,6 @@ export const ExportPanel: React.FC = () => {
 
   const deselectAllClips = () => {
     setSelectedClipIds([]);
-  };
-
-  const getTotalExports = () => {
-    return selectedClipIds.length * selectedFormats.length;
-  };
-
-  const startExport = async () => {
-    if (selectedClipIds.length === 0 || selectedFormats.length === 0) return;
-
-    setIsExporting(true);
-
-    for (const clipId of selectedClipIds) {
-      for (const format of selectedFormats) {
-        const job = addRenderJob(clipId, format, selectedTemplateId);
-        simulateRender(job.id);
-      }
-    }
-  };
-
-  const simulateRender = async (jobId: string) => {
-    updateRenderJob(jobId, { status: "rendering", progress: 0 });
-
-    for (let i = 0; i <= 100; i += 10) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      updateRenderJob(jobId, { progress: i });
-    }
-
-    updateRenderJob(jobId, {
-      status: "completed",
-      progress: 100,
-      outputPath: `/exports/clip_${jobId}.mp4`,
-      completedAt: new Date().toISOString(),
-    });
   };
 
   const openPlatformUpload = (platform: string, clip: Clip) => {
@@ -257,60 +219,6 @@ export const ExportPanel: React.FC = () => {
                       </button>
                     );
                   })}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Export Button Card */}
-            <Card
-              variant="default"
-              className="animate-fadeIn border-[hsl(158_70%_48%/0.2)] bg-[hsl(158_50%_15%/0.2)]"
-              style={{ animationDelay: "100ms" }}
-            >
-              <CardContent className="p-5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div
-                      className={cn(
-                        "flex h-11 w-11 items-center justify-center rounded-lg",
-                        "bg-[hsl(158_50%_15%/0.5)]"
-                      )}
-                    >
-                      <RocketIcon className="h-5 w-5 text-[hsl(var(--success))]" />
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-[hsl(var(--text))]">
-                        Ready to Export
-                      </p>
-                      <p className="text-xs text-[hsl(var(--text-subtle))]">
-                        {getTotalExports()} video{getTotalExports() !== 1 ? "s" : ""} will be
-                        generated
-                        <span className="text-[hsl(var(--text-muted))]">
-                          {" "}
-                          ({selectedClipIds.length} × {selectedFormats.length})
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-                  <Button
-                    onClick={startExport}
-                    disabled={
-                      selectedClipIds.length === 0 || selectedFormats.length === 0 || isExporting
-                    }
-                    glow={!isExporting && selectedClipIds.length > 0 && selectedFormats.length > 0}
-                  >
-                    {isExporting ? (
-                      <>
-                        <Spinner size="sm" className="mr-2" />
-                        Exporting...
-                      </>
-                    ) : (
-                      <>
-                        <DownloadIcon className="h-4 w-4" />
-                        Export Videos
-                      </>
-                    )}
-                  </Button>
                 </div>
               </CardContent>
             </Card>

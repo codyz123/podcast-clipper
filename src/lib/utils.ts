@@ -10,20 +10,37 @@ export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 }
 
-// Debounce function
-export function debounce<T extends (...args: unknown[]) => unknown>(
+// Debounce function with cancel support
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DebouncedFunction<T extends (...args: any[]) => any> = ((...args: Parameters<T>) => void) & {
+  cancel: () => void;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function debounce<T extends (...args: any[]) => any>(
   fn: T,
   delay: number
-): (...args: Parameters<T>) => void {
-  let timeoutId: ReturnType<typeof setTimeout>;
-  return (...args: Parameters<T>) => {
-    clearTimeout(timeoutId);
+): DebouncedFunction<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  const debounced = (...args: Parameters<T>) => {
+    if (timeoutId) clearTimeout(timeoutId);
     timeoutId = setTimeout(() => fn(...args), delay);
   };
+
+  debounced.cancel = () => {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+  };
+
+  return debounced;
 }
 
 // Throttle function
-export function throttle<T extends (...args: unknown[]) => unknown>(
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function throttle<T extends (...args: any[]) => any>(
   fn: T,
   limit: number
 ): (...args: Parameters<T>) => void {

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Podcast, AuthState } from "../lib/authTypes";
-import { useSettingsStore } from "./settingsStore";
+import { getApiBase } from "../lib/api";
 
 interface AuthStore extends AuthState {
   podcasts: Podcast[];
@@ -17,10 +17,6 @@ interface AuthStore extends AuthState {
   setCurrentPodcast: (id: string | null) => void;
   setPodcasts: (podcasts: Podcast[]) => void;
   setShowCreatePodcast: (show: boolean) => void;
-}
-
-function getApiBase(): string {
-  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3001";
 }
 
 export const useAuthStore = create<AuthStore>()(
@@ -126,7 +122,9 @@ export const useAuthStore = create<AuthStore>()(
           fetch(`${getApiBase()}/api/auth/logout`, {
             method: "POST",
             headers: { Authorization: `Bearer ${accessToken}` },
-          }).catch(() => {});
+          }).catch((err) => {
+            console.error("[Auth] Logout request failed:", err);
+          });
         }
 
         set({

@@ -11,6 +11,7 @@ import { Button, Card, CardContent, Input } from "../ui";
 import { Progress, Spinner } from "../ui/Progress";
 import { useProjectStore, getAudioBlob } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useEpisodes } from "../../hooks/useEpisodes";
 import { ClippabilityScore, Word } from "../../lib/types";
 import { retryWithBackoff, cn } from "../../lib/utils";
 import { ClipEditor } from "./ClipEditor";
@@ -23,6 +24,7 @@ interface ClipSelectorProps {
 export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
   const { currentProject, addClip, removeClip, updateClip } = useProjectStore();
   const { settings } = useSettingsStore();
+  const { saveClips } = useEpisodes();
 
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -52,19 +54,71 @@ export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
 
   // Load audio from IndexedDB
   useEffect(() => {
+    let objectUrl: string | null = null;
+
     const loadAudio = async () => {
       if (!currentProject?.id) return;
 
       const blob = await getAudioBlob(currentProject.id);
       if (blob) {
-        const url = URL.createObjectURL(blob);
-        setAudioUrl(url);
-        return () => URL.revokeObjectURL(url);
+        objectUrl = URL.createObjectURL(blob);
+        setAudioUrl(objectUrl);
       }
     };
 
     loadAudio();
+
+    return () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
   }, [currentProject?.id]);
+
+  // Sync clips to backend when they change (debounced)
+  const clipsRef = useRef(clips);
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    // Skip if clips haven't actually changed (compare by length, IDs, and times)
+    const prevClips = clipsRef.current;
+    const clipsChanged =
+      clips.length !== prevClips.length ||
+      clips.some(
+        (c, i) =>
+          c.id !== prevClips[i]?.id ||
+          c.startTime !== prevClips[i]?.startTime ||
+          c.endTime !== prevClips[i]?.endTime ||
+          c.name !== prevClips[i]?.name
+      );
+
+    if (!clipsChanged || !currentProject?.id) {
+      clipsRef.current = clips;
+      return;
+    }
+
+    clipsRef.current = clips;
+
+    // Debounce the sync
+    if (syncTimeoutRef.current) {
+      clearTimeout(syncTimeoutRef.current);
+    }
+
+    syncTimeoutRef.current = setTimeout(async () => {
+      try {
+        await saveClips(currentProject.id, clips);
+        console.log("[ClipSelector] Synced", clips.length, "clips to backend");
+      } catch (err) {
+        console.error("[ClipSelector] Failed to sync clips:", err);
+      }
+    }, 2000); // 2 second debounce
+
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+    };
+  }, [clips, currentProject?.id, saveClips]);
 
   // Handle audio duration once loaded
   useEffect(() => {

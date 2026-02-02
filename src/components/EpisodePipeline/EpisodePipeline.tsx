@@ -31,8 +31,8 @@ interface StageConfig {
 const stages: StageConfig[] = [
   { id: "info", label: "Episode Info", icon: InfoCircledIcon },
   { id: "planning", label: "Planning", icon: Pencil1Icon },
-  { id: "production", label: "Production", icon: SpeakerLoudIcon, disabled: true },
-  { id: "post-production", label: "Post", icon: MixerHorizontalIcon, disabled: true },
+  { id: "production", label: "Production", icon: SpeakerLoudIcon },
+  { id: "post-production", label: "Post", icon: MixerHorizontalIcon },
   { id: "distribution", label: "Distribution", icon: RocketIcon, disabled: true },
   { id: "marketing", label: "Marketing", icon: Share1Icon },
 ];

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuthStore } from "../stores/authStore";
-import { useSettingsStore } from "../stores/settingsStore";
 import { useProjectStore } from "../stores/projectStore";
+import { getApiBase, authFetch } from "../lib/api";
 
 // Episode type from backend
 export interface Episode {
@@ -23,6 +23,7 @@ export interface Episode {
     website?: string;
     twitter?: string;
   }>;
+  stageStatus?: Record<string, { status: string; updatedAt?: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,43 +79,12 @@ export interface EpisodeWithDetails extends Episode {
   clips: Clip[];
 }
 
-function getApiBase(): string {
-  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3001";
-}
-
 export function useEpisodes() {
-  const { accessToken, currentPodcastId, refreshAccessToken } = useAuthStore();
+  const { currentPodcastId } = useAuthStore();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [currentEpisode, setCurrentEpisode] = useState<EpisodeWithDetails | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Auth fetch helper with token refresh
-  const authFetch = useCallback(
-    async (url: string, options: RequestInit = {}): Promise<Response> => {
-      const headers = {
-        ...options.headers,
-        Authorization: `Bearer ${accessToken}`,
-      };
-
-      let res = await fetch(url, { ...options, headers });
-
-      // Try to refresh token if unauthorized
-      if (res.status === 401) {
-        const refreshed = await refreshAccessToken();
-        if (refreshed) {
-          const newToken = useAuthStore.getState().accessToken;
-          res = await fetch(url, {
-            ...options,
-            headers: { ...options.headers, Authorization: `Bearer ${newToken}` },
-          });
-        }
-      }
-
-      return res;
-    },
-    [accessToken, refreshAccessToken]
-  );
 
   // Fetch episodes for current podcast
   const fetchEpisodes = useCallback(async () => {
@@ -142,7 +112,7 @@ export function useEpisodes() {
     } finally {
       setIsLoading(false);
     }
-  }, [currentPodcastId, authFetch]);
+  }, [currentPodcastId]);
 
   // Fetch a single episode with details
   const fetchEpisode = useCallback(
@@ -173,7 +143,7 @@ export function useEpisodes() {
         return null;
       }
     },
-    [currentPodcastId, authFetch]
+    [currentPodcastId]
   );
 
   // Create a new episode
@@ -204,7 +174,7 @@ export function useEpisodes() {
         return null;
       }
     },
-    [currentPodcastId, authFetch, fetchEpisodes]
+    [currentPodcastId, fetchEpisodes]
   );
 
   // Update an episode
@@ -242,7 +212,7 @@ export function useEpisodes() {
         return null;
       }
     },
-    [currentPodcastId, authFetch, currentEpisode]
+    [currentPodcastId, currentEpisode]
   );
 
   // Delete an episode
@@ -274,17 +244,20 @@ export function useEpisodes() {
         return false;
       }
     },
-    [currentPodcastId, authFetch, currentEpisode]
+    [currentPodcastId, currentEpisode]
   );
 
   // Upload audio for an episode
   const uploadAudio = useCallback(
-    async (episodeId: string, file: File): Promise<Episode | null> => {
+    async (episodeId: string, file: File, audioDuration?: number): Promise<Episode | null> => {
       if (!currentPodcastId) return null;
 
       try {
         const formData = new FormData();
         formData.append("file", file);
+        if (audioDuration !== undefined) {
+          formData.append("audioDuration", audioDuration.toString());
+        }
 
         const res = await authFetch(
           `${getApiBase()}/api/podcasts/${currentPodcastId}/episodes/${episodeId}/audio`,
@@ -314,7 +287,7 @@ export function useEpisodes() {
         return null;
       }
     },
-    [currentPodcastId, authFetch, currentEpisode]
+    [currentPodcastId, currentEpisode]
   );
 
   // Save transcript
@@ -361,7 +334,7 @@ export function useEpisodes() {
         return null;
       }
     },
-    [currentPodcastId, authFetch, currentEpisode]
+    [currentPodcastId, currentEpisode]
   );
 
   // Save clips (bulk)
@@ -397,13 +370,47 @@ export function useEpisodes() {
         return null;
       }
     },
-    [currentPodcastId, authFetch, currentEpisode]
+    [currentPodcastId, currentEpisode]
   );
 
   // Clear current episode
   const clearCurrentEpisode = useCallback(() => {
     setCurrentEpisode(null);
   }, []);
+
+  // Update stage status
+  const updateStageStatus = useCallback(
+    async (
+      episodeId: string,
+      stage: string,
+      status: string
+    ): Promise<Record<string, { status: string; updatedAt?: string }> | null> => {
+      if (!currentPodcastId) return null;
+
+      try {
+        const res = await authFetch(
+          `${getApiBase()}/api/podcasts/${currentPodcastId}/episodes/${episodeId}/stage-status`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ stage, status }),
+          }
+        );
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Failed to update stage status");
+        }
+
+        const { stageStatus } = await res.json();
+        return stageStatus;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to update stage status");
+        return null;
+      }
+    },
+    [currentPodcastId]
+  );
 
   // Track if we've attempted migration in this session
   const migrationAttemptedRef = useRef(false);
@@ -529,7 +536,7 @@ export function useEpisodes() {
     localStorage.removeItem("podcastomatic-projects");
 
     console.log("[Migration] Migration complete. localStorage projects cleared.");
-  }, [currentPodcastId, authFetch, fetchEpisodes]);
+  }, [currentPodcastId, fetchEpisodes]);
 
   // Fetch episodes when podcast changes, then migrate if needed
   useEffect(() => {
@@ -556,6 +563,7 @@ export function useEpisodes() {
     ) {
       const localProjects = useProjectStore.getState().projects;
       if (localProjects.length > 0) {
+        migrationAttemptedRef.current = true; // Set BEFORE calling async function
         console.log("[Migration] Database empty, localStorage has data. Starting migration...");
         migrateLocalStorageProjects();
       }
@@ -576,5 +584,6 @@ export function useEpisodes() {
     saveTranscript,
     saveClips,
     clearCurrentEpisode,
+    updateStageStatus,
   };
 }

@@ -66,6 +66,7 @@ router.get("/:podcastId/episodes", verifyPodcastAccess, async (req: Request, res
         episodeNumber: projects.episodeNumber,
         seasonNumber: projects.seasonNumber,
         publishDate: projects.publishDate,
+        stageStatus: projects.stageStatus,
         createdAt: projects.createdAt,
         updatedAt: projects.updatedAt,
       })
@@ -197,6 +198,63 @@ router.put(
   }
 );
 
+// Update stage status for an episode
+router.put(
+  "/:podcastId/episodes/:episodeId/stage-status",
+  verifyPodcastAccess,
+  async (req: Request, res: Response) => {
+    try {
+      const podcastId = getParam(req.params.podcastId);
+      const episodeId = getParam(req.params.episodeId);
+      const { stage, status } = req.body;
+
+      // Validate inputs (use "complete" to match frontend StageStatus type)
+      const validStages = [
+        "planning",
+        "production",
+        "post-production",
+        "distribution",
+        "marketing",
+      ];
+      const validStatuses = ["not-started", "in-progress", "complete"];
+
+      if (!validStages.includes(stage) || !validStatuses.includes(status)) {
+        res.status(400).json({ error: "Invalid stage or status" });
+        return;
+      }
+
+      // Verify episode exists and belongs to podcast
+      const [episode] = await db
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, episodeId), eq(projects.podcastId, podcastId)));
+
+      if (!episode) {
+        res.status(404).json({ error: "Episode not found" });
+        return;
+      }
+
+      // Merge new status into existing stageStatus object
+      const currentStatus = (episode.stageStatus as Record<string, unknown>) || {};
+      const updatedStatus = {
+        ...currentStatus,
+        [stage]: { status, updatedAt: new Date().toISOString() },
+      };
+
+      const [updated] = await db
+        .update(projects)
+        .set({ stageStatus: updatedStatus, updatedAt: new Date() })
+        .where(eq(projects.id, episodeId))
+        .returning();
+
+      res.json({ episode: updated, stageStatus: updatedStatus });
+    } catch (error) {
+      console.error("Error updating stage status:", error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  }
+);
+
 // Delete an episode
 router.delete(
   "/:podcastId/episodes/:episodeId",
@@ -249,6 +307,8 @@ router.post(
       const podcastId = getParam(req.params.podcastId);
       const episodeId = getParam(req.params.episodeId);
       const file = req.file;
+      // Duration can be sent as form field (calculated client-side)
+      const audioDuration = req.body.audioDuration ? parseFloat(req.body.audioDuration) : undefined;
 
       if (!file) {
         res.status(400).json({ error: "No file uploaded" });
@@ -283,12 +343,13 @@ router.post(
         `podcasts/${podcastId}/episodes/${episodeId}`
       );
 
-      // Update episode with audio URL
+      // Update episode with audio URL and duration
       const [updated] = await db
         .update(projects)
         .set({
           audioBlobUrl: url,
           audioFileName: file.originalname,
+          ...(audioDuration !== undefined && { audioDuration }),
           updatedAt: new Date(),
         })
         .where(eq(projects.id, episodeId))

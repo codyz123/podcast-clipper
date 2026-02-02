@@ -1,6 +1,4 @@
 import React from "react";
-import { cn } from "../lib/utils";
-import { useProjectStore } from "../stores/projectStore";
 import { EpisodeStage, PlanningSubStage } from "./EpisodePipeline/EpisodePipeline";
 import { EpisodeInfoPage } from "./EpisodeInfo/EpisodeInfoPage";
 import { PlanningPage } from "./Planning/PlanningPage";
@@ -13,6 +11,7 @@ export type ViewType =
   | "editor"
   | "export"
   | "publish"
+  | "text-content"
   | "settings";
 
 interface LayoutProps {
@@ -20,22 +19,15 @@ interface LayoutProps {
   currentView: ViewType;
   onViewChange: (view: ViewType) => void;
   activeStage: EpisodeStage;
-  activePlanningSubStage: PlanningSubStage;
+  activeSubStage: string;
 }
 
 export const Layout: React.FC<LayoutProps> = ({
   children,
   currentView,
   activeStage,
-  activePlanningSubStage,
+  activeSubStage,
 }) => {
-  const { currentProject } = useProjectStore();
-
-  const hasProject = !!currentProject;
-  const hasAudio = !!currentProject?.audioPath;
-  const hasTranscript = !!currentProject?.transcript;
-  const hasClips = (currentProject?.clips?.length ?? 0) > 0;
-
   return (
     <div className="relative z-10 flex h-full flex-col overflow-hidden">
       {/* Main Content */}
@@ -50,7 +42,7 @@ export const Layout: React.FC<LayoutProps> = ({
           {activeStage === "info" && currentView !== "projects" ? (
             <EpisodeInfoPage />
           ) : activeStage === "planning" && currentView !== "projects" ? (
-            <PlanningPage activeSubStage={activePlanningSubStage} />
+            <PlanningPage activeSubStage={activeSubStage as PlanningSubStage} />
           ) : currentView === "editor" ? (
             <div className="h-full">{children}</div>
           ) : (
@@ -58,51 +50,6 @@ export const Layout: React.FC<LayoutProps> = ({
           )}
         </div>
       </main>
-
-      {/* Bottom Status Bar */}
-      {hasProject && (
-        <footer
-          className={cn(
-            "flex h-8 items-center justify-between px-4",
-            "bg-[hsl(var(--void)/0.95)]",
-            "border-t border-[hsl(0_0%_100%/0.04)]"
-          )}
-        >
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <div
-                className={cn(
-                  "h-2 w-2 rounded-full",
-                  hasClips
-                    ? "bg-[hsl(var(--success))]"
-                    : hasTranscript
-                      ? "bg-[hsl(var(--cyan))]"
-                      : "bg-[hsl(var(--magenta))]",
-                  "shadow-[0_0_6px_currentColor]"
-                )}
-              />
-              <span className="text-[11px] font-medium text-[hsl(var(--text-ghost))]">
-                {hasClips
-                  ? "Ready to export"
-                  : hasTranscript
-                    ? "Transcript ready"
-                    : hasAudio
-                      ? "Audio loaded"
-                      : "Waiting for audio"}
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="font-mono text-[10px] text-[hsl(var(--text-ghost))]">
-              {currentProject?.clips?.length || 0} clips
-            </span>
-            <span className="text-[10px] text-[hsl(var(--text-ghost))]">•</span>
-            <span className="font-mono text-[10px] text-[hsl(var(--text-ghost))]">
-              {currentProject?.transcript?.words?.length || 0} words
-            </span>
-          </div>
-        </footer>
-      )}
     </div>
   );
 };

@@ -18,6 +18,7 @@ export interface Project {
   showNotes?: string;
   explicit?: boolean;
   guests?: Guest[];
+  stageStatus?: Record<string, { status: string; updatedAt?: string }>;
 
   // Legacy: single transcript (for backward compatibility)
   transcript?: Transcript;
@@ -82,6 +83,39 @@ export interface ClippabilityScore {
   completeness: number; // 1-10
   overall: number; // average
   explanation: string;
+}
+
+// ============ Text Snippets (Marketing Tidbits) ============
+
+export interface TextSnippet {
+  id: string;
+  projectId: string;
+  index: number; // Snippet 1, 2, etc.
+  name: string; // AI-generated description (e.g., "Dating advice from clip 1")
+  content: string; // The actual snippet text
+  prompt?: string; // The prompt used if AI-generated
+  focusClipId?: string; // Optional: the clip it was focused on
+  isManual: boolean; // true if manually written, false if AI-generated
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CreateSnippetRequest {
+  content: string;
+  name?: string;
+  prompt?: string;
+  focusClipId?: string;
+  isManual: boolean;
+}
+
+export interface GenerateSnippetRequest {
+  prompt: string;
+  focusClipId?: string;
+}
+
+export interface GenerateSnippetResponse {
+  content: string;
+  name: string;
 }
 
 export interface VideoTemplate {
