@@ -14,8 +14,10 @@ import { PlaceholderPage } from "./components/PlaceholderPage";
 import { PodcastInfoPage } from "./components/PodcastInfo/PodcastInfoPage";
 import { ConnectionsPage } from "./components/Connections/ConnectionsPage";
 import { OAuthCallback } from "./pages/OAuthCallback";
+import { AuthScreen, LoadingScreen, CreatePodcastScreen } from "./components/Auth";
 import { useProjectStore } from "./stores/projectStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
+import { useAuthStore } from "./stores/authStore";
 import { applyBrandColors } from "./lib/colorExtractor";
 import { EpisodeStage, PlanningSubStage } from "./components/EpisodePipeline/EpisodePipeline";
 
@@ -72,6 +74,12 @@ function App() {
 
   const { currentProject, projects, loadProject } = useProjectStore();
   const { brandColors } = useWorkspaceStore();
+  const { isAuthenticated, isLoading: authLoading, checkAuth, podcasts } = useAuthStore();
+
+  // Check authentication on mount
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
 
   // Apply brand colors on mount and when they change
   useEffect(() => {
@@ -299,6 +307,21 @@ function App() {
   // Render OAuth callback page if on that route
   if (isOAuthCallback) {
     return <OAuthCallback />;
+  }
+
+  // Show loading screen while checking auth
+  if (authLoading) {
+    return <LoadingScreen />;
+  }
+
+  // Show auth screen if not authenticated
+  if (!isAuthenticated) {
+    return <AuthScreen />;
+  }
+
+  // Show create podcast screen if user has no podcasts
+  if (podcasts.length === 0) {
+    return <CreatePodcastScreen />;
   }
 
   return (

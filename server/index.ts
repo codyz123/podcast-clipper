@@ -5,6 +5,8 @@ import { transcribeRouter } from "./routes/transcribe.js";
 import { analyzeClipsRouter } from "./routes/analyze-clips.js";
 import { oauthRouter } from "./routes/oauth.js";
 import { projectsRouter } from "./routes/projects.js";
+import { authRouter } from "./routes/auth.js";
+import { podcastsRouter } from "./routes/podcasts.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { initializeDatabase } from "./lib/token-storage.js";
 import { initializeMediaTables } from "./lib/media-storage.js";
@@ -21,11 +23,18 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// Auth routes - handles registration, login, logout
+// Rate limiting is applied per-route in the auth router
+app.use("/api/auth", authRouter);
+
 // OAuth routes - mounted without global auth, handles auth internally
 // The callback route must be accessible without auth (Google redirects here)
 app.use("/api/oauth", oauthRouter);
 
-// Protected routes
+// Podcast management routes (JWT auth handled internally)
+app.use("/api/podcasts", podcastsRouter);
+
+// Protected routes (legacy - uses access code or JWT)
 app.use("/api", authMiddleware);
 app.use("/api", transcribeRouter);
 app.use("/api", analyzeClipsRouter);

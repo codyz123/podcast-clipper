@@ -157,15 +157,20 @@ export async function updateToken(
 
   const encryptedAccess = encryptToken(accessToken);
 
-  const result = await sql`
+  // Check if token exists first
+  const existing = await sql`
+    SELECT 1 FROM oauth_tokens WHERE platform = ${platform}
+  `;
+
+  if (existing.length === 0) {
+    throw new Error(`No token found for platform: ${platform}`);
+  }
+
+  await sql`
     UPDATE oauth_tokens
     SET access_token = ${encryptedAccess}, expires_at = ${expiresAt.toISOString()}, updated_at = NOW()
     WHERE platform = ${platform}
   `;
-
-  if (result.count === 0) {
-    throw new Error(`No token found for platform: ${platform}`);
-  }
 }
 
 export async function deleteToken(platform: StoredToken["platform"]): Promise<void> {

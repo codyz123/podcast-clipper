@@ -2,15 +2,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Request, Response, NextFunction } from "express";
 import { authMiddleware } from "../../middleware/auth.js";
 
-describe("Auth Middleware", () => {
+/**
+ * Tests for the hybrid authMiddleware that supports both JWT and access code authentication.
+ *
+ * The middleware tries JWT first, then falls back to access code for legacy support.
+ */
+describe("Auth Middleware (Hybrid)", () => {
   let mockReq: Partial<Request>;
   let mockRes: Partial<Response>;
   let mockNext: NextFunction;
-  let originalAccessCode: string | undefined;
+  const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    // Save original env var
-    originalAccessCode = process.env.ACCESS_CODE;
+    // Set up test environment
+    process.env.JWT_SECRET = "test-jwt-secret-key-12345";
+    process.env.ACCESS_CODE = "test-secret";
 
     // Set up mock request
     mockReq = {
@@ -25,78 +31,149 @@ describe("Auth Middleware", () => {
 
     // Set up mock next
     mockNext = vi.fn();
-
-    // Set default access code
-    process.env.ACCESS_CODE = "test-secret";
   });
 
   afterEach(() => {
-    // Restore original env var
-    if (originalAccessCode !== undefined) {
-      process.env.ACCESS_CODE = originalAccessCode;
-    } else {
-      delete process.env.ACCESS_CODE;
-    }
+    process.env = { ...originalEnv };
     vi.clearAllMocks();
   });
 
-  it("should call next() with valid access code", () => {
-    mockReq.headers = { "x-access-code": "test-secret" };
+  describe("JWT Authentication", () => {
+    it("should call next() with valid JWT token and attach user", async () => {
+      const jwt = await import("jsonwebtoken");
+      const token = jwt.default.sign(
+        { userId: "user-123", email: "test@example.com", type: "access" },
+        process.env.JWT_SECRET!,
+        { expiresIn: "15m" }
+      );
+      mockReq.headers = { authorization: `Bearer ${token}` };
 
-    authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
 
-    expect(mockNext).toHaveBeenCalled();
-    expect(mockRes.status).not.toHaveBeenCalled();
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.user).toEqual({
+        userId: "user-123",
+        email: "test@example.com",
+      });
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    it("should return 401 when JWT token is invalid", () => {
+      mockReq.headers = { authorization: "Bearer invalid-token" };
+
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      // Falls through to access code check, which also fails
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Authentication required",
+      });
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it("should return 401 when JWT token is expired", async () => {
+      const jwt = await import("jsonwebtoken");
+      const expiredToken = jwt.default.sign(
+        { userId: "user-123", email: "test@example.com", type: "access" },
+        process.env.JWT_SECRET!,
+        { expiresIn: "-1s" }
+      );
+      mockReq.headers = { authorization: `Bearer ${expiredToken}` };
+
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockNext).not.toHaveBeenCalled();
+    });
   });
 
-  it("should return 401 when access code is missing", () => {
-    mockReq.headers = {};
+  describe("Access Code Fallback", () => {
+    it("should call next() with valid access code (legacy support)", () => {
+      mockReq.headers = { "x-access-code": "test-secret" };
 
-    authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
 
-    expect(mockRes.status).toHaveBeenCalledWith(401);
-    expect(mockRes.json).toHaveBeenCalledWith({ error: "Access code required" });
-    expect(mockNext).not.toHaveBeenCalled();
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
+      // Note: user is not attached with access code auth
+      expect(mockReq.user).toBeUndefined();
+    });
+
+    it("should fall back to access code when JWT is invalid", () => {
+      mockReq.headers = {
+        authorization: "Bearer invalid-token",
+        "x-access-code": "test-secret",
+      };
+
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockRes.status).not.toHaveBeenCalled();
+    });
+
+    it("should return 401 when both JWT and access code are missing", () => {
+      mockReq.headers = {};
+
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Authentication required",
+      });
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it("should return 401 when access code is invalid and no JWT", () => {
+      mockReq.headers = { "x-access-code": "wrong-code" };
+
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockNext).not.toHaveBeenCalled();
+    });
+
+    it("should return 401 when access code is empty", () => {
+      mockReq.headers = { "x-access-code": "" };
+
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockRes.json).toHaveBeenCalledWith({
+        error: "Authentication required",
+      });
+    });
+
+    it("should be case-sensitive for access codes", () => {
+      process.env.ACCESS_CODE = "MySecret";
+      mockReq.headers = { "x-access-code": "mysecret" };
+
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+
+      expect(mockRes.status).toHaveBeenCalledWith(401);
+      expect(mockNext).not.toHaveBeenCalled();
+    });
   });
 
-  it("should return 403 when access code is invalid", () => {
-    mockReq.headers = { "x-access-code": "wrong-code" };
+  describe("Priority", () => {
+    it("should prefer valid JWT over valid access code", async () => {
+      const jwt = await import("jsonwebtoken");
+      const token = jwt.default.sign(
+        { userId: "jwt-user", email: "jwt@example.com", type: "access" },
+        process.env.JWT_SECRET!,
+        { expiresIn: "15m" }
+      );
+      mockReq.headers = {
+        authorization: `Bearer ${token}`,
+        "x-access-code": "test-secret",
+      };
 
-    authMiddleware(mockReq as Request, mockRes as Response, mockNext);
+      authMiddleware(mockReq as Request, mockRes as Response, mockNext);
 
-    expect(mockRes.status).toHaveBeenCalledWith(403);
-    expect(mockRes.json).toHaveBeenCalledWith({ error: "Invalid access code" });
-    expect(mockNext).not.toHaveBeenCalled();
-  });
-
-  it("should return 500 when ACCESS_CODE env var is not set", () => {
-    delete process.env.ACCESS_CODE;
-    mockReq.headers = { "x-access-code": "any-code" };
-
-    authMiddleware(mockReq as Request, mockRes as Response, mockNext);
-
-    expect(mockRes.status).toHaveBeenCalledWith(500);
-    expect(mockRes.json).toHaveBeenCalledWith({ error: "Server misconfigured" });
-    expect(mockNext).not.toHaveBeenCalled();
-  });
-
-  it("should handle empty string access code in header", () => {
-    mockReq.headers = { "x-access-code": "" };
-
-    authMiddleware(mockReq as Request, mockRes as Response, mockNext);
-
-    // Empty string is falsy, so should return 401
-    expect(mockRes.status).toHaveBeenCalledWith(401);
-    expect(mockRes.json).toHaveBeenCalledWith({ error: "Access code required" });
-  });
-
-  it("should be case-sensitive for access codes", () => {
-    process.env.ACCESS_CODE = "MySecret";
-    mockReq.headers = { "x-access-code": "mysecret" };
-
-    authMiddleware(mockReq as Request, mockRes as Response, mockNext);
-
-    expect(mockRes.status).toHaveBeenCalledWith(403);
-    expect(mockNext).not.toHaveBeenCalled();
+      expect(mockNext).toHaveBeenCalled();
+      expect(mockReq.user).toEqual({
+        userId: "jwt-user",
+        email: "jwt@example.com",
+      });
+    });
   });
 });
