@@ -3,7 +3,13 @@ import cors from "cors";
 import multer from "multer";
 import { transcribeRouter } from "./routes/transcribe.js";
 import { analyzeClipsRouter } from "./routes/analyze-clips.js";
+import { oauthRouter } from "./routes/oauth.js";
+import { projectsRouter } from "./routes/projects.js";
+import { authRouter } from "./routes/auth.js";
+import { podcastsRouter } from "./routes/podcasts.js";
 import { authMiddleware } from "./middleware/auth.js";
+import { initializeDatabase } from "./lib/token-storage.js";
+import { initializeMediaTables } from "./lib/media-storage.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -17,10 +23,22 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
-// Protected routes
+// Auth routes - handles registration, login, logout
+// Rate limiting is applied per-route in the auth router
+app.use("/api/auth", authRouter);
+
+// OAuth routes - mounted without global auth, handles auth internally
+// The callback route must be accessible without auth (Google redirects here)
+app.use("/api/oauth", oauthRouter);
+
+// Podcast management routes (JWT auth handled internally)
+app.use("/api/podcasts", podcastsRouter);
+
+// Protected routes (legacy - uses access code or JWT)
 app.use("/api", authMiddleware);
 app.use("/api", transcribeRouter);
 app.use("/api", analyzeClipsRouter);
+app.use("/api", projectsRouter);
 
 // Error handler for multer and other errors - returns JSON instead of HTML
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
@@ -49,6 +67,18 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Initialize database and start server
+async function start() {
+  try {
+    await initializeDatabase();
+    await initializeMediaTables();
+    app.listen(PORT, () => {
+      console.log(`Server running on port ${PORT}`);
+    });
+  } catch (error) {
+    console.error("Failed to initialize database:", error);
+    process.exit(1);
+  }
+}
+
+start();

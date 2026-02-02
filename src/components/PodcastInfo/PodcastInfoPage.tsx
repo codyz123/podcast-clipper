@@ -5,10 +5,14 @@ import {
   PersonIcon,
   GlobeIcon,
   EnvelopeClosedIcon,
+  PlusIcon,
+  Cross2Icon,
+  CheckIcon,
 } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
 import { useWorkspaceStore, PodcastMetadata } from "../../stores/workspaceStore";
 import { extractBrandColors } from "../../lib/colorExtractor";
+import { usePodcast } from "../../hooks/usePodcast";
 
 // Categories based on Apple Podcasts categories
 const PODCAST_CATEGORIES = [
@@ -54,6 +58,23 @@ export const PodcastInfoPage: React.FC = () => {
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Team management
+  const {
+    podcast,
+    isLoading: isLoadingPodcast,
+    error: podcastError,
+    inviteMember,
+    removeMember,
+    cancelInvitation,
+    isOwner,
+  } = usePodcast();
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [isInviting, setIsInviting] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [cancellingInviteId, setCancellingInviteId] = useState<string | null>(null);
+
   // Sync from store when it changes (e.g., on mount)
   useEffect(() => {
     setMetadata(podcastMetadata);
@@ -95,6 +116,53 @@ export const PodcastInfoPage: React.FC = () => {
   const handleRemoveCoverImage = () => {
     handleChange("coverImage", "");
     setBrandColors(null);
+  };
+
+  // Team management handlers
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+
+    setIsInviting(true);
+    setInviteError(null);
+    setInviteSuccess(null);
+
+    try {
+      const result = await inviteMember(inviteEmail.trim());
+      setInviteEmail("");
+      setInviteSuccess(
+        result.status === "added"
+          ? "User added to team!"
+          : "Invitation sent! They'll be added when they sign up."
+      );
+      setTimeout(() => setInviteSuccess(null), 5000);
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : "Failed to invite");
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleRemoveMember = async (userId: string) => {
+    setRemovingMemberId(userId);
+    try {
+      await removeMember(userId);
+    } catch (err) {
+      console.error("Failed to remove member:", err);
+    } finally {
+      setRemovingMemberId(null);
+    }
+  };
+
+  const handleCancelInvitation = async (invitationId: string) => {
+    setCancellingInviteId(invitationId);
+    try {
+      await cancelInvitation(invitationId);
+    } catch (err) {
+      console.error("Failed to cancel invitation:", err);
+    } finally {
+      setCancellingInviteId(null);
+    }
   };
 
   return (
@@ -422,6 +490,188 @@ export const PodcastInfoPage: React.FC = () => {
                   )}
                 />
               </div>
+            </div>
+          </section>
+
+          {/* Team Section */}
+          <section>
+            <h2 className="mb-4 flex items-center gap-2 text-sm font-medium tracking-wider text-[hsl(var(--text-muted))] uppercase">
+              <PersonIcon className="h-4 w-4" />
+              Team
+            </h2>
+            <div className="rounded-xl border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface)/0.5)] p-5">
+              {/* Invite Form */}
+              <form onSubmit={handleInvite} className="mb-6">
+                <label className="mb-1.5 block text-sm font-medium text-[hsl(var(--text))]">
+                  Invite a team member
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="colleague@example.com"
+                    disabled={isInviting}
+                    className={cn(
+                      "flex-1 rounded-lg px-4 py-2.5",
+                      "bg-[hsl(var(--bg-base))]",
+                      "border border-[hsl(var(--border-subtle))]",
+                      "text-[hsl(var(--text))] placeholder:text-[hsl(var(--text-ghost))]",
+                      "focus:border-[hsl(var(--cyan))] focus:ring-1 focus:ring-[hsl(var(--cyan)/0.3)] focus:outline-none",
+                      "disabled:opacity-50"
+                    )}
+                  />
+                  <button
+                    type="submit"
+                    disabled={isInviting || !inviteEmail.trim()}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-lg px-4 py-2.5",
+                      "bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))]",
+                      "text-sm font-medium",
+                      "hover:bg-[hsl(var(--cyan)/0.9)]",
+                      "disabled:cursor-not-allowed disabled:opacity-50",
+                      "transition-colors"
+                    )}
+                  >
+                    <PlusIcon className="h-4 w-4" />
+                    {isInviting ? "Inviting..." : "Invite"}
+                  </button>
+                </div>
+                {inviteError && (
+                  <p className="mt-2 text-sm text-[hsl(var(--error))]">{inviteError}</p>
+                )}
+                {inviteSuccess && (
+                  <p className="mt-2 flex items-center gap-1.5 text-sm text-green-500">
+                    <CheckIcon className="h-4 w-4" />
+                    {inviteSuccess}
+                  </p>
+                )}
+              </form>
+
+              {/* Current Members */}
+              <div className="mb-4">
+                <h3 className="mb-3 text-sm font-medium text-[hsl(var(--text))]">
+                  Current Members
+                </h3>
+                {isLoadingPodcast ? (
+                  <p className="text-sm text-[hsl(var(--text-ghost))]">Loading...</p>
+                ) : podcastError ? (
+                  <p className="text-sm text-[hsl(var(--error))]">{podcastError}</p>
+                ) : podcast?.members && podcast.members.length > 0 ? (
+                  <div className="space-y-2">
+                    {podcast.members.map((member) => (
+                      <div
+                        key={member.userId}
+                        className={cn(
+                          "flex items-center justify-between rounded-lg px-4 py-3",
+                          "bg-[hsl(var(--bg-base))]",
+                          "border border-[hsl(var(--border-subtle))]"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          {member.avatarUrl ? (
+                            <img
+                              src={member.avatarUrl}
+                              alt={member.name}
+                              className="h-8 w-8 rounded-full"
+                            />
+                          ) : (
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--cyan)/0.2)] text-sm font-medium text-[hsl(var(--cyan))]">
+                              {member.name
+                                .split(" ")
+                                .map((n) => n[0])
+                                .join("")
+                                .toUpperCase()
+                                .slice(0, 2)}
+                            </div>
+                          )}
+                          <div>
+                            <p className="text-sm font-medium text-[hsl(var(--text))]">
+                              {member.name}
+                            </p>
+                            <p className="text-xs text-[hsl(var(--text-ghost))]">{member.email}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={cn(
+                              "rounded px-2 py-0.5 text-xs font-medium",
+                              member.role === "owner"
+                                ? "bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]"
+                                : "bg-[hsl(var(--surface))] text-[hsl(var(--text-muted))]"
+                            )}
+                          >
+                            {member.role === "owner" ? "Owner" : "Member"}
+                          </span>
+                          {isOwner && member.role !== "owner" && (
+                            <button
+                              onClick={() => handleRemoveMember(member.userId)}
+                              disabled={removingMemberId === member.userId}
+                              className={cn(
+                                "rounded p-1.5 text-[hsl(var(--text-ghost))]",
+                                "hover:bg-[hsl(var(--error)/0.1)] hover:text-[hsl(var(--error))]",
+                                "disabled:opacity-50",
+                                "transition-colors"
+                              )}
+                              title="Remove member"
+                            >
+                              <Cross2Icon className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-[hsl(var(--text-ghost))]">No members yet</p>
+                )}
+              </div>
+
+              {/* Pending Invitations */}
+              {podcast?.pendingInvitations && podcast.pendingInvitations.length > 0 && (
+                <div>
+                  <h3 className="mb-3 text-sm font-medium text-[hsl(var(--text))]">
+                    Pending Invitations
+                  </h3>
+                  <div className="space-y-2">
+                    {podcast.pendingInvitations.map((invitation) => (
+                      <div
+                        key={invitation.id}
+                        className={cn(
+                          "flex items-center justify-between rounded-lg px-4 py-3",
+                          "bg-[hsl(var(--bg-base))]",
+                          "border border-dashed border-[hsl(var(--border-subtle))]"
+                        )}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--surface))] text-[hsl(var(--text-ghost))]">
+                            <EnvelopeClosedIcon className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="text-sm text-[hsl(var(--text))]">{invitation.email}</p>
+                            <p className="text-xs text-[hsl(var(--text-ghost))]">
+                              Invited {new Date(invitation.createdAt).toLocaleDateString()}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleCancelInvitation(invitation.id)}
+                          disabled={cancellingInviteId === invitation.id}
+                          className={cn(
+                            "rounded p-1.5 text-[hsl(var(--text-ghost))]",
+                            "hover:bg-[hsl(var(--error)/0.1)] hover:text-[hsl(var(--error))]",
+                            "disabled:opacity-50",
+                            "transition-colors"
+                          )}
+                          title="Cancel invitation"
+                        >
+                          <Cross2Icon className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </section>
         </div>

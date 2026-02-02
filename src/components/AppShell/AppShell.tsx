@@ -23,6 +23,7 @@ import {
 } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
 import { EpisodeStage } from "../EpisodePipeline/EpisodePipeline";
+import { UserMenu } from "../Auth/UserMenu";
 
 // Marketing sub-stages (workflow steps)
 export type MarketingSubStage = "import" | "transcript" | "clips" | "editor" | "export";
@@ -65,7 +66,7 @@ const marketingSubStages: SubStageOption[] = [
   { id: "transcript", label: "Transcribe", icon: TextIcon },
   { id: "clips", label: "Clips", icon: ScissorsIcon },
   { id: "editor", label: "Editor", icon: VideoIcon },
-  { id: "export", label: "Export", icon: DownloadIcon },
+  { id: "export", label: "Publish", icon: DownloadIcon },
 ];
 
 // Get sub-stages for a given stage
@@ -78,7 +79,6 @@ const getSubStagesForStage = (stage: EpisodeStage): SubStageOption[] => {
 interface AppShellProps {
   children: React.ReactNode;
   onSettingsClick?: () => void;
-  onAccountClick?: () => void;
   // Episode breadcrumb
   episodeName?: string;
   episodes?: Episode[];
@@ -95,7 +95,6 @@ interface AppShellProps {
 export const AppShell: React.FC<AppShellProps> = ({
   children,
   onSettingsClick,
-  onAccountClick,
   episodeName,
   episodes = [],
   onBackToEpisodes,
@@ -407,19 +406,8 @@ export const AppShell: React.FC<AppShellProps> = ({
             <GearIcon className="h-4 w-4" />
           </button>
 
-          {/* Account */}
-          <button
-            onClick={onAccountClick}
-            className={cn(
-              "flex h-8 w-8 items-center justify-center rounded-md",
-              "text-[hsl(var(--text-ghost))]",
-              "hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text-muted))]",
-              "transition-colors"
-            )}
-            title="Account"
-          >
-            <PersonIcon className="h-4 w-4" />
-          </button>
+          {/* User Menu */}
+          <UserMenu />
         </div>
       </header>
 

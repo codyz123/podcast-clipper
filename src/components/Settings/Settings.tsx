@@ -658,7 +658,7 @@ export const Settings: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-[family-name:var(--font-display)] text-sm font-bold text-[hsl(var(--text))]">
-                    Podcast Clipper
+                    Podcastomatic
                   </p>
                   <p className="mt-0.5 text-xs text-[hsl(var(--text-muted))]">Version 0.1.0</p>
                 </div>

@@ -70,6 +70,8 @@ export const Layout: React.FC<LayoutProps> = ({
             <EpisodeInfoPage />
           ) : activeStage === "planning" && currentView !== "projects" ? (
             <PlanningPage activeSubStage={activePlanningSubStage} />
+          ) : currentView === "editor" ? (
+            <div className="h-full">{children}</div>
           ) : (
             <div className="animate-fadeInUp px-6 py-8 sm:px-8 lg:px-12 lg:py-10">{children}</div>
           )}

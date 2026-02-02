@@ -153,7 +153,7 @@ describe("POST /api/transcribe", () => {
   });
 
   describe("Authentication", () => {
-    it("should reject requests without access code", async () => {
+    it("should reject requests without authentication", async () => {
       const audioBuffer = await readFile(join(FIXTURES_PATH, "short-5s.mp3"));
 
       const response = await request(app)
@@ -161,10 +161,10 @@ describe("POST /api/transcribe", () => {
         .attach("file", audioBuffer, "test.mp3");
 
       expect(response.status).toBe(401);
-      expect(response.body.error).toBe("Access code required");
+      expect(response.body.error).toBe("Authentication required");
     });
 
-    it("should reject requests with invalid access code", async () => {
+    it("should reject requests with invalid credentials", async () => {
       const audioBuffer = await readFile(join(FIXTURES_PATH, "short-5s.mp3"));
 
       const response = await request(app)
@@ -172,8 +172,9 @@ describe("POST /api/transcribe", () => {
         .set("X-Access-Code", "wrong-code")
         .attach("file", audioBuffer, "test.mp3");
 
-      expect(response.status).toBe(403);
-      expect(response.body.error).toBe("Invalid access code");
+      // The hybrid middleware returns 401 for all auth failures
+      expect(response.status).toBe(401);
+      expect(response.body.error).toBe("Authentication required");
     });
   });
 

@@ -37,7 +37,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "json"],
-      include: ["routes/**/*.ts", "middleware/**/*.ts", "lib/**/*.ts"],
+      include: ["routes/**/*.ts", "middleware/**/*.ts", "lib/**/*.ts", "services/**/*.ts"],
       exclude: ["__tests__/**"],
     },
   },

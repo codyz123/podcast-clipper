@@ -1,4 +1,4 @@
-import React, { useRef, useCallback, useState } from "react";
+import React, { useRef, useCallback, useState, useMemo } from "react";
 import {
   SpeakerLoudIcon,
   SpeakerOffIcon,
@@ -9,7 +9,7 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
 } from "@radix-ui/react-icons";
-import { Track, TrackType } from "../../../lib/types";
+import { Track, TrackType, Word } from "../../../lib/types";
 import { cn } from "../../../lib/utils";
 import { formatTimestamp } from "../../../lib/formats";
 
@@ -19,9 +19,13 @@ interface MultiTrackTimelineProps {
   currentTime: number;
   zoomLevel: number; // pixels per second
   selectedTrackId: string | null;
+  selectedClipId: string | null;
   onTracksChange: (tracks: Track[]) => void;
   onSeek: (time: number) => void;
   onSelectTrack: (trackId: string | null) => void;
+  onSelectClip: (clipId: string | null) => void;
+  words?: Word[]; // Words for caption visualization
+  clipStartTime?: number; // Start time of the clip in the full audio
 }
 
 // Track type icons and colors
@@ -81,9 +85,13 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
   currentTime,
   zoomLevel,
   selectedTrackId,
+  selectedClipId,
   onTracksChange,
   onSeek,
   onSelectTrack,
+  onSelectClip,
+  words = [],
+  clipStartTime = 0,
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [draggingFade, setDraggingFade] = useState<{
@@ -92,6 +100,20 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
     startX: number;
     startValue: number;
   } | null>(null);
+
+  // State for dragging clips
+  const [draggingClip, setDraggingClip] = useState<{
+    trackId: string;
+    clipId: string;
+    startX: number;
+    originalStartTime: number;
+  } | null>(null);
+
+  // Get words that fall within the clip duration (for caption visualization)
+  const clipWords = useMemo(() => {
+    const clipEndTime = clipStartTime + clipDuration;
+    return words.filter((w) => w.start >= clipStartTime && w.end <= clipEndTime);
+  }, [words, clipStartTime, clipDuration]);
 
   // Calculate timeline width based on duration and zoom
   const timelineWidth = Math.max(clipDuration * zoomLevel, 400);
@@ -210,17 +232,18 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
       const track = tracks.find((t) => t.id === trackId);
       if (!track) return;
 
+      const startX = e.clientX;
       const startValue = fadeType === "fadeIn" ? track.fadeIn || 0 : track.fadeOut || 0;
 
       setDraggingFade({
         trackId,
         type: fadeType,
-        startX: e.clientX,
+        startX,
         startValue,
       });
 
       const handleMouseMove = (e: MouseEvent) => {
-        const deltaX = e.clientX - (draggingFade?.startX || e.clientX);
+        const deltaX = e.clientX - startX;
         const deltaTime = deltaX / zoomLevel;
 
         // For fade in, dragging right increases; for fade out, dragging left increases
@@ -238,7 +261,64 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
       document.addEventListener("mousemove", handleMouseMove);
       document.addEventListener("mouseup", handleMouseUp);
     },
-    [tracks, zoomLevel, updateTrackFade, draggingFade?.startX]
+    [tracks, zoomLevel, updateTrackFade]
+  );
+
+  // Handle clip drag start (for repositioning clips)
+  const handleClipDragStart = useCallback(
+    (e: React.MouseEvent, trackId: string, clipId: string, originalStartTime: number) => {
+      e.stopPropagation();
+      e.preventDefault();
+
+      const track = tracks.find((t) => t.id === trackId);
+      if (!track || track.locked) return;
+
+      // Don't allow dragging podcast-audio or captions tracks
+      if (track.type === "podcast-audio" || track.type === "captions") return;
+
+      const startX = e.clientX;
+
+      setDraggingClip({
+        trackId,
+        clipId,
+        startX,
+        originalStartTime,
+      });
+
+      const handleMouseMove = (e: MouseEvent) => {
+        const deltaX = e.clientX - startX;
+        const deltaTime = deltaX / zoomLevel;
+
+        // Find the clip to get its duration for bounds checking
+        const clip = track.clips.find((c) => c.id === clipId);
+        const clipDur = clip?.duration || 1;
+
+        const newStartTime = Math.max(
+          0,
+          Math.min(clipDuration - clipDur, originalStartTime + deltaTime)
+        );
+
+        // Update the clip position
+        const updatedTracks = tracks.map((t) => {
+          if (t.id !== trackId) return t;
+          return {
+            ...t,
+            clips: t.clips.map((c) => (c.id === clipId ? { ...c, startTime: newStartTime } : c)),
+          };
+        });
+        onTracksChange(updatedTracks);
+      };
+
+      const handleMouseUp = () => {
+        setDraggingClip(null);
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [tracks, zoomLevel, clipDuration, onTracksChange]
   );
 
   // Sort tracks by order (lower = bottom, higher = top)
@@ -412,42 +492,124 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
 
               {/* Track content */}
               <div className="relative flex-1 bg-[hsl(var(--bg-base))]">
+                {/* Caption word visualization for captions track */}
+                {track.type === "captions" && clipWords.length > 0 && (
+                  <div className="absolute inset-x-0 top-1 bottom-1 overflow-hidden">
+                    {clipWords.map((word, i) => {
+                      const wordStart = (word.start - clipStartTime) * zoomLevel;
+                      const wordWidth = Math.max((word.end - word.start) * zoomLevel, 2);
+                      return (
+                        <div
+                          key={i}
+                          className="absolute top-0 bottom-0 flex items-center overflow-hidden rounded-sm"
+                          style={{
+                            left: wordStart,
+                            width: wordWidth,
+                            backgroundColor: config.bgColor,
+                          }}
+                        >
+                          {wordWidth > 20 && (
+                            <span
+                              className="truncate px-0.5 text-[8px]"
+                              style={{ color: config.color }}
+                            >
+                              {word.text}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 {/* Track clips with fade overlays */}
                 {track.clips.map((clip) => {
                   const clipLeft = clip.startTime * zoomLevel;
                   const clipWidth = Math.max(clip.duration * zoomLevel, 4);
+                  const isDraggable =
+                    !track.locked && track.type !== "podcast-audio" && track.type !== "captions";
+                  const isDraggingThis = draggingClip?.clipId === clip.id;
+                  const isClipSelected = selectedClipId === clip.id;
 
                   return (
                     <div
                       key={clip.id}
-                      className="absolute top-1 bottom-1 overflow-hidden rounded"
+                      className={cn(
+                        "absolute top-1 bottom-1 overflow-hidden rounded",
+                        isDraggable && "cursor-grab",
+                        isDraggingThis && "cursor-grabbing ring-2 ring-white/50",
+                        isClipSelected &&
+                          "ring-2 ring-[hsl(var(--cyan))] ring-offset-1 ring-offset-[hsl(var(--bg-base))]"
+                      )}
                       style={{
                         left: clipLeft,
                         width: clipWidth,
                         backgroundColor: config.bgColor,
                         borderLeft: `2px solid ${config.color}`,
                       }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Only allow selecting clips on video-overlay tracks (animations)
+                        if (track.type === "video-overlay") {
+                          onSelectClip(isClipSelected ? null : clip.id);
+                        }
+                      }}
+                      onMouseDown={
+                        isDraggable
+                          ? (e) => handleClipDragStart(e, track.id, clip.id, clip.startTime)
+                          : undefined
+                      }
                     >
-                      {/* Fade In overlay */}
+                      {/* Fade In overlay - triangle from bottom-left to top of handle */}
                       {isAudio && fadeInWidth > 0 && (
                         <div
-                          className="absolute top-0 bottom-0 left-0"
+                          className="pointer-events-none absolute top-0 bottom-0 left-0"
                           style={{ width: Math.min(fadeInWidth, clipWidth) }}
                         >
-                          <svg className="h-full w-full" preserveAspectRatio="none">
-                            <polygon points={`0,100% 0,0 100%,0`} fill={config.fadeColor} />
+                          <svg
+                            className="h-full w-full"
+                            viewBox="0 0 100 100"
+                            preserveAspectRatio="none"
+                          >
+                            {/* Triangle: bottom-left -> top-right -> bottom-right */}
+                            <polygon points="0,100 100,0 100,100" fill={config.fadeColor} />
+                            {/* Diagonal line for the fade curve */}
+                            <line
+                              x1="0"
+                              y1="100"
+                              x2="100"
+                              y2="0"
+                              stroke={config.color}
+                              strokeWidth="2"
+                              vectorEffect="non-scaling-stroke"
+                            />
                           </svg>
                         </div>
                       )}
 
-                      {/* Fade Out overlay */}
+                      {/* Fade Out overlay - triangle from top of handle to bottom-right */}
                       {isAudio && fadeOutWidth > 0 && (
                         <div
-                          className="absolute top-0 right-0 bottom-0"
+                          className="pointer-events-none absolute top-0 right-0 bottom-0"
                           style={{ width: Math.min(fadeOutWidth, clipWidth) }}
                         >
-                          <svg className="h-full w-full" preserveAspectRatio="none">
-                            <polygon points={`0,0 100%,0 100%,100%`} fill={config.fadeColor} />
+                          <svg
+                            className="h-full w-full"
+                            viewBox="0 0 100 100"
+                            preserveAspectRatio="none"
+                          >
+                            {/* Triangle: top-left -> bottom-left -> bottom-right */}
+                            <polygon points="0,0 0,100 100,100" fill={config.fadeColor} />
+                            {/* Diagonal line for the fade curve */}
+                            <line
+                              x1="0"
+                              y1="0"
+                              x2="100"
+                              y2="100"
+                              stroke={config.color}
+                              strokeWidth="2"
+                              vectorEffect="non-scaling-stroke"
+                            />
                           </svg>
                         </div>
                       )}

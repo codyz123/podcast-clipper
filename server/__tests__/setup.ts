@@ -68,8 +68,24 @@ afterEach(() => {
   mockTranscriptionCreate.mockResolvedValue(mockTranscriptionResponse);
 });
 
-// Set default environment variables for tests
+// Set default environment variables for tests BEFORE any imports
+// This must run before other code that might access these
+process.env.DATABASE_URL = process.env.DATABASE_URL || "postgresql://test:test@localhost:5432/test";
+process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-api-key";
+process.env.ACCESS_CODE = process.env.ACCESS_CODE || "test-access-code";
+process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret-key-12345";
+process.env.JWT_REFRESH_SECRET =
+  process.env.JWT_REFRESH_SECRET || "test-jwt-refresh-secret-key-67890";
+process.env.RESEND_API_KEY = ""; // Disable email sending in tests
+
+// Also set in beforeAll for tests that might reset env
 beforeAll(() => {
+  process.env.DATABASE_URL =
+    process.env.DATABASE_URL || "postgresql://test:test@localhost:5432/test";
   process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "test-api-key";
   process.env.ACCESS_CODE = process.env.ACCESS_CODE || "test-access-code";
+  process.env.JWT_SECRET = process.env.JWT_SECRET || "test-jwt-secret-key-12345";
+  process.env.JWT_REFRESH_SECRET =
+    process.env.JWT_REFRESH_SECRET || "test-jwt-refresh-secret-key-67890";
+  process.env.RESEND_API_KEY = ""; // Disable email sending in tests
 });

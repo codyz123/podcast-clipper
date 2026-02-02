@@ -1,13 +1,25 @@
-import React, { useState } from "react";
-import { CheckCircledIcon, ExternalLinkIcon, CrossCircledIcon } from "@radix-ui/react-icons";
+import React, { useState, useEffect } from "react";
+import {
+  CheckCircledIcon,
+  ExternalLinkIcon,
+  CrossCircledIcon,
+  InfoCircledIcon,
+} from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
 import { useWorkspaceStore, SocialConnection } from "../../stores/workspaceStore";
+import {
+  startOAuthFlow,
+  disconnectOAuth,
+  getOAuthStatus,
+  type OAuthPlatform,
+} from "../../services/oauth";
 
 interface PlatformConfig {
   id: SocialConnection["platform"];
   name: string;
   description: string;
   icon: React.ReactNode;
+  oauthSupported: boolean; // Whether real OAuth is implemented
 }
 
 const platformConfigs: PlatformConfig[] = [
@@ -15,6 +27,7 @@ const platformConfigs: PlatformConfig[] = [
     id: "youtube",
     name: "YouTube",
     description: "Publish full episodes and clips to your YouTube channel",
+    oauthSupported: true,
     icon: (
       <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
         <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
@@ -25,6 +38,7 @@ const platformConfigs: PlatformConfig[] = [
     id: "tiktok",
     name: "TikTok",
     description: "Share short-form clips to TikTok",
+    oauthSupported: false,
     icon: (
       <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
         <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" />
@@ -35,6 +49,7 @@ const platformConfigs: PlatformConfig[] = [
     id: "instagram",
     name: "Instagram",
     description: "Post Reels and stories to Instagram",
+    oauthSupported: false,
     icon: (
       <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
         <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 1 0 0 12.324 6.162 6.162 0 0 0 0-12.324zM12 16a4 4 0 1 1 0-8 4 4 0 0 1 0 8zm6.406-11.845a1.44 1.44 0 1 0 0 2.881 1.44 1.44 0 0 0 0-2.881z" />
@@ -45,6 +60,7 @@ const platformConfigs: PlatformConfig[] = [
     id: "x",
     name: "X (Twitter)",
     description: "Share clips and episode announcements on X",
+    oauthSupported: false,
     icon: (
       <svg viewBox="0 0 24 24" className="h-6 w-6" fill="currentColor">
         <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
@@ -56,16 +72,59 @@ const platformConfigs: PlatformConfig[] = [
 export const ConnectionsPage: React.FC = () => {
   const { connections, connectAccount, disconnectAccount } = useWorkspaceStore();
   const [connecting, setConnecting] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Sync OAuth status from backend on mount
+  useEffect(() => {
+    const syncStatus = async () => {
+      try {
+        const statuses = await getOAuthStatus();
+        for (const status of statuses) {
+          if (status.connected && status.accountName) {
+            connectAccount(status.platform, status.accountName);
+          } else {
+            disconnectAccount(status.platform);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to sync OAuth status:", err);
+      }
+    };
+    syncStatus();
+  }, [connectAccount, disconnectAccount]);
 
   const handleConnect = async (platform: SocialConnection["platform"]) => {
+    const config = platformConfigs.find((p) => p.id === platform);
+    if (!config?.oauthSupported) {
+      setError(`OAuth for ${platform} is coming soon. Use manual upload for now.`);
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
     setConnecting(platform);
-    // Simulate OAuth flow - in production this would redirect to OAuth provider
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    connectAccount(platform, `@${platform}_user`);
-    setConnecting(null);
+    setError(null);
+
+    try {
+      const result = await startOAuthFlow(platform as OAuthPlatform);
+      if (result.success && result.accountName) {
+        connectAccount(platform, result.accountName);
+      } else if (result.error) {
+        setError(result.error);
+        setTimeout(() => setError(null), 5000);
+      }
+    } catch (err) {
+      setError((err as Error).message);
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setConnecting(null);
+    }
   };
 
-  const handleDisconnect = (platform: SocialConnection["platform"]) => {
+  const handleDisconnect = async (platform: SocialConnection["platform"]) => {
+    const config = platformConfigs.find((p) => p.id === platform);
+    if (config?.oauthSupported) {
+      await disconnectOAuth(platform as OAuthPlatform);
+    }
     disconnectAccount(platform);
   };
 
@@ -132,6 +191,11 @@ export const ConnectionsPage: React.FC = () => {
                         Connected
                       </span>
                     )}
+                    {!platform.oauthSupported && !isConnected && (
+                      <span className="rounded-full bg-[hsl(var(--surface))] px-2 py-0.5 text-[10px] text-[hsl(var(--text-muted))]">
+                        Coming soon
+                      </span>
+                    )}
                   </div>
                   <p className="truncate text-sm text-[hsl(var(--text-muted))]">
                     {isConnected ? accountName : platform.description}
@@ -183,6 +247,19 @@ export const ConnectionsPage: React.FC = () => {
             );
           })}
 
+          {/* Error message */}
+          {error && (
+            <div
+              className={cn(
+                "mt-4 rounded-lg p-4",
+                "bg-[hsl(var(--error)/0.1)]",
+                "border border-[hsl(var(--error)/0.3)]"
+              )}
+            >
+              <p className="text-sm text-[hsl(var(--error))]">{error}</p>
+            </div>
+          )}
+
           {/* Help text */}
           <div
             className={cn(
@@ -191,10 +268,19 @@ export const ConnectionsPage: React.FC = () => {
               "border border-[hsl(var(--border-subtle))]"
             )}
           >
-            <p className="text-sm text-[hsl(var(--text-muted))]">
-              Connecting your accounts allows Podcastomatic to automatically publish your clips and
-              episodes. We only request the minimum permissions needed for publishing.
-            </p>
+            <div className="flex items-start gap-2">
+              <InfoCircledIcon className="mt-0.5 h-4 w-4 flex-shrink-0 text-[hsl(var(--text-muted))]" />
+              <div className="space-y-2 text-sm text-[hsl(var(--text-muted))]">
+                <p>
+                  Connecting your accounts allows Podcastomatic to automatically publish your clips
+                  and episodes. We only request the minimum permissions needed for publishing.
+                </p>
+                <p>
+                  <strong>Currently supported:</strong> YouTube. TikTok, Instagram, and X support is
+                  coming soon - for now, use manual upload with the copy caption feature.
+                </p>
+              </div>
+            </div>
           </div>
         </div>
       </div>

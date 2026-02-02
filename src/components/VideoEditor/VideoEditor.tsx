@@ -6,12 +6,22 @@ import {
   PlusIcon,
   MinusIcon,
   CaretDownIcon,
+  TrashIcon,
 } from "@radix-ui/react-icons";
 import { Button } from "../ui";
 import { useProjectStore, getAudioBlob } from "../../stores/projectStore";
 import { useEditorStore, createDefaultTracks } from "../../stores/editorStore";
 import { useSettingsStore } from "../../stores/settingsStore";
-import { VideoFormat, VIDEO_FORMATS, Track, TrackType, CAPTION_PRESETS } from "../../lib/types";
+import { useWorkspaceStore } from "../../stores/workspaceStore";
+import {
+  VideoFormat,
+  VIDEO_FORMATS,
+  Track,
+  TrackType,
+  TrackClip,
+  CAPTION_PRESETS,
+  CaptionStyle,
+} from "../../lib/types";
 import { generateId } from "../../lib/utils";
 import { cn } from "../../lib/utils";
 import { MultiTrackTimeline } from "./Timeline/MultiTrackTimeline";
@@ -21,13 +31,14 @@ import { AssetsPanel } from "./Panels/AssetsPanel";
 import { useAudioFade } from "../../hooks/useAudioFade";
 
 interface VideoEditorProps {
-  onExport: () => void;
+  onExport?: () => void;
   onPublish?: () => void;
 }
 
-export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish }) => {
-  const { currentProject, updateClip } = useProjectStore();
+export const VideoEditor: React.FC<VideoEditorProps> = () => {
+  const { currentProject, updateClip, removeClip } = useProjectStore();
   const { templates, settings } = useSettingsStore();
+  const { brandColors } = useWorkspaceStore();
   const {
     activeClipId,
     setActiveClip,
@@ -56,9 +67,15 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
   const [selectedFormat, setSelectedFormat] = useState<VideoFormat>("9:16");
   const [selectedTemplateId, setSelectedTemplateId] = useState(settings.defaultTemplate);
   const [showAddTrackMenu, setShowAddTrackMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [customColorInput, setCustomColorInput] = useState("");
+  const [colorPickerPosition, setColorPickerPosition] = useState({ top: 0, left: 0 });
+  const [selectedTimelineClipId, setSelectedTimelineClipId] = useState<string | null>(null);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const animationRef = useRef<number | null>(null);
+  const colorPickerButtonRef = useRef<HTMLButtonElement>(null);
 
   const clips = currentProject?.clips || [];
   const activeClip = clips.find((c) => c.id === activeClipId) || clips[0] || null;
@@ -93,6 +110,21 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
       updateClip(activeClip.id, { tracks: defaultTracks });
     }
   }, [activeClip, updateClip]);
+
+  // Migrate old track names (B-Roll -> Video)
+  useEffect(() => {
+    if (activeClip?.tracks) {
+      const needsMigration = activeClip.tracks.some(
+        (t) => t.type === "video-overlay" && t.name === "B-Roll"
+      );
+      if (needsMigration) {
+        const migratedTracks = activeClip.tracks.map((t) =>
+          t.type === "video-overlay" && t.name === "B-Roll" ? { ...t, name: "Video" } : t
+        );
+        updateClip(activeClip.id, { tracks: migratedTracks });
+      }
+    }
+  }, [activeClip?.id, activeClip?.tracks, updateClip]);
 
   // Set active clip on mount
   useEffect(() => {
@@ -166,6 +198,71 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
     }
   }, [activeClip?.tracks, isMuted]);
 
+  // Delete selected timeline clip
+  const handleDeleteTimelineClip = useCallback(() => {
+    if (!selectedTimelineClipId || !activeClip?.tracks) return;
+
+    const currentTracks = activeClip.tracks;
+    pushSnapshot(currentTracks, activeClip.captionStyle);
+
+    // Find and remove the clip from its track
+    const updatedTracks = currentTracks.map((track) => ({
+      ...track,
+      clips: track.clips.filter((c) => c.id !== selectedTimelineClipId),
+    }));
+
+    updateClip(activeClip.id, { tracks: updatedTracks });
+    setSelectedTimelineClipId(null);
+  }, [selectedTimelineClipId, activeClip, updateClip, pushSnapshot]);
+
+  // Keyboard shortcuts (spacebar play/pause, delete clip)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't trigger if user is typing in an input or textarea
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") {
+        return;
+      }
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (audioRef.current && activeClip) {
+          if (isPlaying) {
+            audioRef.current.pause();
+            setIsPlaying(false);
+          } else {
+            audioRef.current.currentTime = activeClip.startTime + currentTime;
+            audioRef.current.playbackRate = playbackSpeed;
+            audioRef.current.play();
+            setIsPlaying(true);
+          }
+        }
+      }
+
+      // Delete or Backspace to delete selected clip
+      if ((e.code === "Delete" || e.code === "Backspace") && selectedTimelineClipId) {
+        e.preventDefault();
+        handleDeleteTimelineClip();
+      }
+
+      // Escape to deselect
+      if (e.code === "Escape") {
+        setSelectedTimelineClipId(null);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    activeClip,
+    currentTime,
+    isPlaying,
+    playbackSpeed,
+    setIsPlaying,
+    selectedTimelineClipId,
+    handleDeleteTimelineClip,
+  ]);
+
   // Handle play/pause
   const handlePlayPause = useCallback(() => {
     if (!audioRef.current || !activeClip) return;
@@ -207,6 +304,26 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
     },
     [clips, setActiveClip, setCurrentTime, isPlaying, setIsPlaying]
   );
+
+  // Handle clip deletion
+  const handleDeleteClip = useCallback(() => {
+    if (!activeClip) return;
+
+    // Stop playback
+    if (audioRef.current && isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+
+    // Navigate to previous or next clip before deleting
+    if (clips.length > 1) {
+      const newIndex = activeClipIndex > 0 ? activeClipIndex - 1 : 0;
+      setActiveClip(clips[newIndex === activeClipIndex ? newIndex + 1 : newIndex].id);
+    }
+
+    removeClip(activeClip.id);
+    setShowDeleteConfirm(false);
+  }, [activeClip, activeClipIndex, clips, isPlaying, removeClip, setActiveClip, setIsPlaying]);
 
   // Handle track changes
   const handleTracksChange = useCallback(
@@ -253,7 +370,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
         "podcast-audio": "Podcast Audio",
         music: "Music",
         sfx: "Sound Effects",
-        "video-overlay": "Video Overlay",
+        "video-overlay": "Video",
         "text-graphics": "Text Graphics",
         captions: "Captions",
       };
@@ -287,6 +404,136 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
     [activeClip, updateClip, pushSnapshot]
   );
 
+  // Get current caption style from clip or use default
+  const currentCaptionStyle: CaptionStyle = useMemo(() => {
+    return activeClip?.captionStyle || { ...CAPTION_PRESETS.hormozi, preset: "hormozi" as const };
+  }, [activeClip?.captionStyle]);
+
+  // Check if highlight is enabled (highlightColor differs from primaryColor)
+  const isHighlightEnabled =
+    currentCaptionStyle.highlightColor !== currentCaptionStyle.primaryColor;
+
+  // Handle caption style updates
+  const handleCaptionStyleChange = useCallback(
+    (updates: Partial<CaptionStyle>) => {
+      if (!activeClip) return;
+      pushSnapshot(activeClip.tracks || [], activeClip.captionStyle);
+      const newStyle = { ...currentCaptionStyle, ...updates };
+      updateClip(activeClip.id, { captionStyle: newStyle });
+    },
+    [activeClip, currentCaptionStyle, updateClip, pushSnapshot]
+  );
+
+  // Toggle highlight on/off
+  const handleToggleHighlight = useCallback(() => {
+    if (isHighlightEnabled) {
+      // Turn off highlight by setting highlightColor to primaryColor
+      handleCaptionStyleChange({ highlightColor: currentCaptionStyle.primaryColor });
+    } else {
+      // Turn on highlight with a default highlight color
+      handleCaptionStyleChange({ highlightColor: "#FFD700" });
+    }
+  }, [isHighlightEnabled, currentCaptionStyle.primaryColor, handleCaptionStyleChange]);
+
+  // Check if captions track is selected
+  const isCaptionsTrackSelected = useMemo(() => {
+    if (!selectedTrackId || !activeClip?.tracks) return false;
+    const track = activeClip.tracks.find((t) => t.id === selectedTrackId);
+    return track?.type === "captions";
+  }, [selectedTrackId, activeClip?.tracks]);
+
+  // Check if video track is selected
+  const isVideoTrackSelected = useMemo(() => {
+    if (!selectedTrackId || !activeClip?.tracks) return false;
+    const track = activeClip.tracks.find((t) => t.id === selectedTrackId);
+    return track?.type === "video-overlay";
+  }, [selectedTrackId, activeClip?.tracks]);
+
+  // Handle caption position change from preview drag
+  const handleCaptionPositionChange = useCallback(
+    (positionX: number, positionY: number) => {
+      handleCaptionStyleChange({ positionX, positionY });
+    },
+    [handleCaptionStyleChange]
+  );
+
+  // Handle animation position change from preview drag
+  const handleAnimationPositionChange = useCallback(
+    (clipId: string, positionX: number, positionY: number) => {
+      if (!activeClip) return;
+
+      const currentTracks = activeClip.tracks || [];
+      pushSnapshot(currentTracks, activeClip.captionStyle);
+
+      // Update the clip's position in the tracks
+      const updatedTracks = currentTracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((c) => (c.id === clipId ? { ...c, positionX, positionY } : c)),
+      }));
+
+      updateClip(activeClip.id, { tracks: updatedTracks });
+    },
+    [activeClip, updateClip, pushSnapshot]
+  );
+
+  // Handle adding an animation from the assets panel
+  const handleAddAnimation = useCallback(
+    (
+      animationUrl: string,
+      _name: string,
+      duration: number,
+      source: "lottie" | "giphy" | "tenor" = "lottie"
+    ) => {
+      if (!activeClip) return;
+
+      const currentTracks = activeClip.tracks || [];
+      pushSnapshot(currentTracks, activeClip.captionStyle);
+
+      // Deep copy tracks to avoid mutating snapshot
+      const tracksCopy = currentTracks.map((t) => ({
+        ...t,
+        clips: [...t.clips],
+      }));
+
+      // Find or create a video-overlay track
+      let overlayTrack = tracksCopy.find((t) => t.type === "video-overlay");
+
+      if (!overlayTrack) {
+        // Create a new video-overlay track
+        const maxOrder = tracksCopy.reduce((max, t) => Math.max(max, t.order), -1);
+        overlayTrack = {
+          id: generateId(),
+          type: "video-overlay" as TrackType,
+          name: "Video",
+          order: maxOrder + 1,
+          locked: false,
+          muted: false,
+          volume: 1,
+          opacity: 1,
+          clips: [],
+        };
+        tracksCopy.push(overlayTrack);
+      }
+
+      // Create the animation clip
+      const newClip: TrackClip = {
+        id: generateId(),
+        trackId: overlayTrack.id,
+        startTime: currentTime, // Place at current playhead position
+        duration: duration,
+        type: "animation",
+        assetUrl: animationUrl,
+        assetSource: source,
+      };
+
+      // Add the clip to the track
+      overlayTrack.clips = [...overlayTrack.clips, newClip];
+
+      updateClip(activeClip.id, { tracks: tracksCopy });
+    },
+    [activeClip, currentTime, updateClip, pushSnapshot]
+  );
+
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) || templates[0];
 
   return (
@@ -297,93 +544,114 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[hsl(var(--border-subtle))] px-4 py-3">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded bg-[hsl(var(--cyan)/0.2)]">
-              <span className="text-xs font-bold text-[hsl(var(--cyan))]">4</span>
-            </div>
-            <h1 className="text-sm font-semibold text-[hsl(var(--text))]">
-              {currentProject?.name || "Video Editor"}
-            </h1>
-          </div>
-
-          {/* Undo/Redo */}
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleUndo}
-              disabled={undoStack.length === 0}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded transition-colors",
-                undoStack.length === 0
-                  ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
-                  : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
-              )}
-              title="Undo (Cmd+Z)"
-            >
-              <ResetIcon className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={handleRedo}
-              disabled={redoStack.length === 0}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded transition-colors",
-                redoStack.length === 0
-                  ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
-                  : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
-              )}
-              title="Redo (Cmd+Shift+Z)"
-            >
-              <ResetIcon className="h-3.5 w-3.5 -scale-x-100" />
-            </button>
-          </div>
+      <div className="flex items-center justify-between border-b border-[hsl(var(--border-subtle))] px-4 py-2">
+        {/* Left: Undo/Redo */}
+        <div className="flex w-32 items-center gap-1">
+          <button
+            onClick={handleUndo}
+            disabled={undoStack.length === 0}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded transition-colors",
+              undoStack.length === 0
+                ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
+                : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
+            )}
+            title="Undo (Cmd+Z)"
+          >
+            <ResetIcon className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={handleRedo}
+            disabled={redoStack.length === 0}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded transition-colors",
+              redoStack.length === 0
+                ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
+                : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
+            )}
+            title="Redo (Cmd+Shift+Z)"
+          >
+            <ResetIcon className="h-3.5 w-3.5 -scale-x-100" />
+          </button>
         </div>
 
-        <div className="flex items-center gap-3">
-          {/* Clip selector */}
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => goToClip(activeClipIndex - 1)}
-              disabled={activeClipIndex <= 0}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded transition-colors",
-                activeClipIndex <= 0
-                  ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
-                  : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
-              )}
-            >
-              <ChevronLeftIcon className="h-4 w-4" />
-            </button>
-            <span className="min-w-[80px] text-center text-xs text-[hsl(var(--text-muted))]">
-              {activeClip?.name || "No clip"} ({activeClipIndex + 1}/{clips.length})
-            </span>
-            <button
-              onClick={() => goToClip(activeClipIndex + 1)}
-              disabled={activeClipIndex >= clips.length - 1}
-              className={cn(
-                "flex h-7 w-7 items-center justify-center rounded transition-colors",
-                activeClipIndex >= clips.length - 1
-                  ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
-                  : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
-              )}
-            >
-              <ChevronRightIcon className="h-4 w-4" />
-            </button>
-          </div>
-
-          {/* Actions */}
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={onExport}>
-              Export
-            </Button>
-            {onPublish && (
-              <Button size="sm" glow onClick={onPublish}>
-                Publish
-              </Button>
+        {/* Center: Clip selector */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => goToClip(activeClipIndex - 1)}
+            disabled={activeClipIndex <= 0}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded transition-colors",
+              activeClipIndex <= 0
+                ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
+                : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
             )}
-          </div>
+          >
+            <ChevronLeftIcon className="h-4 w-4" />
+          </button>
+          <span className="min-w-[100px] text-center text-xs text-[hsl(var(--text-muted))]">
+            {activeClip?.name || "No clip"} ({activeClipIndex + 1}/{clips.length})
+          </span>
+          <button
+            onClick={() => goToClip(activeClipIndex + 1)}
+            disabled={activeClipIndex >= clips.length - 1}
+            className={cn(
+              "flex h-7 w-7 items-center justify-center rounded transition-colors",
+              activeClipIndex >= clips.length - 1
+                ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
+                : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
+            )}
+          >
+            <ChevronRightIcon className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Right: Delete button */}
+        <div className="flex w-32 items-center justify-end">
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            disabled={!activeClip}
+            className={cn(
+              "flex h-7 items-center gap-1.5 rounded px-2 transition-colors",
+              !activeClip
+                ? "cursor-not-allowed text-[hsl(var(--text-ghost))]"
+                : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--error)/0.1)] hover:text-[hsl(var(--error))]"
+            )}
+            title="Delete clip"
+          >
+            <TrashIcon className="h-3.5 w-3.5" />
+            <span className="text-xs">Delete</span>
+          </button>
         </div>
       </div>
+
+      {/* Delete confirmation dialog */}
+      {showDeleteConfirm && (
+        <>
+          <div
+            className="fixed inset-0 z-50 bg-black/50"
+            onClick={() => setShowDeleteConfirm(false)}
+          />
+          <div className="fixed top-1/2 left-1/2 z-50 w-80 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-elevated))] p-5 shadow-xl">
+            <h3 className="text-sm font-semibold text-[hsl(var(--text))]">Delete Clip</h3>
+            <p className="mt-2 text-xs text-[hsl(var(--text-muted))]">
+              Are you sure you want to delete "{activeClip?.name}"? This action cannot be undone.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowDeleteConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                className="bg-[hsl(var(--error))] text-white hover:bg-[hsl(var(--error)/0.9)]"
+                onClick={handleDeleteClip}
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Main content area */}
       <div className="flex flex-1 overflow-hidden">
@@ -409,7 +677,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
               )}
             </button>
           </div>
-          {!isPanelCollapsed.assets && <AssetsPanel />}
+          {!isPanelCollapsed.assets && <AssetsPanel onAddAnimation={handleAddAnimation} />}
         </div>
 
         {/* Center - Preview */}
@@ -420,6 +688,12 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
             format={selectedFormat}
             template={selectedTemplate}
             onFormatChange={setSelectedFormat}
+            isCaptionsTrackSelected={isCaptionsTrackSelected}
+            isVideoTrackSelected={isVideoTrackSelected}
+            onCaptionPositionChange={handleCaptionPositionChange}
+            onAnimationPositionChange={handleAnimationPositionChange}
+            selectedClipId={selectedTimelineClipId}
+            onSelectClip={setSelectedTimelineClipId}
           />
         </div>
 
@@ -510,15 +784,179 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
                   </div>
                 </div>
 
-                {/* Caption styles placeholder */}
+                {/* Caption controls */}
                 <div>
                   <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
                     Captions
                   </h3>
-                  <div className="rounded-lg border border-[hsl(var(--border-subtle))] p-3">
-                    <p className="text-xs text-[hsl(var(--text-muted))]">
-                      Caption style editor coming soon
-                    </p>
+                  <div className="space-y-3">
+                    {/* Words per line */}
+                    <div>
+                      <div className="mb-1.5 flex items-center justify-between">
+                        <label className="text-[10px] text-[hsl(var(--text-muted))]">
+                          Words on screen
+                        </label>
+                        <span className="text-[10px] font-medium text-[hsl(var(--text))]">
+                          {currentCaptionStyle.wordsPerLine}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="8"
+                        value={currentCaptionStyle.wordsPerLine}
+                        onChange={(e) =>
+                          handleCaptionStyleChange({ wordsPerLine: parseInt(e.target.value) })
+                        }
+                        className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[hsl(var(--surface))] accent-[hsl(var(--cyan))]"
+                      />
+                      <div className="mt-1 flex justify-between text-[8px] text-[hsl(var(--text-ghost))]">
+                        <span>1</span>
+                        <span>8</span>
+                      </div>
+                    </div>
+
+                    {/* Highlight toggle */}
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] text-[hsl(var(--text-muted))]">
+                        Highlight active word
+                      </label>
+                      <button
+                        onClick={handleToggleHighlight}
+                        className={cn(
+                          "relative h-5 w-9 rounded-full transition-colors",
+                          isHighlightEnabled ? "bg-[hsl(var(--cyan))]" : "bg-[hsl(var(--surface))]"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                            isHighlightEnabled ? "translate-x-4" : "translate-x-0.5"
+                          )}
+                        />
+                      </button>
+                    </div>
+
+                    {/* Highlight color (only shown when highlight is enabled) */}
+                    {isHighlightEnabled && (
+                      <div>
+                        <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                          Highlight color
+                        </label>
+                        <div className="flex gap-1.5">
+                          {/* Brand colors (primary, secondary) + off-white as fallback */}
+                          {[
+                            brandColors?.primary || "#FFD700",
+                            brandColors?.secondary || "#FF00FF",
+                            "#FAFAFA",
+                          ].map((color, index) => (
+                            <button
+                              key={color}
+                              onClick={() => handleCaptionStyleChange({ highlightColor: color })}
+                              className={cn(
+                                "h-6 w-6 rounded-md border-2 transition-all",
+                                currentCaptionStyle.highlightColor === color
+                                  ? "scale-110 border-white"
+                                  : "border-transparent hover:scale-105"
+                              )}
+                              style={{ backgroundColor: color }}
+                              title={
+                                index === 0
+                                  ? "Brand Primary"
+                                  : index === 1
+                                    ? "Brand Secondary"
+                                    : "Light"
+                              }
+                            />
+                          ))}
+                          {/* Custom color picker button */}
+                          <div className="relative">
+                            <button
+                              ref={colorPickerButtonRef}
+                              onClick={() => {
+                                if (!showColorPicker && colorPickerButtonRef.current) {
+                                  const rect = colorPickerButtonRef.current.getBoundingClientRect();
+                                  setColorPickerPosition({
+                                    top: rect.bottom + 8,
+                                    left: Math.max(8, rect.right - 192), // 192px = popover width (w-48)
+                                  });
+                                }
+                                setCustomColorInput(currentCaptionStyle.highlightColor);
+                                setShowColorPicker(!showColorPicker);
+                              }}
+                              className={cn(
+                                "flex h-6 w-6 items-center justify-center rounded-md border-2 transition-all",
+                                showColorPicker ||
+                                  ![
+                                    brandColors?.primary || "#FFD700",
+                                    brandColors?.secondary || "#FF00FF",
+                                    "#FAFAFA",
+                                  ].includes(currentCaptionStyle.highlightColor)
+                                  ? "scale-110 border-white"
+                                  : "border-transparent hover:scale-105",
+                                "bg-gradient-to-br from-red-500 via-green-500 to-blue-500"
+                              )}
+                              title="Custom color"
+                            >
+                              <PlusIcon className="h-3 w-3 text-white drop-shadow-md" />
+                            </button>
+                            {/* Color picker popover */}
+                            {showColorPicker && (
+                              <>
+                                <div
+                                  className="fixed inset-0 z-40"
+                                  onClick={() => setShowColorPicker(false)}
+                                />
+                                <div
+                                  className="fixed z-50 w-48 rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-elevated))] p-3 shadow-xl"
+                                  style={{
+                                    top: colorPickerPosition.top,
+                                    left: colorPickerPosition.left,
+                                  }}
+                                >
+                                  <label className="mb-2 block text-[10px] text-[hsl(var(--text-muted))]">
+                                    Custom color
+                                  </label>
+                                  {/* Color wheel input */}
+                                  <input
+                                    type="color"
+                                    value={customColorInput || currentCaptionStyle.highlightColor}
+                                    onChange={(e) => {
+                                      setCustomColorInput(e.target.value);
+                                      handleCaptionStyleChange({ highlightColor: e.target.value });
+                                    }}
+                                    className="mb-2 h-8 w-full cursor-pointer rounded border-0 bg-transparent"
+                                  />
+                                  {/* Hex input */}
+                                  <div className="flex gap-2">
+                                    <input
+                                      type="text"
+                                      value={customColorInput || currentCaptionStyle.highlightColor}
+                                      onChange={(e) => {
+                                        const value = e.target.value;
+                                        setCustomColorInput(value);
+                                        // Only apply if it's a valid hex color
+                                        if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+                                          handleCaptionStyleChange({ highlightColor: value });
+                                        }
+                                      }}
+                                      placeholder="#FFFFFF"
+                                      className="flex-1 rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface))] px-2 py-1 text-[10px] text-[hsl(var(--text))] placeholder-[hsl(var(--text-ghost))] focus:border-[hsl(var(--cyan))] focus:outline-none"
+                                    />
+                                    <button
+                                      onClick={() => setShowColorPicker(false)}
+                                      className="rounded bg-[hsl(var(--cyan))] px-2 py-1 text-[10px] font-medium text-[hsl(var(--bg-base))]"
+                                    >
+                                      Done
+                                    </button>
+                                  </div>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -550,7 +988,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
                     onClick={() => handleAddTrack("video-overlay")}
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
                   >
-                    Video Overlay
+                    Video
                   </button>
                   <button
                     onClick={() => handleAddTrack("music")}
@@ -621,9 +1059,13 @@ export const VideoEditor: React.FC<VideoEditorProps> = ({ onExport, onPublish })
           currentTime={currentTime}
           zoomLevel={zoomLevel}
           selectedTrackId={selectedTrackId}
+          selectedClipId={selectedTimelineClipId}
           onTracksChange={handleTracksChange}
           onSeek={handleSeek}
           onSelectTrack={setSelectedTrack}
+          onSelectClip={setSelectedTimelineClipId}
+          words={activeClip?.words || []}
+          clipStartTime={activeClip?.startTime || 0}
         />
       </div>
     </div>

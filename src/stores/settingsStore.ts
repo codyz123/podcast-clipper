@@ -109,13 +109,19 @@ interface SettingsState {
 // Current settings version - increment when adding new required fields
 const SETTINGS_VERSION = 3;
 
+// Detect production environment and use appropriate backend URL
+const isProduction = window.location.hostname !== "localhost";
+const DEFAULT_BACKEND_URL = isProduction
+  ? "https://podcastomatic-api-production.up.railway.app"
+  : "http://localhost:3001";
+
 export const useSettingsStore = create<SettingsState>()(
   persist(
     (set, get) => ({
       settings: {
-        // Backend config for local development
-        backendUrl: "http://localhost:3010",
-        accessCode: "podcast-friends",
+        // Backend config
+        backendUrl: DEFAULT_BACKEND_URL,
+        accessCode: isProduction ? "" : "podcast-friends",
         defaultTemplate: "minimal-dark",
         defaultFormats: ["9:16"] as VideoFormat[],
         defaultClipDuration: 30,
@@ -204,7 +210,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
     }),
     {
-      name: "podcast-clipper-settings",
+      name: "podcastomatic-settings",
       version: SETTINGS_VERSION,
       migrate: (persistedState: any, version: number) => {
         // Migration: update backend config
@@ -213,8 +219,9 @@ export const useSettingsStore = create<SettingsState>()(
             ...persistedState,
             settings: {
               ...persistedState.settings,
-              backendUrl: "http://localhost:3010",
-              accessCode: persistedState.settings?.accessCode || "podcast-friends",
+              backendUrl: DEFAULT_BACKEND_URL,
+              accessCode:
+                persistedState.settings?.accessCode || (isProduction ? "" : "podcast-friends"),
             },
           };
         }

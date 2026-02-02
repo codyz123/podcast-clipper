@@ -316,7 +316,7 @@ export function createDefaultTracks(clipStartTime: number, clipEndTime: number):
     {
       id: generateId(),
       type: "video-overlay",
-      name: "B-Roll",
+      name: "Video",
       order: 2,
       locked: false,
       muted: false,

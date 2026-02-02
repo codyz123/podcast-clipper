@@ -1,4 +1,4 @@
-# Podcast Clipper
+# Podcastomatic
 
 A web app for creating short-form video clips from podcast episodes. Built for a small group of podcast collaborators.
 
