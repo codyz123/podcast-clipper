@@ -7,6 +7,7 @@ import { oauthRouter } from "./routes/oauth.js";
 import { projectsRouter } from "./routes/projects.js";
 import { authRouter } from "./routes/auth.js";
 import { podcastsRouter } from "./routes/podcasts.js";
+import { episodesRouter } from "./routes/episodes.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { initializeDatabase } from "./lib/token-storage.js";
 import { initializeMediaTables } from "./lib/media-storage.js";
@@ -34,6 +35,9 @@ app.use("/api/oauth", oauthRouter);
 
 // Podcast management routes (JWT auth handled internally)
 app.use("/api/podcasts", podcastsRouter);
+
+// Episodes routes - scoped to podcast (JWT auth handled internally)
+app.use("/api/podcasts", episodesRouter);
 
 // Protected routes (legacy - uses access code or JWT)
 app.use("/api", authMiddleware);
