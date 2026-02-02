@@ -405,22 +405,30 @@ export function useEpisodes() {
     setCurrentEpisode(null);
   }, []);
 
-  // Track if we've attempted migration for this podcast
-  const migrationAttemptedRef = useRef<string | null>(null);
+  // Track if we've attempted migration in this session
+  const migrationAttemptedRef = useRef(false);
 
-  // Migrate localStorage projects to database
+  // Migrate localStorage projects to database (runs ONCE globally)
   const migrateLocalStorageProjects = useCallback(async () => {
     if (!currentPodcastId) return;
 
-    // Only attempt migration once per podcast
-    if (migrationAttemptedRef.current === currentPodcastId) return;
-    migrationAttemptedRef.current = currentPodcastId;
+    // Check if migration was already done (persisted in localStorage)
+    const MIGRATION_FLAG = "podcastomatic-migrated-to-db";
+    if (localStorage.getItem(MIGRATION_FLAG)) {
+      console.log("[Migration] Already migrated previously, skipping");
+      return;
+    }
+
+    // Only attempt migration once per session
+    if (migrationAttemptedRef.current) return;
+    migrationAttemptedRef.current = true;
 
     // Get projects from localStorage via projectStore
     const localProjects = useProjectStore.getState().projects;
 
     if (localProjects.length === 0) {
       console.log("[Migration] No localStorage projects to migrate");
+      localStorage.setItem(MIGRATION_FLAG, new Date().toISOString());
       return;
     }
 
@@ -513,9 +521,15 @@ export function useEpisodes() {
     // Refresh episodes list after migration
     await fetchEpisodes();
 
-    // Clear localStorage projects after successful migration
-    // (Keep them for now in case migration failed partially)
-    console.log("[Migration] Migration complete. localStorage projects preserved as backup.");
+    // Mark migration as complete
+    const MIGRATION_FLAG = "podcastomatic-migrated-to-db";
+    localStorage.setItem(MIGRATION_FLAG, new Date().toISOString());
+
+    // Clear localStorage projects to prevent duplicate migrations
+    useProjectStore.setState({ projects: [] });
+    localStorage.removeItem("podcastomatic-projects");
+
+    console.log("[Migration] Migration complete. localStorage projects cleared.");
   }, [currentPodcastId, authFetch, fetchEpisodes]);
 
   // Fetch episodes when podcast changes, then migrate if needed
@@ -533,11 +547,13 @@ export function useEpisodes() {
 
   // Trigger migration if database is empty but localStorage has data
   useEffect(() => {
+    const MIGRATION_FLAG = "podcastomatic-migrated-to-db";
     if (
       currentPodcastId &&
       !isLoading &&
       episodes.length === 0 &&
-      migrationAttemptedRef.current !== currentPodcastId
+      !migrationAttemptedRef.current &&
+      !localStorage.getItem(MIGRATION_FLAG)
     ) {
       const localProjects = useProjectStore.getState().projects;
       if (localProjects.length > 0) {
