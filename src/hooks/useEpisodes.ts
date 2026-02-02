@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { useSettingsStore } from "../stores/settingsStore";
+import { useProjectStore } from "../stores/projectStore";
 
 // Episode type from backend
 export interface Episode {
@@ -404,15 +405,147 @@ export function useEpisodes() {
     setCurrentEpisode(null);
   }, []);
 
-  // Fetch episodes when podcast changes
+  // Track if we've attempted migration for this podcast
+  const migrationAttemptedRef = useRef<string | null>(null);
+
+  // Migrate localStorage projects to database
+  const migrateLocalStorageProjects = useCallback(async () => {
+    if (!currentPodcastId) return;
+
+    // Only attempt migration once per podcast
+    if (migrationAttemptedRef.current === currentPodcastId) return;
+    migrationAttemptedRef.current = currentPodcastId;
+
+    // Get projects from localStorage via projectStore
+    const localProjects = useProjectStore.getState().projects;
+
+    if (localProjects.length === 0) {
+      console.log("[Migration] No localStorage projects to migrate");
+      return;
+    }
+
+    console.log(`[Migration] Found ${localProjects.length} localStorage projects to migrate`);
+
+    // Migrate each project
+    for (const project of localProjects) {
+      try {
+        // Create episode in database
+        const res = await authFetch(`${getApiBase()}/api/podcasts/${currentPodcastId}/episodes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: project.name,
+            audioDuration: project.audioDuration,
+          }),
+        });
+
+        if (!res.ok) {
+          console.error(`[Migration] Failed to migrate project ${project.name}`);
+          continue;
+        }
+
+        const { episode } = await res.json();
+        console.log(`[Migration] Migrated project "${project.name}" -> episode ${episode.id}`);
+
+        // If project has transcripts, migrate them too
+        const transcripts = project.transcripts || [];
+        if (project.transcript && !transcripts.find((t) => t.id === project.transcript?.id)) {
+          transcripts.push(project.transcript);
+        }
+
+        for (const transcript of transcripts) {
+          try {
+            await authFetch(
+              `${getApiBase()}/api/podcasts/${currentPodcastId}/episodes/${episode.id}/transcripts`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  text: transcript.text,
+                  words: transcript.words,
+                  language: transcript.language,
+                  name: transcript.name,
+                  audioFingerprint: transcript.audioFingerprint,
+                }),
+              }
+            );
+            console.log(`[Migration] Migrated transcript for "${project.name}"`);
+          } catch (err) {
+            console.error(`[Migration] Failed to migrate transcript:`, err);
+          }
+        }
+
+        // Migrate clips
+        const clips = project.clips || [];
+        if (clips.length > 0) {
+          try {
+            await authFetch(
+              `${getApiBase()}/api/podcasts/${currentPodcastId}/episodes/${episode.id}/clips`,
+              {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  clips: clips.map((c) => ({
+                    name: c.name,
+                    startTime: c.startTime,
+                    endTime: c.endTime,
+                    transcript: c.transcript,
+                    words: c.words,
+                    clippabilityScore: c.clippabilityScore,
+                    isManual: c.isManual,
+                    tracks: c.tracks,
+                    captionStyle: c.captionStyle,
+                    format: c.format,
+                  })),
+                }),
+              }
+            );
+            console.log(`[Migration] Migrated ${clips.length} clips for "${project.name}"`);
+          } catch (err) {
+            console.error(`[Migration] Failed to migrate clips:`, err);
+          }
+        }
+      } catch (err) {
+        console.error(`[Migration] Error migrating project ${project.name}:`, err);
+      }
+    }
+
+    // Refresh episodes list after migration
+    await fetchEpisodes();
+
+    // Clear localStorage projects after successful migration
+    // (Keep them for now in case migration failed partially)
+    console.log("[Migration] Migration complete. localStorage projects preserved as backup.");
+  }, [currentPodcastId, authFetch, fetchEpisodes]);
+
+  // Fetch episodes when podcast changes, then migrate if needed
   useEffect(() => {
     if (currentPodcastId) {
-      fetchEpisodes();
+      fetchEpisodes().then(() => {
+        // After fetching, check if we need to migrate
+        // We'll do this in a separate effect to access the latest episodes state
+      });
     } else {
       setEpisodes([]);
       setCurrentEpisode(null);
     }
   }, [currentPodcastId, fetchEpisodes]);
+
+  // Trigger migration if database is empty but localStorage has data
+  useEffect(() => {
+    if (
+      currentPodcastId &&
+      !isLoading &&
+      episodes.length === 0 &&
+      migrationAttemptedRef.current !== currentPodcastId
+    ) {
+      const localProjects = useProjectStore.getState().projects;
+      if (localProjects.length > 0) {
+        console.log("[Migration] Database empty, localStorage has data. Starting migration...");
+        migrateLocalStorageProjects();
+      }
+    }
+  }, [currentPodcastId, isLoading, episodes.length, migrateLocalStorageProjects]);
 
   return {
     episodes,
