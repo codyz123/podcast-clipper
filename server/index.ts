@@ -7,9 +7,13 @@ import { oauthRouter } from "./routes/oauth.js";
 import { projectsRouter } from "./routes/projects.js";
 import { authRouter } from "./routes/auth.js";
 import { podcastsRouter } from "./routes/podcasts.js";
+import { episodesRouter } from "./routes/episodes.js";
+import { textSnippetsRouter } from "./routes/text-snippets.js";
+import { generateSnippetRouter } from "./routes/generate-snippet.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { initializeDatabase } from "./lib/token-storage.js";
 import { initializeMediaTables } from "./lib/media-storage.js";
+import { validateEnv } from "./utils/validateEnv.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -34,11 +38,20 @@ app.use("/api/oauth", oauthRouter);
 // Podcast management routes (JWT auth handled internally)
 app.use("/api/podcasts", podcastsRouter);
 
+// Episodes routes - scoped to podcast (JWT auth handled internally)
+app.use("/api/podcasts", episodesRouter);
+
+// Text snippets routes - scoped to podcast (JWT auth handled internally)
+app.use("/api/podcasts", textSnippetsRouter);
+
 // Protected routes (legacy - uses access code or JWT)
 app.use("/api", authMiddleware);
 app.use("/api", transcribeRouter);
 app.use("/api", analyzeClipsRouter);
 app.use("/api", projectsRouter);
+
+// AI snippet generation (JWT auth handled internally)
+app.use("/api", generateSnippetRouter);
 
 // Error handler for multer and other errors - returns JSON instead of HTML
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
@@ -69,6 +82,9 @@ app.use(errorHandler);
 
 // Initialize database and start server
 async function start() {
+  // Validate environment variables first - fail fast with clear instructions
+  validateEnv();
+
   try {
     await initializeDatabase();
     await initializeMediaTables();

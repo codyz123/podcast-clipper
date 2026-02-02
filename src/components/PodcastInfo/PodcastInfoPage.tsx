@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   ImageIcon,
   Link2Icon,
@@ -8,11 +8,15 @@ import {
   PlusIcon,
   Cross2Icon,
   CheckIcon,
+  TrashIcon,
 } from "@radix-ui/react-icons";
-import { cn } from "../../lib/utils";
+import { cn, debounce } from "../../lib/utils";
 import { useWorkspaceStore, PodcastMetadata } from "../../stores/workspaceStore";
-import { extractBrandColors } from "../../lib/colorExtractor";
+import { extractBrandColors, parseBrandColorsFromStorage } from "../../lib/colorExtractor";
 import { usePodcast } from "../../hooks/usePodcast";
+import { useAuthStore } from "../../stores/authStore";
+import { getApiBase } from "../../lib/api";
+import { ConfirmationDialog } from "../ui/ConfirmationDialog";
 
 // Categories based on Apple Podcasts categories
 const PODCAST_CATEGORIES = [
@@ -56,7 +60,7 @@ export const PodcastInfoPage: React.FC = () => {
   // Local state for form editing
   const [metadata, setMetadata] = useState<PodcastMetadata>(podcastMetadata);
   const [isDirty, setIsDirty] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
 
   // Team management
   const {
@@ -67,6 +71,9 @@ export const PodcastInfoPage: React.FC = () => {
     removeMember,
     cancelInvitation,
     isOwner,
+    updatePodcast,
+    deletePodcast,
+    transferOwnership,
   } = usePodcast();
   const [inviteEmail, setInviteEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
@@ -75,47 +82,170 @@ export const PodcastInfoPage: React.FC = () => {
   const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
   const [cancellingInviteId, setCancellingInviteId] = useState<string | null>(null);
 
-  // Sync from store when it changes (e.g., on mount)
+  // Danger zone state
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Transfer ownership state
+  const [showTransferDialog, setShowTransferDialog] = useState(false);
+  const [transferTarget, setTransferTarget] = useState<{ userId: string; name: string } | null>(
+    null
+  );
+  const [isTransferring, setIsTransferring] = useState(false);
+
+  // Cover upload state
+  const [isUploadingCover, setIsUploadingCover] = useState(false);
+
+  // Initialize form from backend data when podcast loads
   useEffect(() => {
-    setMetadata(podcastMetadata);
-  }, [podcastMetadata]);
+    if (podcast) {
+      const newMetadata = {
+        name: podcast.name || "",
+        description: podcast.description || "",
+        author: podcast.podcastMetadata?.author || "",
+        email: podcast.podcastMetadata?.email || "",
+        website: podcast.podcastMetadata?.website || "",
+        category: podcast.podcastMetadata?.category || "Technology",
+        language: podcast.podcastMetadata?.language || "en",
+        explicit: podcast.podcastMetadata?.explicit || false,
+        coverImage: podcast.coverImageUrl || "",
+      };
+      setMetadata(newMetadata);
+      setIsDirty(false);
+      // Also sync to workspaceStore for sidebar display
+      updatePodcastMetadata(newMetadata);
+    }
+  }, [podcast, updatePodcastMetadata]);
+
+  // Apply brand colors from backend when podcast loads
+  useEffect(() => {
+    if (podcast?.brandColors) {
+      const colors = parseBrandColorsFromStorage(podcast.brandColors);
+      if (colors) {
+        setBrandColors(colors);
+      }
+    }
+  }, [podcast?.brandColors, setBrandColors]);
 
   const handleChange = (field: keyof PodcastMetadata, value: string | boolean) => {
     setMetadata((prev) => ({ ...prev, [field]: value }));
     setIsDirty(true);
   };
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    // Save to workspace store (persisted to localStorage)
-    updatePodcastMetadata(metadata);
-    await new Promise((resolve) => setTimeout(resolve, 300)); // Brief delay for UX
-    setIsDirty(false);
-    setIsSaving(false);
-  };
+  // Debounced save function
+  const debouncedSave = useMemo(
+    () =>
+      debounce(async (data: PodcastMetadata) => {
+        if (!isOwner) return;
+        setSaveStatus("saving");
+        try {
+          await updatePodcast({
+            name: data.name,
+            description: data.description,
+            podcastMetadata: {
+              author: data.author,
+              category: data.category,
+              language: data.language,
+              explicit: data.explicit,
+              email: data.email,
+              website: data.website,
+            },
+          });
+          updatePodcastMetadata(data);
+          setSaveStatus("saved");
+        } catch (err) {
+          setSaveStatus("error");
+          console.error("Auto-save failed:", err);
+        }
+      }, 1500),
+    [updatePodcast, isOwner, updatePodcastMetadata]
+  );
+
+  // Trigger save on changes
+  useEffect(() => {
+    if (isDirty) {
+      debouncedSave(metadata);
+    }
+    return () => debouncedSave.cancel();
+  }, [metadata, isDirty, debouncedSave]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const imageDataUrl = reader.result as string;
-        handleChange("coverImage", imageDataUrl);
+    if (!file || !podcast?.id) return;
 
-        // Extract and apply brand colors from the cover image
-        const colors = await extractBrandColors(imageDataUrl);
-        if (colors) {
-          setBrandColors(colors);
-        }
-      };
-      reader.readAsDataURL(file);
+    setIsUploadingCover(true);
+    try {
+      const formData = new FormData();
+      formData.append("cover", file);
+
+      const { accessToken } = useAuthStore.getState();
+      const res = await fetch(`${getApiBase()}/api/podcasts/${podcast.id}/cover`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to upload cover");
+      }
+
+      const { coverImageUrl } = await res.json();
+      handleChange("coverImage", coverImageUrl);
+
+      // Extract and save brand colors
+      const colors = await extractBrandColors(coverImageUrl);
+      if (colors) {
+        setBrandColors(colors);
+        await updatePodcast({
+          brandColors: {
+            primary: colors.primary,
+            secondary: colors.secondary,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("Cover upload failed:", err);
+    } finally {
+      setIsUploadingCover(false);
     }
   };
 
   // Clear brand colors if cover image is removed
-  const handleRemoveCoverImage = () => {
+  const handleRemoveCoverImage = async () => {
     handleChange("coverImage", "");
     setBrandColors(null);
+    if (podcast?.id) {
+      await updatePodcast({ coverImageUrl: "", brandColors: undefined });
+    }
+  };
+
+  // Delete workspace handler
+  const handleDeleteWorkspace = async () => {
+    setIsDeleting(true);
+    try {
+      await deletePodcast();
+    } catch (err) {
+      console.error("Failed to delete workspace:", err);
+      setIsDeleting(false);
+    }
+  };
+
+  // Transfer ownership handler
+  const handleTransferOwnership = async () => {
+    if (!transferTarget) return;
+    setIsTransferring(true);
+    try {
+      await transferOwnership(transferTarget.userId);
+      setShowTransferDialog(false);
+      setTransferTarget(null);
+    } catch (err) {
+      console.error("Failed to transfer ownership:", err);
+    } finally {
+      setIsTransferring(false);
+    }
   };
 
   // Team management handlers
@@ -176,18 +306,22 @@ export const PodcastInfoPage: React.FC = () => {
               Configure your podcast details for RSS feeds and directories
             </p>
           </div>
-          <button
-            onClick={handleSave}
-            disabled={!isDirty || isSaving}
+          <div
             className={cn(
-              "rounded-lg px-4 py-2 text-sm font-medium transition-all",
-              isDirty
-                ? "bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)]"
-                : "cursor-not-allowed bg-[hsl(var(--surface))] text-[hsl(var(--text-ghost))]"
+              "rounded-lg px-4 py-2 text-sm font-medium",
+              saveStatus === "saving"
+                ? "bg-[hsl(var(--surface))] text-[hsl(var(--text-muted))]"
+                : saveStatus === "error"
+                  ? "bg-[hsl(var(--error)/0.1)] text-[hsl(var(--error))]"
+                  : "bg-[hsl(var(--surface))] text-[hsl(var(--text-ghost))]"
             )}
           >
-            {isSaving ? "Saving..." : isDirty ? "Save Changes" : "Saved"}
-          </button>
+            {saveStatus === "saving"
+              ? "Saving..."
+              : saveStatus === "error"
+                ? "Error saving"
+                : "Auto-saved"}
+          </div>
         </div>
 
         {/* Form */}
@@ -243,15 +377,21 @@ export const PodcastInfoPage: React.FC = () => {
                         "bg-[hsl(var(--surface))] text-sm text-[hsl(var(--text))]",
                         "border border-[hsl(var(--border-subtle))]",
                         "hover:bg-[hsl(var(--surface-hover))]",
-                        "transition-colors"
+                        "transition-colors",
+                        isUploadingCover && "cursor-wait opacity-50"
                       )}
                     >
                       <ImageIcon className="h-4 w-4" />
-                      {metadata.coverImage ? "Change Cover" : "Upload Cover"}
+                      {isUploadingCover
+                        ? "Uploading..."
+                        : metadata.coverImage
+                          ? "Change Cover"
+                          : "Upload Cover"}
                       <input
                         type="file"
                         accept="image/jpeg,image/png"
                         onChange={handleImageUpload}
+                        disabled={isUploadingCover}
                         className="hidden"
                       />
                     </label>
@@ -604,19 +744,30 @@ export const PodcastInfoPage: React.FC = () => {
                             {member.role === "owner" ? "Owner" : "Member"}
                           </span>
                           {isOwner && member.role !== "owner" && (
-                            <button
-                              onClick={() => handleRemoveMember(member.userId)}
-                              disabled={removingMemberId === member.userId}
-                              className={cn(
-                                "rounded p-1.5 text-[hsl(var(--text-ghost))]",
-                                "hover:bg-[hsl(var(--error)/0.1)] hover:text-[hsl(var(--error))]",
-                                "disabled:opacity-50",
-                                "transition-colors"
-                              )}
-                              title="Remove member"
-                            >
-                              <Cross2Icon className="h-4 w-4" />
-                            </button>
+                            <>
+                              <button
+                                onClick={() => {
+                                  setTransferTarget({ userId: member.userId, name: member.name });
+                                  setShowTransferDialog(true);
+                                }}
+                                className="mr-2 text-xs text-[hsl(var(--text-ghost))] hover:text-[hsl(var(--cyan))]"
+                              >
+                                Make Owner
+                              </button>
+                              <button
+                                onClick={() => handleRemoveMember(member.userId)}
+                                disabled={removingMemberId === member.userId}
+                                className={cn(
+                                  "rounded p-1.5 text-[hsl(var(--text-ghost))]",
+                                  "hover:bg-[hsl(var(--error)/0.1)] hover:text-[hsl(var(--error))]",
+                                  "disabled:opacity-50",
+                                  "transition-colors"
+                                )}
+                                title="Remove member"
+                              >
+                                <Cross2Icon className="h-4 w-4" />
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
@@ -674,8 +825,63 @@ export const PodcastInfoPage: React.FC = () => {
               )}
             </div>
           </section>
+
+          {/* Danger Zone */}
+          {isOwner && (
+            <section>
+              <h2 className="mb-4 flex items-center gap-2 text-sm font-medium tracking-wider text-[hsl(var(--error))] uppercase">
+                <TrashIcon className="h-4 w-4" />
+                Danger Zone
+              </h2>
+              <div className="rounded-xl border border-[hsl(var(--error)/0.3)] bg-[hsl(var(--error)/0.05)] p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-medium text-[hsl(var(--text))]">
+                      Delete Workspace
+                    </h3>
+                    <p className="text-xs text-[hsl(var(--text-muted))]">
+                      Permanently delete this podcast and all its episodes, clips, and data.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowDeleteDialog(true)}
+                    className="rounded-lg bg-[hsl(var(--error))] px-4 py-2 text-sm font-medium text-white hover:bg-[hsl(var(--error)/0.9)]"
+                  >
+                    Delete Workspace
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={showDeleteDialog}
+        onClose={() => setShowDeleteDialog(false)}
+        onConfirm={handleDeleteWorkspace}
+        title="Delete Workspace?"
+        description={`This will permanently delete "${podcast?.name}" and all its episodes, clips, and data. This cannot be undone.`}
+        confirmText="Delete Forever"
+        variant="danger"
+        isLoading={isDeleting}
+      />
+
+      {/* Transfer Ownership Dialog */}
+      <ConfirmationDialog
+        isOpen={showTransferDialog}
+        onClose={() => {
+          setShowTransferDialog(false);
+          setTransferTarget(null);
+        }}
+        onConfirm={handleTransferOwnership}
+        title="Transfer Ownership?"
+        description={`Transfer ownership to ${transferTarget?.name}? You will become a regular member and lose owner privileges.`}
+        confirmText="Transfer Ownership"
+        variant="warning"
+        isLoading={isTransferring}
+      />
     </div>
   );
 };

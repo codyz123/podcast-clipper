@@ -1,6 +1,14 @@
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+// Lazy-load Resend client to avoid throwing at module load when API key is missing
+let resend: Resend | null = null;
+function getResendClient(): Resend | null {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (!resend) {
+    resend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return resend;
+}
 
 // Get the app URL for links in emails
 function getAppUrl(): string {
@@ -20,7 +28,8 @@ export async function sendInvitationEmail({
   podcastName,
   invitationToken,
 }: InvitationEmailParams): Promise<{ success: boolean; error?: string }> {
-  if (!process.env.RESEND_API_KEY) {
+  const client = getResendClient();
+  if (!client) {
     console.warn("[Email] RESEND_API_KEY not configured, skipping email send");
     return { success: false, error: "Email not configured" };
   }
@@ -29,7 +38,7 @@ export async function sendInvitationEmail({
   const signUpUrl = `${appUrl}?invite=${invitationToken}`;
 
   try {
-    const { error } = await resend.emails.send({
+    const { error } = await client.emails.send({
       from: process.env.RESEND_FROM_EMAIL || "Podcastomatic <noreply@resend.dev>",
       to: [to],
       subject: `${inviterName} invited you to collaborate on ${podcastName}`,

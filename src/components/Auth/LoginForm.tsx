@@ -39,6 +39,7 @@ export function LoginForm({ onSwitchToRegister }: LoginFormProps) {
         </label>
         <Input
           id="email"
+          name="email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -58,6 +59,7 @@ export function LoginForm({ onSwitchToRegister }: LoginFormProps) {
         </label>
         <Input
           id="password"
+          name="password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

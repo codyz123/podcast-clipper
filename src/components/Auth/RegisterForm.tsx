@@ -52,6 +52,7 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
         </label>
         <Input
           id="name"
+          name="name"
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -71,6 +72,7 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
         </label>
         <Input
           id="email"
+          name="email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -90,6 +92,7 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
         </label>
         <Input
           id="password"
+          name="password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -109,6 +112,7 @@ export function RegisterForm({ onSwitchToLogin }: RegisterFormProps) {
         </label>
         <Input
           id="confirmPassword"
+          name="confirmPassword"
           type="password"
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}

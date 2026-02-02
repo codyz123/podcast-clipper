@@ -1,11 +1,26 @@
 import { Router, Request, Response } from "express";
+import multer from "multer";
 import { db, podcasts, podcastMembers, podcastInvitations, users } from "../db/index.js";
 import { eq, and, gt } from "drizzle-orm";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
 import { generateInvitationToken } from "../services/authService.js";
 import { sendInvitationEmail } from "../services/emailService.js";
+import { uploadMedia } from "../lib/media-storage.js";
 
 export const podcastsRouter = Router();
+
+// Configure multer for cover image uploads (5MB limit)
+const coverUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only images are allowed"));
+    }
+  },
+});
 
 // Helper to extract string param (Express params can be string | string[])
 function getParam(param: string | string[] | undefined): string {
@@ -177,6 +192,53 @@ podcastsRouter.put("/:id", async (req: Request, res: Response) => {
     res.status(500).json({ error: "Failed to update podcast" });
   }
 });
+
+// POST /api/podcasts/:id/cover - Upload cover image
+podcastsRouter.post(
+  "/:id/cover",
+  coverUpload.single("cover"),
+  async (req: Request, res: Response) => {
+    try {
+      const id = getParam(req.params.id);
+
+      // Verify ownership
+      const [membership] = await db
+        .select()
+        .from(podcastMembers)
+        .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+
+      if (!membership || membership.role !== "owner") {
+        res.status(403).json({ error: "Only owner can update cover image" });
+        return;
+      }
+
+      if (!req.file) {
+        res.status(400).json({ error: "No file uploaded" });
+        return;
+      }
+
+      const { url } = await uploadMedia(
+        req.file.buffer,
+        req.file.originalname,
+        req.file.mimetype,
+        `podcasts/${id}/cover`
+      );
+
+      // Update podcast with new cover URL
+      const [updated] = await db
+        .update(podcasts)
+        .set({ coverImageUrl: url, updatedAt: new Date() })
+        .where(eq(podcasts.id, id))
+        .returning();
+
+      res.json({ coverImageUrl: url, podcast: updated });
+    } catch (error) {
+      console.error("Cover upload error:", error);
+      const message = error instanceof Error ? error.message : "Unknown error";
+      res.status(500).json({ error: `Failed to upload: ${message}` });
+    }
+  }
+);
 
 // DELETE /api/podcasts/:id - Delete podcast
 podcastsRouter.delete("/:id", async (req: Request, res: Response) => {

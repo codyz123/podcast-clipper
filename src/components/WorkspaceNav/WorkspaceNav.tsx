@@ -12,6 +12,7 @@ import {
 } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useAuthStore } from "../../stores/authStore";
 
 export type WorkspaceSection =
   | "dashboard"
@@ -44,21 +45,21 @@ const navItems: NavItemConfig[] = [
 
 export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNavigate }) => {
   const { podcastMetadata } = useWorkspaceStore();
+  const { podcasts, currentPodcastId, setCurrentPodcast, setShowCreatePodcast } = useAuthStore();
   const [isPinned, setIsPinned] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [isWorkspaceSwitcherOpen, setIsWorkspaceSwitcherOpen] = useState(false);
-  const [showComingSoon, setShowComingSoon] = useState(false);
 
-  // Get workspace name from store
-  const workspaceName = podcastMetadata.name || "My Podcast";
+  // Get current podcast and workspace name
+  const currentPodcast = podcasts.find((p) => p.id === currentPodcastId);
+  const workspaceName = currentPodcast?.name || podcastMetadata.name || "My Podcast";
 
   // Sidebar is expanded if pinned OR hovered
   const showExpanded = isPinned || isHovered;
 
   const handleCreateWorkspace = () => {
     setIsWorkspaceSwitcherOpen(false);
-    setShowComingSoon(true);
-    setTimeout(() => setShowComingSoon(false), 3000);
+    setShowCreatePodcast(true);
   };
 
   return (
@@ -91,7 +92,13 @@ export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNav
               title={!showExpanded ? workspaceName : undefined}
             >
               {/* Workspace icon/avatar - show cover image if available */}
-              {podcastMetadata.coverImage ? (
+              {currentPodcast?.coverImageUrl ? (
+                <img
+                  src={currentPodcast.coverImageUrl}
+                  alt={workspaceName}
+                  className="h-5 w-5 flex-shrink-0 rounded object-cover"
+                />
+              ) : podcastMetadata.coverImage ? (
                 <img
                   src={podcastMetadata.coverImage}
                   alt={workspaceName}
@@ -135,27 +142,40 @@ export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNav
                   <div className="px-3 py-2 text-[10px] font-medium tracking-wider text-[hsl(var(--text-ghost))] uppercase">
                     Workspaces
                   </div>
-                  <button
-                    className={cn(
-                      "flex w-full items-center gap-2 px-3 py-2",
-                      "bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
-                    )}
-                    onClick={() => setIsWorkspaceSwitcherOpen(false)}
-                  >
-                    <div className="h-2 w-2 rounded-full bg-[hsl(var(--cyan))]" />
-                    <span className="text-sm">{workspaceName}</span>
-                  </button>
+                  {podcasts.map((p) => (
+                    <button
+                      key={p.id}
+                      className={cn(
+                        "flex w-full items-center gap-2 px-3 py-2",
+                        p.id === currentPodcastId
+                          ? "bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
+                          : "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface-hover))] hover:text-[hsl(var(--text))]"
+                      )}
+                      onClick={() => {
+                        setCurrentPodcast(p.id);
+                        setIsWorkspaceSwitcherOpen(false);
+                      }}
+                    >
+                      {p.id === currentPodcastId && (
+                        <div className="h-2 w-2 rounded-full bg-[hsl(var(--cyan))]" />
+                      )}
+                      <span className="flex-1 truncate text-left text-sm">{p.name}</span>
+                      {p.role === "owner" && (
+                        <span className="text-[10px] text-[hsl(var(--text-ghost))]">Owner</span>
+                      )}
+                    </button>
+                  ))}
                   <div className="my-1 border-t border-[hsl(var(--border-subtle))]" />
                   <button
                     className={cn(
                       "flex w-full items-center gap-2 px-3 py-2",
                       "text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface-hover))] hover:text-[hsl(var(--text))]",
-                      "text-sm"
+                      "text-sm whitespace-nowrap"
                     )}
                     onClick={handleCreateWorkspace}
                   >
                     <span className="text-[hsl(var(--cyan))]">+</span>
-                    <span>Create new workspace</span>
+                    <span>New Podcast</span>
                   </button>
                 </div>
               </>
@@ -248,23 +268,6 @@ export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNav
           </button>
         </div>
       </nav>
-
-      {/* Coming Soon Toast */}
-      {showComingSoon && (
-        <div
-          className={cn(
-            "fixed bottom-4 left-1/2 z-50 -translate-x-1/2",
-            "flex items-center gap-3 rounded-lg px-4 py-3",
-            "bg-[hsl(var(--surface))]",
-            "border border-[hsl(var(--border-subtle))]",
-            "shadow-lg shadow-black/20",
-            "animate-in fade-in slide-in-from-bottom-2 duration-200"
-          )}
-        >
-          <span className="h-2 w-2 animate-pulse rounded-full bg-[hsl(var(--cyan))]" />
-          <span className="text-sm text-[hsl(var(--text))]">Multiple workspaces coming soon</span>
-        </div>
-      )}
     </>
   );
 };

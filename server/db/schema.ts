@@ -65,6 +65,8 @@ export const podcasts = pgTable("podcasts", {
     category?: string;
     language?: string;
     explicit?: boolean;
+    email?: string;
+    website?: string;
   }>(),
   brandColors: jsonb("brand_colors").$type<{
     primary?: string;
@@ -145,6 +147,16 @@ export const projects = pgTable(
       }>
     >(),
     createdById: uuid("created_by_id").references(() => users.id),
+    stageStatus: jsonb("stage_status").$type<{
+      planning?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+      production?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+      "post-production"?: {
+        status: "not-started" | "in-progress" | "complete";
+        updatedAt?: string;
+      };
+      distribution?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+      marketing?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+    }>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -219,6 +231,31 @@ export const clips = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("clips_v2_project_id_idx").on(table.projectId)]
+);
+
+// ============ Text Snippets (Marketing Tidbits) ============
+
+export const textSnippets = pgTable(
+  "text_snippets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .references(() => projects.id, { onDelete: "cascade" })
+      .notNull(),
+    index: integer("index").notNull(), // Auto-incremented per project (Snippet 1, 2, etc.)
+    name: varchar("name", { length: 500 }).notNull(), // AI-generated description
+    content: text("content").notNull(), // The actual snippet text
+    prompt: text("prompt"), // Optional: the prompt used to generate
+    focusClipId: uuid("focus_clip_id").references(() => clips.id, { onDelete: "set null" }),
+    isManual: boolean("is_manual").default(false).notNull(),
+    createdById: uuid("created_by_id").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("text_snippets_project_id_idx").on(table.projectId),
+    index("text_snippets_focus_clip_id_idx").on(table.focusClipId),
+  ]
 );
 
 // ============ Media Assets ============
@@ -346,6 +383,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   transcripts: many(transcripts),
   clips: many(clips),
   mediaAssets: many(mediaAssets),
+  textSnippets: many(textSnippets),
 }));
 
 export const transcriptsRelations = relations(transcripts, ({ one }) => ({
@@ -369,6 +407,22 @@ export const clipsRelations = relations(clips, ({ one, many }) => ({
     references: [users.id],
   }),
   renderedClips: many(renderedClips),
+  textSnippets: many(textSnippets),
+}));
+
+export const textSnippetsRelations = relations(textSnippets, ({ one }) => ({
+  project: one(projects, {
+    fields: [textSnippets.projectId],
+    references: [projects.id],
+  }),
+  focusClip: one(clips, {
+    fields: [textSnippets.focusClipId],
+    references: [clips.id],
+  }),
+  createdBy: one(users, {
+    fields: [textSnippets.createdById],
+    references: [users.id],
+  }),
 }));
 
 export const mediaAssetsRelations = relations(mediaAssets, ({ one }) => ({
@@ -410,6 +464,8 @@ export type Transcript = typeof transcripts.$inferSelect;
 export type NewTranscript = typeof transcripts.$inferInsert;
 export type Clip = typeof clips.$inferSelect;
 export type NewClip = typeof clips.$inferInsert;
+export type TextSnippet = typeof textSnippets.$inferSelect;
+export type NewTextSnippet = typeof textSnippets.$inferInsert;
 export type MediaAsset = typeof mediaAssets.$inferSelect;
 export type NewMediaAsset = typeof mediaAssets.$inferInsert;
 export type RenderedClip = typeof renderedClips.$inferSelect;

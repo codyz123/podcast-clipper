@@ -438,6 +438,7 @@ interface ProjectState {
   // Actions
   createProject: (name: string, audioPath: string, audioDuration: number) => Project;
   loadProject: (projectId: string) => void;
+  setCurrentProject: (project: Project | null) => void;
   updateProject: (updates: Partial<Project>) => void;
   deleteProject: (projectId: string) => void;
 
@@ -535,6 +536,10 @@ export const useProjectStore = create<ProjectState>()(
             }
           });
         }
+      },
+
+      setCurrentProject: (project) => {
+        set({ currentProject: project });
       },
 
       updateProject: (updates) => {

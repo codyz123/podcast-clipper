@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { CalendarIcon, PersonIcon, FileTextIcon } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
 import { useProjectStore } from "../../stores/projectStore";
+import { StageProgressBar } from "../ui/StageProgressBar";
 
 interface EpisodeMetadata {
   title: string;
@@ -117,7 +118,7 @@ export const EpisodeInfoPage: React.FC = () => {
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-3xl px-6 py-8">
         {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-[hsl(var(--text))]">Episode Info</h1>
             <p className="mt-1 text-sm text-[hsl(var(--text-muted))]">
@@ -136,6 +137,11 @@ export const EpisodeInfoPage: React.FC = () => {
           >
             {isSaving ? "Saving..." : isDirty ? "Save Changes" : "Saved"}
           </button>
+        </div>
+
+        {/* Pipeline Progress - Full Width */}
+        <div className="mb-8">
+          <StageProgressBar stageStatus={currentProject?.stageStatus} fullWidth />
         </div>
 
         {/* Form */}

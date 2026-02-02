@@ -334,6 +334,48 @@ function createTintedBackground(hsl: string): string {
   return `${h} 15% 5%`;
 }
 
+/**
+ * Parse an hsl() color string to extract H S% L% values
+ * Handles both "hsl(H, S%, L%)" and "H S% L%" formats
+ */
+export function parseHslToValues(hslString: string): string | null {
+  if (!hslString) return null;
+
+  // Try "hsl(H, S%, L%)" format
+  const hslMatch = hslString.match(/hsl\((\d+),?\s*(\d+)%?,?\s*(\d+)%?\)/i);
+  if (hslMatch) {
+    return `${hslMatch[1]} ${hslMatch[2]}% ${hslMatch[3]}%`;
+  }
+
+  // Try "H S% L%" format (already in correct format)
+  const valuesMatch = hslString.match(/^(\d+)\s+(\d+)%?\s+(\d+)%?$/);
+  if (valuesMatch) {
+    return `${valuesMatch[1]} ${valuesMatch[2]}% ${valuesMatch[3]}%`;
+  }
+
+  return null;
+}
+
+/**
+ * Convert stored brand colors (from backend) to BrandColors format
+ */
+export function parseBrandColorsFromStorage(stored: {
+  primary?: string;
+  secondary?: string;
+}): BrandColors | null {
+  const primaryHsl = parseHslToValues(stored.primary || "");
+  const secondaryHsl = parseHslToValues(stored.secondary || "");
+
+  if (!primaryHsl) return null;
+
+  return {
+    primary: stored.primary || "",
+    secondary: stored.secondary || "",
+    primaryHsl,
+    secondaryHsl: secondaryHsl || primaryHsl, // Fallback to primary if no secondary
+  };
+}
+
 export function applyBrandColors(colors: BrandColors | null): void {
   const root = document.documentElement;
 

@@ -1,14 +1,20 @@
 import { useState } from "react";
 import { usePodcast } from "../../hooks/usePodcast";
+import { useAuthStore } from "../../stores/authStore";
 import { Button, Input } from "../ui";
 
-export function CreatePodcastScreen() {
+interface CreatePodcastScreenProps {
+  onCancel?: () => void;
+}
+
+export function CreatePodcastScreen({ onCancel }: CreatePodcastScreenProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const { createPodcast } = usePodcast();
+  const setShowCreatePodcast = useAuthStore((s) => s.setShowCreatePodcast);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -22,7 +28,8 @@ export function CreatePodcastScreen() {
 
     try {
       await createPodcast(name.trim(), description.trim() || undefined);
-      // The authStore will be updated with the new podcast
+      // Clear the create flag so we go back to the main app
+      setShowCreatePodcast(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create podcast");
       setIsSubmitting(false);
@@ -83,9 +90,26 @@ export function CreatePodcastScreen() {
               </div>
             )}
 
-            <Button type="submit" className="w-full" disabled={isSubmitting || !name.trim()}>
-              {isSubmitting ? "Creating..." : "Create Podcast"}
-            </Button>
+            <div className={onCancel ? "flex gap-3" : ""}>
+              {onCancel && (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="flex-1"
+                  onClick={onCancel}
+                  disabled={isSubmitting}
+                >
+                  Cancel
+                </Button>
+              )}
+              <Button
+                type="submit"
+                className={onCancel ? "flex-1" : "w-full"}
+                disabled={isSubmitting || !name.trim()}
+              >
+                {isSubmitting ? "Creating..." : "Create Podcast"}
+              </Button>
+            </div>
           </form>
         </div>
       </div>

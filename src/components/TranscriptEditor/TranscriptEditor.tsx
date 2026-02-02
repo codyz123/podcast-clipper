@@ -12,25 +12,10 @@ import { Button, Card, CardContent, Input } from "../ui";
 import { Progress, Spinner } from "../ui/Progress";
 import { useProjectStore, getAudioBlob } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
+import { useEpisodes } from "../../hooks/useEpisodes";
 import { Transcript, Word } from "../../lib/types";
 import { generateId, cn } from "../../lib/utils";
-import { formatTimestamp } from "../../lib/formats";
-
-// Simple relative time formatter
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMs / 3600000);
-  const diffDays = Math.floor(diffMs / 86400000);
-
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString();
-}
+import { formatTimestamp, formatRelativeTime } from "../../lib/formats";
 
 interface TranscriptEditorProps {
   onComplete: () => void;
@@ -53,6 +38,7 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     updateTranscriptWord,
   } = useProjectStore();
   const { settings } = useSettingsStore();
+  const { saveTranscript } = useEpisodes();
 
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [progressState, setProgressState] = useState<ProgressState>({
@@ -420,6 +406,16 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
         };
 
         addTranscript(transcript);
+
+        // Sync to backend
+        saveTranscript(currentProject.id, {
+          text: transcript.text,
+          words: transcript.words,
+          language: transcript.language,
+          name: transcript.name,
+          audioFingerprint: transcript.audioFingerprint,
+        }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
+
         setProgressState({
           stage: "complete",
           progress: 100,
@@ -480,6 +476,16 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
         };
 
         addTranscript(transcript);
+
+        // Sync to backend
+        saveTranscript(currentProject.id, {
+          text: transcript.text,
+          words: transcript.words,
+          language: transcript.language,
+          name: transcript.name,
+          audioFingerprint: transcript.audioFingerprint,
+        }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
+
         setProgressState({
           stage: "complete",
           progress: 100,

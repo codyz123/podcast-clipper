@@ -46,6 +46,8 @@ export interface PodcastDetails extends Podcast {
     category?: string;
     language?: string;
     explicit?: boolean;
+    email?: string;
+    website?: string;
   };
   brandColors?: {
     primary?: string;

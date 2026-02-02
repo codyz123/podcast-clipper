@@ -28,5 +28,7 @@ dist-server
 *.njsproj
 *.sln
 *.sw?
-.vercel
 .env*.local
+
+# .vercel folder is committed - contains project link (not secrets)
+# This allows `vercel env pull` to work on fresh clones/worktrees

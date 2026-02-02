@@ -1,37 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuthStore } from "../stores/authStore";
-import { useSettingsStore } from "../stores/settingsStore";
 import type { PodcastDetails } from "../lib/authTypes";
-
-function getApiBase(): string {
-  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3001";
-}
-
-// Helper to make authenticated requests with automatic token refresh
-async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
-  const { accessToken, refreshAccessToken, logout } = useAuthStore.getState();
-
-  const headers = new Headers(options.headers);
-  if (accessToken) {
-    headers.set("Authorization", `Bearer ${accessToken}`);
-  }
-
-  let res = await fetch(url, { ...options, headers });
-
-  // If 401, try to refresh token and retry
-  if (res.status === 401) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      const newToken = useAuthStore.getState().accessToken;
-      headers.set("Authorization", `Bearer ${newToken}`);
-      res = await fetch(url, { ...options, headers });
-    } else {
-      logout();
-    }
-  }
-
-  return res;
-}
+import { getApiBase, authFetch } from "../lib/api";
 
 export function usePodcast() {
   const { currentPodcastId, setPodcasts } = useAuthStore();
@@ -144,6 +114,85 @@ export function usePodcast() {
     setPodcasts(podcasts);
   };
 
+  const updatePodcast = async (updates: {
+    name?: string;
+    description?: string;
+    coverImageUrl?: string;
+    podcastMetadata?: {
+      author?: string;
+      category?: string;
+      language?: string;
+      explicit?: boolean;
+      email?: string;
+      website?: string;
+    };
+    brandColors?: {
+      primary?: string;
+      secondary?: string;
+      accent?: string;
+    };
+  }): Promise<void> => {
+    if (!currentPodcastId) throw new Error("No podcast selected");
+
+    const res = await authFetch(`${getApiBase()}/api/podcasts/${currentPodcastId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "Failed to update podcast");
+    }
+
+    await fetchPodcast();
+  };
+
+  const deletePodcast = async (): Promise<void> => {
+    if (!currentPodcastId) throw new Error("No podcast selected");
+
+    const res = await authFetch(`${getApiBase()}/api/podcasts/${currentPodcastId}`, {
+      method: "DELETE",
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "Failed to delete podcast");
+    }
+
+    // Refresh podcasts list
+    const podcastsRes = await authFetch(`${getApiBase()}/api/podcasts`);
+    const { podcasts } = await podcastsRes.json();
+    setPodcasts(podcasts);
+
+    // If podcasts remain, select the first one
+    // If none remain, App.tsx will automatically show CreatePodcastScreen
+    if (podcasts.length > 0) {
+      const { setCurrentPodcast } = useAuthStore.getState();
+      setCurrentPodcast(podcasts[0].id);
+    }
+  };
+
+  const transferOwnership = async (newOwnerId: string): Promise<void> => {
+    if (!currentPodcastId) throw new Error("No podcast selected");
+
+    const res = await authFetch(
+      `${getApiBase()}/api/podcasts/${currentPodcastId}/transfer-ownership`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newOwnerId }),
+      }
+    );
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "Failed to transfer ownership");
+    }
+
+    await fetchPodcast();
+  };
+
   return {
     podcast,
     isLoading,
@@ -153,6 +202,9 @@ export function usePodcast() {
     removeMember,
     cancelInvitation,
     createPodcast,
+    updatePodcast,
+    deletePodcast,
+    transferOwnership,
     isOwner: podcast?.currentUserRole === "owner",
   };
 }
