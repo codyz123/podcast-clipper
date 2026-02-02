@@ -471,7 +471,7 @@ type ProjectStateSetter = (
     | ProjectState
     | Partial<ProjectState>
     | ((state: ProjectState) => ProjectState | Partial<ProjectState>),
-  replace?: boolean
+  replace?: false
 ) => void;
 
 let projectStoreSetState: ProjectStateSetter | null = null;
