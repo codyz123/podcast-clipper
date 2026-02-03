@@ -1,9 +1,9 @@
 import type { MouseEvent } from "react";
 import { cn } from "../../lib/utils";
-import type { StageStatus } from "../EpisodePipeline/EpisodePipeline";
+import type { StageStatus, StageStatusWithSubSteps, StageId } from "../../lib/statusConfig";
 
 interface StageProgressBarProps {
-  stageStatus?: Record<string, { status: string; updatedAt?: string }>;
+  stageStatus?: StageStatusWithSubSteps;
   compact?: boolean;
   fullWidth?: boolean;
   onStageStatusChange?: (stageId: string, nextStatus: StageStatus) => void;
@@ -42,7 +42,8 @@ export const StageProgressBar: React.FC<StageProgressBarProps> = ({
   };
 
   const getStatus = (stageId: string): StageStatus => {
-    const status = stageStatus?.[stageId]?.status;
+    const stageEntry = stageStatus?.[stageId as StageId];
+    const status = stageEntry?.status;
     if (status === "complete" || status === "in-progress" || status === "not-started") {
       return status;
     }

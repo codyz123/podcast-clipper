@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuthStore } from "../stores/authStore";
 import { useProjectStore } from "../stores/projectStore";
 import { getApiBase, authFetch } from "../lib/api";
+import type { StageStatusWithSubSteps } from "../lib/statusConfig";
 
 // Episode type from backend
 export interface Episode {
@@ -23,7 +24,7 @@ export interface Episode {
     website?: string;
     twitter?: string;
   }>;
-  stageStatus?: Record<string, { status: string; updatedAt?: string }>;
+  stageStatus?: StageStatusWithSubSteps;
   createdAt: string;
   updatedAt: string;
 }
@@ -393,19 +394,17 @@ export function useEpisodes() {
       episodeId: string,
       stage: string,
       status: string
-    ): Promise<Record<string, { status: string; updatedAt?: string }> | null> => {
+    ): Promise<StageStatusWithSubSteps | null> => {
       if (!currentPodcastId) return null;
 
       const prevEpisode = episodes.find((e) => e.id === episodeId);
-      const previousStageStatus = prevEpisode?.stageStatus || {};
-      const optimisticStageStatus = {
+      const previousStageStatus: StageStatusWithSubSteps = prevEpisode?.stageStatus || {};
+      const optimisticStageStatus: StageStatusWithSubSteps = {
         ...previousStageStatus,
         [stage]: { status, updatedAt: new Date().toISOString() },
       };
 
-      const applyStageStatus = (
-        nextStageStatus: Record<string, { status: string; updatedAt?: string }>
-      ) => {
+      const applyStageStatus = (nextStageStatus: StageStatusWithSubSteps) => {
         setEpisodes((prev) =>
           prev.map((episode) =>
             episode.id === episodeId ? { ...episode, stageStatus: nextStageStatus } : episode
@@ -447,6 +446,74 @@ export function useEpisodes() {
       } catch (err) {
         applyStageStatus(previousStageStatus);
         setError(err instanceof Error ? err.message : "Failed to update stage status");
+        return null;
+      }
+    },
+    [currentPodcastId, episodes, currentEpisode]
+  );
+
+  // Update sub-step status (granular tracking within stages)
+  const updateSubStepStatus = useCallback(
+    async (
+      episodeId: string,
+      subStepId: string,
+      status: string
+    ): Promise<Episode["stageStatus"] | null> => {
+      if (!currentPodcastId) return null;
+
+      const prevEpisode = episodes.find((e) => e.id === episodeId);
+      const previousStageStatus = prevEpisode?.stageStatus || {};
+      const previousSubSteps = previousStageStatus.subSteps || {};
+      const optimisticStageStatus = {
+        ...previousStageStatus,
+        subSteps: {
+          ...previousSubSteps,
+          [subStepId]: { status, updatedAt: new Date().toISOString() },
+        },
+      };
+
+      const applyStageStatus = (nextStageStatus: Episode["stageStatus"]) => {
+        setEpisodes((prev) =>
+          prev.map((episode) =>
+            episode.id === episodeId ? { ...episode, stageStatus: nextStageStatus } : episode
+          )
+        );
+
+        if (currentEpisode?.id === episodeId) {
+          setCurrentEpisode((prev) => (prev ? { ...prev, stageStatus: nextStageStatus } : prev));
+        }
+
+        const projectState = useProjectStore.getState();
+        if (projectState.currentProject?.id === episodeId) {
+          projectState.updateProject({ stageStatus: nextStageStatus });
+        }
+      };
+
+      applyStageStatus(optimisticStageStatus);
+
+      try {
+        const res = await authFetch(
+          `${getApiBase()}/api/podcasts/${currentPodcastId}/episodes/${episodeId}/substep-status`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ subStepId, status }),
+          }
+        );
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Failed to update sub-step status");
+        }
+
+        const { stageStatus } = await res.json();
+        if (stageStatus) {
+          applyStageStatus(stageStatus);
+        }
+        return stageStatus;
+      } catch (err) {
+        applyStageStatus(previousStageStatus);
+        setError(err instanceof Error ? err.message : "Failed to update sub-step status");
         return null;
       }
     },
@@ -626,5 +693,6 @@ export function useEpisodes() {
     saveClips,
     clearCurrentEpisode,
     updateStageStatus,
+    updateSubStepStatus,
   };
 }

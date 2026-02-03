@@ -5,7 +5,7 @@ import {
   EnvelopeClosedIcon,
   BarChartIcon,
   IdCardIcon,
-  Link2Icon,
+  GearIcon,
   PinLeftIcon,
   PinRightIcon,
   ChevronDownIcon,
@@ -20,7 +20,7 @@ export type WorkspaceSection =
   | "outreach"
   | "analytics"
   | "podcast-info"
-  | "connections";
+  | "settings";
 
 interface WorkspaceNavProps {
   activeSection: WorkspaceSection;
@@ -40,7 +40,6 @@ const navItems: NavItemConfig[] = [
   { id: "outreach", label: "Outreach", icon: EnvelopeClosedIcon, disabled: true },
   { id: "analytics", label: "Analytics", icon: BarChartIcon, disabled: true },
   { id: "podcast-info", label: "Podcast Info", icon: IdCardIcon },
-  { id: "connections", label: "Connections", icon: Link2Icon },
 ];
 
 export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNavigate }) => {
@@ -236,6 +235,38 @@ export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNav
 
         {/* Spacer */}
         <div className="flex-1" />
+
+        {/* Settings Button - at bottom */}
+        <div className="p-2 pb-0">
+          <div className="mb-2 border-t border-[hsl(var(--border-subtle))]" />
+          <button
+            onClick={() => onNavigate("settings")}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg px-2.5 py-2",
+              "transition-all duration-150",
+              "overflow-hidden",
+              activeSection === "settings"
+                ? cn("bg-[hsl(var(--cyan)/0.15)]", "text-[hsl(var(--cyan))]")
+                : cn(
+                    "text-[hsl(var(--text-ghost))]",
+                    "hover:bg-[hsl(var(--surface))]",
+                    "hover:text-[hsl(var(--text-muted))]"
+                  )
+            )}
+            title={!showExpanded ? "Settings" : undefined}
+          >
+            <GearIcon className="h-[18px] w-[18px] flex-shrink-0" />
+            <span
+              className={cn(
+                "text-sm font-medium whitespace-nowrap",
+                "transition-opacity duration-150",
+                showExpanded ? "opacity-100" : "w-0 opacity-0"
+              )}
+            >
+              Settings
+            </span>
+          </button>
+        </div>
 
         {/* Pin Button */}
         <div className="p-2 pb-3">

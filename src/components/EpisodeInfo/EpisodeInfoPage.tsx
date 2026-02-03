@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { CalendarIcon, PersonIcon, FileTextIcon } from "@radix-ui/react-icons";
+import { CalendarIcon, PersonIcon, FileTextIcon, SpeakerLoudIcon } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEpisodes } from "../../hooks/useEpisodes";
 import { StageProgressBar } from "../ui/StageProgressBar";
+import { ImportButton } from "../ImportButton";
 import type { StageStatus } from "../EpisodePipeline/EpisodePipeline";
 
 interface EpisodeMetadata {
@@ -207,6 +208,14 @@ export const EpisodeInfoPage: React.FC = () => {
 
         {/* Form */}
         <div className="space-y-8">
+          {/* Audio Import Section */}
+          <section>
+            <h2 className="mb-4 flex items-center gap-2 text-sm font-medium tracking-wider text-[hsl(var(--text-muted))] uppercase">
+              <SpeakerLoudIcon className="h-4 w-4" />
+              Audio
+            </h2>
+            <ImportButton variant="expanded" />
+          </section>
           {/* Basic Info Section */}
           <section>
             <h2 className="mb-4 flex items-center gap-2 text-sm font-medium tracking-wider text-[hsl(var(--text-muted))] uppercase">

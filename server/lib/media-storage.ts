@@ -1,6 +1,6 @@
-import { put, del, list } from "@vercel/blob";
 import { neon } from "@neondatabase/serverless";
 import { readFileSync } from "fs";
+import { uploadToR2, deleteFromR2ByUrl, listR2Objects } from "./r2-storage.js";
 
 // Get database connection
 function getDb() {
@@ -78,84 +78,43 @@ export async function initializeMediaTables(): Promise<void> {
   console.log("[Database] Media tables initialized");
 }
 
-// Upload a file to Vercel Blob
+// Upload a file to R2
 export async function uploadMedia(
   file: Buffer,
   filename: string,
   contentType: string,
   folder: string = "media"
 ): Promise<{ url: string; size: number }> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
-    throw new Error("BLOB_READ_WRITE_TOKEN environment variable is required");
-  }
-
-  const pathname = `${folder}/${Date.now()}-${filename}`;
-
-  const blob = await put(pathname, file, {
-    access: "public",
-    contentType,
-    token,
-  });
-
-  return {
-    url: blob.url,
-    size: file.length,
-  };
+  const key = `${folder}/${Date.now()}-${filename}`;
+  return uploadToR2(key, file, contentType);
 }
 
-// Upload a file from disk path to Vercel Blob
+// Upload a file from disk path to R2
 export async function uploadMediaFromPath(
   filePath: string,
   filename: string,
   contentType: string,
   folder: string = "media"
 ): Promise<{ url: string; size: number }> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
-    throw new Error("BLOB_READ_WRITE_TOKEN environment variable is required");
-  }
-
-  const pathname = `${folder}/${Date.now()}-${filename}`;
+  const key = `${folder}/${Date.now()}-${filename}`;
   const fileBuffer = readFileSync(filePath);
-
-  const blob = await put(pathname, fileBuffer, {
-    access: "public",
-    contentType,
-    token,
-  });
-
-  return {
-    url: blob.url,
-    size: fileBuffer.length,
-  };
+  return uploadToR2(key, fileBuffer, contentType);
 }
 
-// Delete a file from Vercel Blob
+// Delete a file from R2
 export async function deleteMedia(url: string): Promise<void> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
-    throw new Error("BLOB_READ_WRITE_TOKEN environment variable is required");
-  }
-
-  await del(url, { token });
+  await deleteFromR2ByUrl(url);
 }
 
-// List files in Vercel Blob
+// List files in R2
 export async function listMedia(
   prefix?: string
 ): Promise<Array<{ url: string; pathname: string; size: number }>> {
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!token) {
-    throw new Error("BLOB_READ_WRITE_TOKEN environment variable is required");
-  }
-
-  const { blobs } = await list({ prefix, token });
-
-  return blobs.map((blob) => ({
-    url: blob.url,
-    pathname: blob.pathname,
-    size: blob.size,
+  const objects = await listR2Objects(prefix);
+  return objects.map((obj) => ({
+    url: obj.url,
+    pathname: obj.key,
+    size: obj.size,
   }));
 }
 
@@ -264,21 +223,18 @@ export async function deleteProject(id: string): Promise<void> {
     SELECT source_blob_url FROM projects WHERE id = ${id}
   `;
 
-  // Delete blobs
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (token) {
-    const urls = [
-      ...mediaAssets.map((r) => r.blob_url as string),
-      ...renderedClips.map((r) => r.blob_url as string),
-      ...(project[0]?.source_blob_url ? [project[0].source_blob_url as string] : []),
-    ].filter(Boolean);
+  // Delete blobs from R2
+  const urls = [
+    ...mediaAssets.map((r) => r.blob_url as string),
+    ...renderedClips.map((r) => r.blob_url as string),
+    ...(project[0]?.source_blob_url ? [project[0].source_blob_url as string] : []),
+  ].filter(Boolean);
 
-    for (const url of urls) {
-      try {
-        await del(url, { token });
-      } catch (e) {
-        console.error(`Failed to delete blob: ${url}`, e);
-      }
+  for (const url of urls) {
+    try {
+      await deleteFromR2ByUrl(url);
+    } catch (e) {
+      console.error(`Failed to delete blob: ${url}`, e);
     }
   }
 
@@ -359,14 +315,11 @@ export async function deleteClip(id: string): Promise<void> {
     SELECT blob_url FROM rendered_clips WHERE clip_id = ${id}
   `;
 
-  const token = process.env.BLOB_READ_WRITE_TOKEN;
-  if (token) {
-    for (const row of renderedClips) {
-      try {
-        await del(row.blob_url as string, { token });
-      } catch (e) {
-        console.error(`Failed to delete blob: ${row.blob_url}`, e);
-      }
+  for (const row of renderedClips) {
+    try {
+      await deleteFromR2ByUrl(row.blob_url as string);
+    } catch (e) {
+      console.error(`Failed to delete blob: ${row.blob_url}`, e);
     }
   }
 
@@ -444,13 +397,10 @@ export async function deleteMediaAsset(id: string): Promise<void> {
   `;
 
   if (rows.length > 0) {
-    const token = process.env.BLOB_READ_WRITE_TOKEN;
-    if (token) {
-      try {
-        await del(rows[0].blob_url as string, { token });
-      } catch (e) {
-        console.error(`Failed to delete blob: ${rows[0].blob_url}`, e);
-      }
+    try {
+      await deleteFromR2ByUrl(rows[0].blob_url as string);
+    } catch (e) {
+      console.error(`Failed to delete blob: ${rows[0].blob_url}`, e);
     }
   }
 

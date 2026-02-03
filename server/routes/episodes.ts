@@ -285,6 +285,76 @@ router.put(
   }
 );
 
+// Update sub-step status for an episode
+router.put(
+  "/:podcastId/episodes/:episodeId/substep-status",
+  verifyPodcastAccess,
+  async (req: Request, res: Response) => {
+    try {
+      const podcastId = getParam(req.params.podcastId);
+      const episodeId = getParam(req.params.episodeId);
+      const { subStepId, status } = req.body;
+
+      // Validate inputs
+      const validSubSteps = [
+        "guest",
+        "topic",
+        "logistics",
+        "recording",
+        "mixing",
+        "editing",
+        "transcription",
+        "rss",
+        "youtube-dist",
+        "x",
+        "instagram-reel",
+        "instagram-post",
+        "youtube-short",
+        "tiktok",
+      ];
+      const validStatuses = ["not-started", "in-progress", "complete"];
+
+      if (!validSubSteps.includes(subStepId) || !validStatuses.includes(status)) {
+        res.status(400).json({ error: "Invalid sub-step ID or status" });
+        return;
+      }
+
+      // Verify episode exists and belongs to podcast
+      const [episode] = await db
+        .select()
+        .from(projects)
+        .where(and(eq(projects.id, episodeId), eq(projects.podcastId, podcastId)));
+
+      if (!episode) {
+        res.status(404).json({ error: "Episode not found" });
+        return;
+      }
+
+      // Merge new sub-step status into existing stageStatus.subSteps object
+      const currentStatus = (episode.stageStatus as Record<string, unknown>) || {};
+      const currentSubSteps = (currentStatus.subSteps as Record<string, unknown>) || {};
+      const updatedStatus = {
+        ...currentStatus,
+        subSteps: {
+          ...currentSubSteps,
+          [subStepId]: { status, updatedAt: new Date().toISOString() },
+        },
+      };
+
+      const [updated] = await db
+        .update(projects)
+        .set({ stageStatus: updatedStatus, updatedAt: new Date() })
+        .where(eq(projects.id, episodeId))
+        .returning();
+
+      res.json({ episode: updated, stageStatus: updatedStatus });
+    } catch (error) {
+      console.error("Error updating sub-step status:", error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  }
+);
+
 // Delete an episode
 router.delete(
   "/:podcastId/episodes/:episodeId",

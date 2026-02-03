@@ -6,16 +6,15 @@ import { WorkspaceLayout } from "./components/WorkspaceNav/WorkspaceLayout";
 import { WorkspaceSection } from "./components/WorkspaceNav/WorkspaceNav";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProjectsView } from "./components/ProjectsView";
-import { AudioImport } from "./components/AudioImport/AudioImport";
+import { ImportButton } from "./components/ImportButton";
 import { TranscriptEditor } from "./components/TranscriptEditor/TranscriptEditor";
 import { ClipSelector } from "./components/ClipSelector/ClipSelector";
 import { VideoEditor } from "./components/VideoEditor";
 import { PublishPanel } from "./components/PublishPanel";
 import { TextContent } from "./components/TextContent";
-import { Settings } from "./components/Settings/Settings";
 import { PlaceholderPage } from "./components/PlaceholderPage";
 import { PodcastInfoPage } from "./components/PodcastInfo/PodcastInfoPage";
-import { ConnectionsPage } from "./components/Connections/ConnectionsPage";
+import { PodcastSettingsPage } from "./components/Settings/PodcastSettingsPage";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { AuthScreen, LoadingScreen, CreatePodcastScreen } from "./components/Auth";
 import { useProjectStore } from "./stores/projectStore";
@@ -26,17 +25,23 @@ import { useEpisodes } from "./hooks/useEpisodes";
 import { Project, Transcript, Clip } from "./lib/types";
 import type { EpisodeWithDetails } from "./hooks/useEpisodes";
 import { applyBrandColors, parseBrandColorsFromStorage } from "./lib/colorExtractor";
-import { EpisodeStage, StageStatus } from "./components/EpisodePipeline/EpisodePipeline";
+import type { EpisodeStage } from "./components/EpisodePipeline/EpisodePipeline";
+import {
+  ROUTE_TO_SUB_STEP,
+  type StageStatus,
+  type SubStepId,
+  cycleStatus,
+} from "./lib/statusConfig";
 
 const planningSubStageIds = new Set(["guests", "topics", "notes"]);
-const productionSubStageIds = new Set(["import", "record"]);
+const productionSubStageIds = new Set(["record"]);
 const postProductionSubStageIds = new Set(["transcript"]);
 const marketingSubStageIds = new Set(["clips", "editor", "export", "text-content"]);
 
 const stageDefaults: Record<EpisodeStage, string | null> = {
   info: null,
   planning: "guests",
-  production: "import",
+  production: "record",
   "post-production": "transcript",
   distribution: null,
   marketing: "clips",
@@ -55,7 +60,6 @@ const subStageToStage: Record<string, EpisodeStage> = {
   guests: "planning",
   topics: "planning",
   notes: "planning",
-  import: "production",
   record: "production",
   transcript: "post-production",
   clips: "marketing",
@@ -68,7 +72,6 @@ const subStageToView: Record<string, ViewType> = {
   guests: "planning",
   topics: "planning",
   notes: "planning",
-  import: "import",
   record: "record",
   transcript: "transcript",
   clips: "clips",
@@ -100,7 +103,6 @@ const subStageToRouteSegment: Record<string, string> = {
   guests: "guests",
   topics: "topics",
   notes: "notes",
-  import: "import",
   record: "record",
   transcript: "transcribe",
   clips: "clips",
@@ -113,7 +115,7 @@ const routeSegmentToSubStage: Record<string, string> = {
   guests: "guests",
   topics: "topics",
   notes: "notes",
-  import: "import",
+  import: "record", // Redirect old import URLs to record
   record: "record",
   transcript: "transcript",
   transcribe: "transcript",
@@ -138,7 +140,6 @@ type RouteInfo =
   | { kind: "oauth" }
   | { kind: "login" }
   | { kind: "create-podcast" }
-  | { kind: "settings" }
   | { kind: "episodes-list"; section: WorkspaceSection; view: ViewType }
   | { kind: "section"; section: WorkspaceSection }
   | { kind: "episode-route"; slugOrId: string; stageSegment?: string; subStageSegment?: string }
@@ -161,8 +162,6 @@ const parseRoute = (pathname: string): RouteInfo => {
       return { kind: "login" };
     case "create-podcast":
       return { kind: "create-podcast" };
-    case "settings":
-      return { kind: "settings" };
     case "dashboard":
       return { kind: "section", section: "dashboard" };
     case "outreach":
@@ -171,8 +170,8 @@ const parseRoute = (pathname: string): RouteInfo => {
       return { kind: "section", section: "analytics" };
     case "podcast-info":
       return { kind: "section", section: "podcast-info" };
-    case "connections":
-      return { kind: "section", section: "connections" };
+    case "settings":
+      return { kind: "section", section: "settings" };
     case "episodes": {
       if (segments.length === 1) {
         return { kind: "episodes-list", section: "episodes", view: "projects" };
@@ -215,7 +214,13 @@ function App() {
     setShowCreatePodcast,
   } = useAuthStore();
   const { podcast } = usePodcast();
-  const { episodes, fetchEpisode, updateStageStatus, isLoading: episodesLoading } = useEpisodes();
+  const {
+    episodes,
+    fetchEpisode,
+    updateStageStatus,
+    updateSubStepStatus,
+    isLoading: episodesLoading,
+  } = useEpisodes();
 
   const getEpisodeSlug = useCallback(
     (episodeId: string, fallbackName?: string) => {
@@ -561,13 +566,11 @@ function App() {
         : lastSection;
 
   const currentView: ViewType =
-    route.kind === "settings"
-      ? "settings"
-      : route.kind === "episodes-list"
-        ? route.view
-        : route.kind === "episode-route" && episodeRouteState
-          ? episodeRouteState.view
-          : "projects";
+    route.kind === "episodes-list"
+      ? route.view
+      : route.kind === "episode-route" && episodeRouteState
+        ? episodeRouteState.view
+        : "projects";
 
   const activeStage = route.kind === "episode-route" ? episodeRouteState?.stage : undefined;
   const activeSubStage = route.kind === "episode-route" ? episodeRouteState?.subStage : undefined;
@@ -579,14 +582,25 @@ function App() {
     ? episodeStageStatus[activeStage] || "not-started"
     : "not-started";
 
+  // Get sub-step ID from active sub-stage (if it maps to a sub-step)
+  const currentSubStepId: SubStepId | undefined = activeSubStage
+    ? ROUTE_TO_SUB_STEP[activeSubStage]
+    : undefined;
+
+  // Get sub-step status from stageStatus.subSteps
+  const currentSubStepStatus: StageStatus = currentSubStepId
+    ? (currentProject?.stageStatus?.subSteps?.[currentSubStepId]?.status as StageStatus) ||
+      "not-started"
+    : "not-started";
+
   const handleSectionNavigate = (section: WorkspaceSection) => {
     const target =
       section === "episodes"
         ? "/episodes"
         : section === "podcast-info"
           ? "/podcast-info"
-          : section === "connections"
-            ? "/connections"
+          : section === "settings"
+            ? "/settings"
             : section === "dashboard"
               ? "/dashboard"
               : section === "outreach"
@@ -624,23 +638,18 @@ function App() {
       return;
     }
 
-    goToEpisodeStage(episodeId, "production", "import");
+    goToEpisodeStage(episodeId, "production", "record");
   };
 
   const handleProjectLoad = (episodeId: string) => {
     if (!episodeId) return;
-    goToEpisodeStage(episodeId, "production", "import");
+    goToEpisodeStage(episodeId, "production", "record");
   };
 
   const handleStageStatusClick = async () => {
     if (!currentProject?.id || !activeStage || activeStage === "info") return;
 
-    const cycleMap: Record<StageStatus, StageStatus> = {
-      "not-started": "in-progress",
-      "in-progress": "complete",
-      complete: "not-started",
-    };
-    const nextStatus = cycleMap[currentStageStatus];
+    const nextStatus = cycleStatus(currentStageStatus);
 
     setEpisodeStageStatus((prev) => ({ ...prev, [activeStage]: nextStatus }));
 
@@ -651,21 +660,96 @@ function App() {
     }
   };
 
+  const handleSubStepStatusClick = async () => {
+    if (!currentProject?.id || !currentSubStepId) return;
+
+    const nextStatus = cycleStatus(currentSubStepStatus);
+
+    // Optimistically update local state
+    const prevSubSteps = currentProject?.stageStatus?.subSteps || {};
+    const updatedSubSteps = {
+      ...prevSubSteps,
+      [currentSubStepId]: { status: nextStatus, updatedAt: new Date().toISOString() },
+    };
+
+    // Update projectStore
+    const projectState = useProjectStore.getState();
+    projectState.updateProject({
+      stageStatus: {
+        ...currentProject.stageStatus,
+        subSteps: updatedSubSteps,
+      },
+    });
+
+    const result = await updateSubStepStatus(currentProject.id, currentSubStepId, nextStatus);
+
+    if (!result) {
+      // Rollback on failure
+      projectState.updateProject({
+        stageStatus: {
+          ...currentProject.stageStatus,
+          subSteps: prevSubSteps,
+        },
+      });
+    }
+  };
+
+  const handleMarketingSubStepStatusChange = async (subStepId: string, newStatus: StageStatus) => {
+    if (!currentProject?.id) return;
+
+    // Optimistically update local state
+    const prevSubSteps = currentProject?.stageStatus?.subSteps || {};
+    const updatedSubSteps = {
+      ...prevSubSteps,
+      [subStepId]: { status: newStatus, updatedAt: new Date().toISOString() },
+    };
+
+    // Update projectStore
+    const projectState = useProjectStore.getState();
+    projectState.updateProject({
+      stageStatus: {
+        ...currentProject.stageStatus,
+        subSteps: updatedSubSteps,
+      },
+    });
+
+    const result = await updateSubStepStatus(currentProject.id, subStepId, newStatus);
+
+    if (!result) {
+      // Rollback on failure
+      projectState.updateProject({
+        stageStatus: {
+          ...currentProject.stageStatus,
+          subSteps: prevSubSteps,
+        },
+      });
+    }
+  };
+
   const renderView = () => {
     switch (currentView) {
       case "projects":
         return <ProjectsView onProjectLoad={handleProjectLoad} />;
-      case "import":
-        return (
-          <AudioImport
-            onComplete={() =>
-              currentProject?.id &&
-              goToEpisodeStage(currentProject.id, "post-production", "transcript")
-            }
-          />
-        );
       case "record":
-        return <PlaceholderPage title="Record" description="Recording tools are coming soon." />;
+        return (
+          <div className="mx-auto max-w-2xl">
+            <div className="mb-8 sm:mb-10">
+              <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
+                Record & Import
+              </h1>
+              <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
+                Import your podcast audio or record directly (coming soon)
+              </p>
+            </div>
+            <ImportButton
+              variant="expanded"
+              onImportComplete={() =>
+                currentProject?.id &&
+                goToEpisodeStage(currentProject.id, "post-production", "transcript")
+              }
+            />
+          </div>
+        );
       case "transcript":
         return (
           <TranscriptEditor
@@ -697,10 +781,6 @@ function App() {
   };
 
   const renderSectionContent = () => {
-    if (currentView === "settings") {
-      return <Settings />;
-    }
-
     switch (currentSection) {
       case "dashboard":
         return (
@@ -725,8 +805,8 @@ function App() {
         );
       case "podcast-info":
         return <PodcastInfoPage />;
-      case "connections":
-        return <ConnectionsPage />;
+      case "settings":
+        return <PodcastSettingsPage />;
       case "episodes":
       default:
         return (
@@ -785,6 +865,17 @@ function App() {
       onSubStageChange={hasEpisodeContext ? handleSubStageChange : undefined}
       stageStatus={hasEpisodeContext ? currentStageStatus : undefined}
       onStageStatusClick={hasEpisodeContext ? handleStageStatusClick : undefined}
+      subStepId={hasEpisodeContext ? currentSubStepId : undefined}
+      subStepStatus={hasEpisodeContext ? currentSubStepStatus : undefined}
+      onSubStepStatusClick={
+        hasEpisodeContext && currentSubStepId ? handleSubStepStatusClick : undefined
+      }
+      stageStatusWithSubSteps={hasEpisodeContext ? currentProject?.stageStatus : undefined}
+      onMarketingSubStepStatusChange={
+        hasEpisodeContext && activeStage === "marketing"
+          ? handleMarketingSubStepStatusChange
+          : undefined
+      }
     >
       <ErrorBoundary>
         <WorkspaceLayout activeSection={currentSection} onNavigate={handleSectionNavigate}>

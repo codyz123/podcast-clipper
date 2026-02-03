@@ -7,14 +7,12 @@ export type ViewType =
   | "projects"
   | "info"
   | "planning"
-  | "import"
   | "record"
   | "transcript"
   | "clips"
   | "editor"
   | "export"
-  | "text-content"
-  | "settings";
+  | "text-content";
 
 interface LayoutProps {
   children: React.ReactNode;

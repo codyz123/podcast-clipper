@@ -13,7 +13,6 @@ import {
   RocketIcon,
   Share1Icon,
   // Sub-stage icons
-  UploadIcon,
   TextIcon,
   ScissorsIcon,
   VideoIcon,
@@ -22,12 +21,19 @@ import {
   FileTextIcon,
 } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
-import { EpisodeStage, StageStatus } from "../EpisodePipeline/EpisodePipeline";
+import type { EpisodeStage } from "../EpisodePipeline/EpisodePipeline";
 import { UserMenu } from "../Auth/UserMenu";
 import { StageStatusIndicator } from "./StageStatusIndicator";
+import { StatusDropdown } from "../ui/StatusDropdown";
+import type { StageStatus, SubStepId } from "../../lib/statusConfig";
+import {
+  SUB_STEP_LABELS,
+  STAGE_SUB_STEPS,
+  type StageStatusWithSubSteps,
+} from "../../lib/statusConfig";
 
 // Sub-stage types for each workflow
-export type ProductionSubStage = "import" | "record";
+export type ProductionSubStage = "record";
 export type PostProductionSubStage = "transcript";
 export type MarketingSubStage = "clips" | "editor" | "export" | "text-content";
 
@@ -65,7 +71,6 @@ const planningSubStages: SubStageOption[] = [
 ];
 
 const productionSubStages: SubStageOption[] = [
-  { id: "import", label: "Import", icon: UploadIcon },
   { id: "record", label: "Record", icon: SpeakerLoudIcon },
 ];
 
@@ -106,6 +111,13 @@ interface AppShellProps {
   // Stage status
   stageStatus?: StageStatus;
   onStageStatusClick?: () => void;
+  // Sub-step status (for granular tracking)
+  subStepId?: SubStepId;
+  subStepStatus?: StageStatus;
+  onSubStepStatusClick?: () => void;
+  // Marketing sub-steps (for dropdown on marketing pages)
+  stageStatusWithSubSteps?: StageStatusWithSubSteps;
+  onMarketingSubStepStatusChange?: (subStepId: string, status: StageStatus) => void;
 }
 
 export const AppShell: React.FC<AppShellProps> = ({
@@ -121,6 +133,11 @@ export const AppShell: React.FC<AppShellProps> = ({
   onSubStageChange,
   stageStatus,
   onStageStatusClick,
+  subStepId,
+  subStepStatus,
+  onSubStepStatusClick,
+  stageStatusWithSubSteps,
+  onMarketingSubStepStatusChange,
 }) => {
   const [megaDropdownOpen, setMegaDropdownOpen] = useState(false);
   const [hoveredStage, setHoveredStage] = useState<EpisodeStage | null>(null);
@@ -397,14 +414,38 @@ export const AppShell: React.FC<AppShellProps> = ({
 
         {/* Right: Notifications + Account */}
         <div className="flex items-center gap-1">
-          {/* Stage Status Indicator - only show when in a workflow stage */}
-          {activeStage && activeStage !== "info" && onStageStatusClick && (
+          {/* Stage Status Indicator - show dropdown for marketing, sub-step for others */}
+          {activeStage && activeStage !== "info" && (
             <>
-              <StageStatusIndicator
-                status={stageStatus || "not-started"}
-                stageName={activeStage}
-                onClick={onStageStatusClick}
-              />
+              {activeStage === "marketing" && onMarketingSubStepStatusChange ? (
+                // Marketing pages show a dropdown with all marketing sub-steps
+                <StatusDropdown
+                  label="Marketing"
+                  items={STAGE_SUB_STEPS.marketing.map((subStepId) => {
+                    const subStepEntry = stageStatusWithSubSteps?.subSteps?.[subStepId];
+                    const status = (subStepEntry?.status as StageStatus) || "not-started";
+                    return {
+                      id: subStepId,
+                      label: SUB_STEP_LABELS[subStepId],
+                      status,
+                    };
+                  })}
+                  onStatusChange={onMarketingSubStepStatusChange}
+                />
+              ) : subStepId && onSubStepStatusClick ? (
+                <StageStatusIndicator
+                  status={subStepStatus || "not-started"}
+                  stageName={activeStage}
+                  displayName={SUB_STEP_LABELS[subStepId]}
+                  onClick={onSubStepStatusClick}
+                />
+              ) : onStageStatusClick ? (
+                <StageStatusIndicator
+                  status={stageStatus || "not-started"}
+                  stageName={activeStage}
+                  onClick={onStageStatusClick}
+                />
+              ) : null}
               <div className="h-4 w-px bg-[hsl(var(--border-subtle))]" />
             </>
           )}

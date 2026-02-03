@@ -148,6 +148,7 @@ export const projects = pgTable(
     >(),
     createdById: uuid("created_by_id").references(() => users.id),
     stageStatus: jsonb("stage_status").$type<{
+      // Stage-level status (independent of sub-steps)
       planning?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
       production?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
       "post-production"?: {
@@ -156,6 +157,40 @@ export const projects = pgTable(
       };
       distribution?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
       marketing?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+      // Sub-step level status (granular tracking)
+      subSteps?: {
+        // Planning sub-steps
+        guest?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        topic?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        logistics?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        // Production sub-step
+        recording?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        // Post-production sub-steps
+        mixing?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        editing?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        transcription?: {
+          status: "not-started" | "in-progress" | "complete";
+          updatedAt?: string;
+        };
+        // Distribution sub-steps
+        rss?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        "youtube-dist"?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        // Marketing sub-steps
+        x?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+        "instagram-reel"?: {
+          status: "not-started" | "in-progress" | "complete";
+          updatedAt?: string;
+        };
+        "instagram-post"?: {
+          status: "not-started" | "in-progress" | "complete";
+          updatedAt?: string;
+        };
+        "youtube-short"?: {
+          status: "not-started" | "in-progress" | "complete";
+          updatedAt?: string;
+        };
+        tiktok?: { status: "not-started" | "in-progress" | "complete"; updatedAt?: string };
+      };
     }>(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),

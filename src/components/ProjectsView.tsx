@@ -1,23 +1,13 @@
 import React, { useState } from "react";
-import {
-  PlusIcon,
-  TrashIcon,
-  SpeakerLoudIcon,
-  PersonIcon,
-  CalendarIcon,
-  ChevronRightIcon,
-  ReloadIcon,
-} from "@radix-ui/react-icons";
+import { PlusIcon, ReloadIcon, SpeakerLoudIcon } from "@radix-ui/react-icons";
 import { Button, Card, CardContent, Input } from "./ui";
-import { StageProgressBar } from "./ui/StageProgressBar";
 import { useEpisodes, Episode, EpisodeWithDetails } from "../hooks/useEpisodes";
-import type { StageStatus } from "./EpisodePipeline/EpisodePipeline";
 import { useProjectStore } from "../stores/projectStore";
-import { Project, Transcript, Clip } from "../lib/types";
+import { Project, Transcript, Clip, StageStatus, StageId, SubStepId } from "../lib/types";
 import { useAuthStore } from "../stores/authStore";
-import { formatDuration } from "../lib/formats";
 import { cn } from "../lib/utils";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
+import { ExpandableEpisodeRow } from "./EpisodeRow";
 
 // Convert database episode to Project format for projectStore
 function episodeToProject(episode: EpisodeWithDetails): Project {
@@ -79,8 +69,15 @@ interface ProjectsViewProps {
 }
 
 export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => {
-  const { episodes, isLoading, createEpisode, fetchEpisode, deleteEpisode, updateStageStatus } =
-    useEpisodes();
+  const {
+    episodes,
+    isLoading,
+    createEpisode,
+    fetchEpisode,
+    deleteEpisode,
+    updateStageStatus,
+    updateSubStepStatus,
+  } = useEpisodes();
   const { setCurrentProject } = useProjectStore();
   const { podcasts, currentPodcastId } = useAuthStore();
 
@@ -89,6 +86,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
   const [isCreating, setIsCreating] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Episode | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   // Get podcast name from current podcast in authStore
   const currentPodcast = podcasts.find((p) => p.id === currentPodcastId);
@@ -135,27 +133,32 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
     }
   };
 
-  const formatPublishDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
+  const handleToggleExpand = (episodeId: string) => {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(episodeId)) {
+        next.delete(episodeId);
+      } else {
+        next.add(episodeId);
+      }
+      return next;
     });
-  };
-
-  const getGuestName = (episode: Episode): string | null => {
-    if (episode.guests && episode.guests.length > 0) {
-      return episode.guests[0].name;
-    }
-    return null;
   };
 
   const handleStageStatusChange = async (
     episodeId: string,
-    stageId: string,
+    stageId: StageId,
     nextStatus: StageStatus
   ) => {
     await updateStageStatus(episodeId, stageId, nextStatus);
+  };
+
+  const handleSubStepStatusChange = async (
+    episodeId: string,
+    subStepId: SubStepId,
+    nextStatus: StageStatus
+  ) => {
+    await updateSubStepStatus(episodeId, subStepId, nextStatus);
   };
 
   return (
@@ -267,7 +270,8 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
                   "text-[hsl(var(--text-ghost))]"
                 )}
               >
-                <div className="w-[280px]">Episode</div>
+                <div className="w-6" /> {/* Expand toggle column */}
+                <div className="w-[260px]">Episode</div>
                 <div className="w-[120px]">Guest</div>
                 <div className="w-[100px]">Published</div>
                 <div className="flex-1">Progress</div>
@@ -276,134 +280,23 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
 
               {/* Episode List */}
               <div className="flex flex-col gap-2">
-                {episodes.map((episode, index) => {
-                  const guestName = getGuestName(episode);
-                  const hasAudio = !!episode.audioBlobUrl;
-
-                  return (
-                    <div
-                      key={episode.id}
-                      onClick={() => handleLoadProject(episode.id)}
-                      className={cn("group cursor-pointer", "animate-fadeInUp")}
-                      style={{ animationDelay: `${index * 30}ms` }}
-                    >
-                      <div
-                        className={cn(
-                          "flex items-center gap-4 rounded-lg px-4 py-3 transition-all duration-150",
-                          "bg-[hsl(var(--surface)/0.5)]",
-                          "border border-transparent",
-                          "hover:border-[hsl(var(--glass-border))]",
-                          "hover:bg-[hsl(var(--surface)/0.8)]"
-                        )}
-                      >
-                        {/* Episode Name + Duration */}
-                        <div className="w-[280px] min-w-0 flex-shrink-0">
-                          <h3 className="truncate font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
-                            {episode.episodeNumber && (
-                              <span className="mr-2 text-[hsl(var(--text-ghost))]">
-                                #{episode.episodeNumber}
-                              </span>
-                            )}
-                            {episode.name}
-                          </h3>
-                          <div className="mt-0.5 flex items-center gap-2 text-xs text-[hsl(var(--text-ghost))]">
-                            {hasAudio && episode.audioDuration ? (
-                              <span className="flex items-center gap-1">
-                                <SpeakerLoudIcon className="h-3 w-3" />
-                                {formatDuration(episode.audioDuration)}
-                              </span>
-                            ) : (
-                              <span>No audio</span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Guest */}
-                        <div className="hidden w-[120px] flex-shrink-0 sm:block">
-                          {guestName ? (
-                            <span className="flex items-center gap-1.5 text-xs text-[hsl(var(--text-muted))]">
-                              <PersonIcon className="h-3 w-3 text-[hsl(var(--text-ghost))]" />
-                              <span className="truncate">{guestName}</span>
-                            </span>
-                          ) : (
-                            <span className="text-xs text-[hsl(var(--text-ghost))]">—</span>
-                          )}
-                        </div>
-
-                        {/* Published Date */}
-                        <div className="hidden w-[100px] flex-shrink-0 sm:block">
-                          {episode.publishDate ? (
-                            <span className="flex items-center gap-1.5 text-xs text-[hsl(var(--text-muted))]">
-                              <CalendarIcon className="h-3 w-3 text-[hsl(var(--text-ghost))]" />
-                              <span>{formatPublishDate(episode.publishDate)}</span>
-                            </span>
-                          ) : (
-                            <span className="text-xs text-[hsl(var(--text-ghost))]">—</span>
-                          )}
-                        </div>
-
-                        {/* Stage Progress Bar */}
-                        <div className="hidden flex-1 sm:block">
-                          <StageProgressBar
-                            stageStatus={episode.stageStatus}
-                            onStageStatusChange={(stageId, nextStatus) =>
-                              handleStageStatusChange(episode.id, stageId, nextStatus)
-                            }
-                          />
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex w-[60px] items-center justify-end gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTarget(episode);
-                            }}
-                            className={cn(
-                              "rounded-md p-1.5 opacity-0 transition-all group-hover:opacity-100",
-                              "text-[hsl(var(--text-ghost))]",
-                              "hover:text-[hsl(var(--error))]",
-                              "hover:bg-[hsl(var(--error)/0.1)]"
-                            )}
-                          >
-                            <TrashIcon className="h-3.5 w-3.5" />
-                          </button>
-                          <ChevronRightIcon
-                            className={cn(
-                              "h-4 w-4 transition-all",
-                              "text-[hsl(var(--text-ghost))]",
-                              "group-hover:text-[hsl(var(--text-muted))]",
-                              "group-hover:translate-x-0.5"
-                            )}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Mobile: Show guest, date, and progress below */}
-                      <div className="mt-2 flex flex-wrap items-center gap-3 px-4 pb-2 sm:hidden">
-                        {guestName && (
-                          <span className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))]">
-                            <PersonIcon className="h-3 w-3" />
-                            {guestName}
-                          </span>
-                        )}
-                        {episode.publishDate && (
-                          <span className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))]">
-                            <CalendarIcon className="h-3 w-3" />
-                            {formatPublishDate(episode.publishDate)}
-                          </span>
-                        )}
-                        <StageProgressBar
-                          stageStatus={episode.stageStatus}
-                          compact
-                          onStageStatusChange={(stageId, nextStatus) =>
-                            handleStageStatusChange(episode.id, stageId, nextStatus)
-                          }
-                        />
-                      </div>
-                    </div>
-                  );
-                })}
+                {episodes.map((episode, index) => (
+                  <ExpandableEpisodeRow
+                    key={episode.id}
+                    episode={episode}
+                    isExpanded={expandedIds.has(episode.id)}
+                    onToggleExpand={() => handleToggleExpand(episode.id)}
+                    onLoad={handleLoadProject}
+                    onDelete={setDeleteTarget}
+                    onStageStatusChange={(stageId, status) =>
+                      handleStageStatusChange(episode.id, stageId, status)
+                    }
+                    onSubStepStatusChange={(subStepId, status) =>
+                      handleSubStepStatusChange(episode.id, subStepId, status)
+                    }
+                    animationDelay={index * 30}
+                  />
+                ))}
               </div>
             </div>
           </div>

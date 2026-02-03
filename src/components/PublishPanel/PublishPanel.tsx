@@ -1,19 +1,65 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { RocketIcon, CrossCircledIcon, CheckCircledIcon, ReloadIcon } from "@radix-ui/react-icons";
-import { Button, Card, CardContent } from "../ui";
+import { Button, Card, CardContent, StatusDropdown } from "../ui";
 import { Progress, Spinner } from "../ui/Progress";
 import { useProjectStore } from "../../stores/projectStore";
 import { usePublishStore } from "../../stores/publishStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useEpisodes } from "../../hooks/useEpisodes";
 import type { SocialPlatform } from "../../lib/publish";
 import { cn } from "../../lib/utils";
 import { ConnectedAccountsBar } from "./ConnectedAccountsBar";
 import { ClipPublishCard } from "./ClipPublishCard";
 import { startOAuthFlow, getOAuthStatus, type OAuthPlatform } from "../../services/oauth";
+import { STAGE_SUB_STEPS, SUB_STEP_LABELS, type StageStatus } from "../../lib/statusConfig";
 
 export const PublishPanel: React.FC = () => {
   const currentProject = useProjectStore((s) => s.currentProject);
+  const updateProject = useProjectStore((s) => s.updateProject);
   const connectAccount = useWorkspaceStore((s) => s.connectAccount);
+  const { updateSubStepStatus } = useEpisodes();
+
+  // Marketing sub-steps for the dropdown
+  const marketingSubSteps = STAGE_SUB_STEPS.marketing;
+  const marketingItems = marketingSubSteps.map((subStepId) => {
+    const subStepEntry = currentProject?.stageStatus?.subSteps?.[subStepId];
+    const status = (subStepEntry?.status as StageStatus) || "not-started";
+    return {
+      id: subStepId,
+      label: SUB_STEP_LABELS[subStepId],
+      status,
+    };
+  });
+
+  const handleMarketingStatusChange = async (subStepId: string, newStatus: StageStatus) => {
+    if (!currentProject?.id) return;
+
+    // Optimistically update local state
+    const prevSubSteps = currentProject?.stageStatus?.subSteps || {};
+    const updatedSubSteps = {
+      ...prevSubSteps,
+      [subStepId]: { status: newStatus, updatedAt: new Date().toISOString() },
+    };
+
+    updateProject({
+      stageStatus: {
+        ...currentProject.stageStatus,
+        subSteps: updatedSubSteps,
+      },
+    });
+
+    const result = await updateSubStepStatus(currentProject.id, subStepId, newStatus);
+
+    if (!result) {
+      // Rollback on failure
+      updateProject({
+        stageStatus: {
+          ...currentProject.stageStatus,
+          subSteps: prevSubSteps,
+        },
+      });
+    }
+  };
 
   const {
     isPublishing,
@@ -170,13 +216,20 @@ export const PublishPanel: React.FC = () => {
     <div className="min-h-full">
       <div className="mx-auto max-w-5xl">
         {/* Header */}
-        <div className="mb-8 sm:mb-10">
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
-            Publish
-          </h1>
-          <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
-            Render and upload your clips to social platforms
-          </p>
+        <div className="mb-8 flex items-start justify-between sm:mb-10">
+          <div>
+            <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
+              Publish
+            </h1>
+            <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
+              Render and upload your clips to social platforms
+            </p>
+          </div>
+          <StatusDropdown
+            label="Marketing"
+            items={marketingItems}
+            onStatusChange={handleMarketingStatusChange}
+          />
         </div>
 
         {/* Connected Accounts */}

@@ -1,5 +1,16 @@
 // Core types for the Podcastomatic app
 
+// Re-export status types from centralized config
+export type {
+  StageStatus,
+  StageId,
+  SubStepId,
+  StatusEntry,
+  StageStatusWithSubSteps,
+} from "./statusConfig";
+
+import type { StageStatusWithSubSteps } from "./statusConfig";
+
 export interface Project {
   id: string;
   name: string;
@@ -18,7 +29,8 @@ export interface Project {
   showNotes?: string;
   explicit?: boolean;
   guests?: Guest[];
-  stageStatus?: Record<string, { status: string; updatedAt?: string }>;
+  // Stage and sub-step status tracking
+  stageStatus?: StageStatusWithSubSteps;
 
   // Legacy: single transcript (for backward compatibility)
   transcript?: Transcript;

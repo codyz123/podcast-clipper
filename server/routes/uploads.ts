@@ -1,12 +1,11 @@
 import { Router, Request, Response } from "express";
-import { createMultipartUpload, uploadPart, completeMultipartUpload } from "@vercel/blob";
 import { eq, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { uploadSessions, projects, podcastMembers } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
+import { createMultipartUpload, uploadPart, completeMultipartUpload } from "../lib/r2-storage.js";
 
 const router = Router();
-const BLOB_TOKEN = process.env.BLOB_READ_WRITE_TOKEN!;
 
 // Chunk size calculation (5MB min, 50MB max, target ~1000 parts)
 function calculateChunkSize(totalBytes: number): number {
@@ -62,12 +61,8 @@ router.post(
       const totalParts = Math.ceil(totalBytes / chunkSize);
       const pathname = `podcasts/${podcastId}/episodes/${episodeId}/${Date.now()}-${filename}`;
 
-      // Initialize Vercel Blob multipart upload
-      const { key, uploadId } = await createMultipartUpload(pathname, {
-        access: "public",
-        contentType,
-        token: BLOB_TOKEN,
-      });
+      // Initialize R2 multipart upload
+      const { key, uploadId } = await createMultipartUpload(pathname, contentType);
 
       // Store session in database
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
@@ -152,14 +147,8 @@ router.post(
         return;
       }
 
-      // Upload to Vercel Blob
-      const part = await uploadPart(session.pathname, chunk, {
-        access: "public",
-        uploadId: session.uploadId,
-        key: session.blobKey,
-        partNumber,
-        token: BLOB_TOKEN,
-      });
+      // Upload to R2
+      const part = await uploadPart(session.blobKey, session.uploadId, partNumber, chunk);
 
       // Update session
       const updatedParts = [...(session.completedParts || []), { partNumber, etag: part.etag }];
@@ -223,18 +212,13 @@ router.post(
         .set({ status: "completing", updatedAt: new Date() })
         .where(eq(uploadSessions.id, sessionId));
 
-      // Sort parts by partNumber (required by Vercel Blob)
+      // Sort parts by partNumber (required by S3/R2)
       const sortedParts = [...(session.completedParts || [])].sort(
         (a, b) => a.partNumber - b.partNumber
       );
 
       // Complete multipart upload
-      const result = await completeMultipartUpload(session.pathname, sortedParts, {
-        uploadId: session.uploadId,
-        key: session.blobKey,
-        access: "public",
-        token: BLOB_TOKEN,
-      });
+      const result = await completeMultipartUpload(session.blobKey, session.uploadId, sortedParts);
 
       // Update session as completed
       await db
