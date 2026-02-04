@@ -107,7 +107,7 @@ interface SettingsState {
 }
 
 // Current settings version - increment when adding new required fields
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 
 // Detect production environment and use appropriate backend URL
 const isProduction = window.location.hostname !== "localhost";
@@ -121,7 +121,7 @@ export const useSettingsStore = create<SettingsState>()(
       settings: {
         // Backend config
         backendUrl: DEFAULT_BACKEND_URL,
-        accessCode: isProduction ? "" : "podcast-friends",
+        accessCode: "podcast-friends",
         defaultTemplate: "minimal-dark",
         defaultFormats: ["9:16"] as VideoFormat[],
         defaultClipDuration: 30,
@@ -213,19 +213,32 @@ export const useSettingsStore = create<SettingsState>()(
       name: "podcastomatic-settings",
       version: SETTINGS_VERSION,
       migrate: (persistedState: any, version: number) => {
-        // Migration: update backend config
+        let state = persistedState;
+
+        // Migration v2 -> v3: update backend config
         if (version < 3) {
-          return {
-            ...persistedState,
+          state = {
+            ...state,
             settings: {
-              ...persistedState.settings,
+              ...state.settings,
               backendUrl: DEFAULT_BACKEND_URL,
-              accessCode:
-                persistedState.settings?.accessCode || (isProduction ? "" : "podcast-friends"),
+              accessCode: state.settings?.accessCode || "podcast-friends",
             },
           };
         }
-        return persistedState;
+
+        // Migration v3 -> v4: ensure access code is set for production users
+        if (version < 4) {
+          state = {
+            ...state,
+            settings: {
+              ...state.settings,
+              accessCode: state.settings?.accessCode || "podcast-friends",
+            },
+          };
+        }
+
+        return state;
       },
     }
   )
