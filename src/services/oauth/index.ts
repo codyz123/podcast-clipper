@@ -20,15 +20,6 @@ function getBackendConfig(): { backendUrl: string; accessCode: string } {
 export async function startOAuthFlow(platform: OAuthPlatform): Promise<OAuthResult> {
   const { backendUrl, accessCode } = getBackendConfig();
 
-  // Only YouTube is supported for now
-  if (platform !== "youtube") {
-    return {
-      success: false,
-      platform,
-      error: `OAuth for ${platform} is not yet implemented`,
-    };
-  }
-
   try {
     // Get the authorization URL from the backend
     const response = await fetch(`${backendUrl}/api/oauth/${platform}/authorize`, {

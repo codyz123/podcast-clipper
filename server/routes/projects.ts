@@ -129,7 +129,17 @@ router.delete("/projects/:id", async (req: Request, res: Response) => {
 router.post("/projects/:projectId/clips", async (req: Request, res: Response) => {
   try {
     const projectId = getParam(req.params.projectId);
-    const { id, name, startTime, endTime, transcriptSegments, templateId, format } = req.body;
+    const {
+      id,
+      name,
+      startTime,
+      endTime,
+      transcriptSegments,
+      templateId,
+      format,
+      background,
+      subtitle,
+    } = req.body;
 
     if (!id || !name || startTime === undefined || endTime === undefined) {
       res.status(400).json({ error: "id, name, startTime, and endTime are required" });
@@ -145,6 +155,8 @@ router.post("/projects/:projectId/clips", async (req: Request, res: Response) =>
       transcriptSegments,
       templateId,
       format,
+      background,
+      subtitle,
     });
 
     res.json({ success: true, id });
@@ -175,6 +187,8 @@ router.put("/projects/:projectId/clips", async (req: Request, res: Response) => 
         transcriptSegments: clip.transcriptSegments,
         templateId: clip.templateId,
         format: clip.format,
+        background: clip.background,
+        subtitle: clip.subtitle,
       });
     }
 

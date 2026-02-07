@@ -16,6 +16,7 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { VideoFormat, VIDEO_FORMATS } from "../../lib/types";
 import { formatDuration } from "../../lib/formats";
 import { cn } from "../../lib/utils";
+import { resolveFontFamily } from "../../lib/fonts";
 
 interface VideoPreviewProps {
   onComplete: () => void;
@@ -139,7 +140,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({ onComplete }) => {
         >
           <p
             style={{
-              fontFamily: subtitle.fontFamily,
+              fontFamily: resolveFontFamily(subtitle.fontFamily),
               fontSize: `${subtitle.fontSize * 0.4}px`,
               fontWeight: subtitle.fontWeight,
               color: subtitle.color,

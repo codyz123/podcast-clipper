@@ -1,5 +1,6 @@
 import { VideoFormat, VideoTemplate, Word } from "./types";
 import { WordTiming } from "../remotion/types";
+import { toWordTimings } from "./clipTransform";
 
 export interface RenderRequest {
   clipId: string;
@@ -25,13 +26,10 @@ export interface RenderProgress {
 export function wordsToFrameTiming(
   words: Word[],
   clipStartTime: number,
-  fps: number = 30
+  fps: number = 30,
+  clipEndTime: number = Number.POSITIVE_INFINITY
 ): WordTiming[] {
-  return words.map((word) => ({
-    text: word.text,
-    startFrame: Math.floor((word.start - clipStartTime) * fps),
-    endFrame: Math.floor((word.end - clipStartTime) * fps),
-  }));
+  return toWordTimings(words, clipStartTime, clipEndTime, fps);
 }
 
 // Calculate duration in frames
@@ -68,12 +66,16 @@ export const QUALITY_SETTINGS = {
 export function generateRenderProps(request: RenderRequest) {
   const fps = 30;
   const durationInFrames = calculateDurationInFrames(request.startTime, request.endTime, fps);
-  const wordTimings = wordsToFrameTiming(request.words, request.startTime, fps);
+  const wordTimings = wordsToFrameTiming(request.words, request.startTime, fps, request.endTime);
+  const audioStartFrame = Math.floor(request.startTime * fps);
+  const audioEndFrame = Math.ceil(request.endTime * fps);
 
   return {
     compositionId: getCompositionId(request.format),
     inputProps: {
       audioUrl: request.audioUrl,
+      audioStartFrame,
+      audioEndFrame,
       words: wordTimings,
       format: request.format,
       background: request.template.background,

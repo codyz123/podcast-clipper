@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useAuthStore } from "../stores/authStore";
+import { useSettingsStore } from "../stores/settingsStore";
 import { getApiBase, authFetch } from "../lib/api";
 import type {
   TextSnippet,
@@ -143,10 +144,13 @@ export function useTextSnippets() {
       setError(null);
 
       try {
+        // Get API key from settings
+        const anthropicApiKey = useSettingsStore.getState().settings.anthropicApiKey;
+
         const res = await authFetch(`${getApiBase()}/api/generate-snippet`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectId, ...request }),
+          body: JSON.stringify({ projectId, ...request, anthropicApiKey }),
         });
         if (!res.ok) {
           const responseData = await res.json();

@@ -1,6 +1,9 @@
 export { PublishPanel } from "./PublishPanel";
 export { ConnectedAccountsBar } from "./ConnectedAccountsBar";
-export { ClipPublishCard } from "./ClipPublishCard";
-export { DestinationRow } from "./DestinationRow";
-export { CaptionEditor } from "./CaptionEditor";
 export { PlatformIcon } from "./PlatformIcon";
+export { PostCard } from "./PostCard";
+export { AddPostButton } from "./AddPostButton";
+export { ClipSelector } from "./ClipSelector";
+export { TextEditor } from "./TextEditor";
+export { SnippetPicker } from "./SnippetPicker";
+export { DestinationBadge } from "./DestinationBadge";

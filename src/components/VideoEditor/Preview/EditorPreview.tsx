@@ -1,15 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import Lottie from "lottie-react";
-import {
-  Clip,
-  VideoFormat,
-  VideoTemplate,
-  VIDEO_FORMATS,
-  CaptionStyle,
-  CAPTION_PRESETS,
-  TrackClip,
-} from "../../../lib/types";
+import { Clip, VideoFormat, VideoTemplate, VIDEO_FORMATS, TrackClip } from "../../../lib/types";
 import { cn } from "../../../lib/utils";
+import { resolveFontFamily } from "../../../lib/fonts";
+import {
+  resolveCaptionStyle,
+  toSubtitleConfig,
+  toWordTimings,
+  type CaptionStyle,
+} from "../../../lib/clipTransform";
 import { fetchLottieData } from "../../../services/assets/lottieService";
 
 // Component to render a single Lottie animation with lazy loading
@@ -90,6 +89,11 @@ interface EditorPreviewProps {
   onAnimationPositionChange?: (clipId: string, positionX: number, positionY: number) => void;
   selectedClipId?: string | null;
   onSelectClip?: (clipId: string | null) => void;
+  previewScale?: number;
+  showUiOverlays?: boolean;
+  showFormatControls?: boolean;
+  showFormatInfo?: boolean;
+  showFrameDecorations?: boolean;
 }
 
 export const EditorPreview: React.FC<EditorPreviewProps> = ({
@@ -104,6 +108,11 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
   onAnimationPositionChange,
   selectedClipId,
   onSelectClip,
+  previewScale,
+  showUiOverlays = true,
+  showFormatControls = true,
+  showFormatInfo = true,
+  showFrameDecorations = true,
 }) => {
   const formatConfig = VIDEO_FORMATS[format];
   const previewRef = useRef<HTMLDivElement>(null);
@@ -121,48 +130,44 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
     y: null,
   });
 
-  // Get caption style from clip or fall back to template
-  const getCaptionStyle = (): CaptionStyle | null => {
-    if (clip?.captionStyle) return clip.captionStyle;
-    // Find caption track and use its style
-    const captionTrack = clip?.tracks?.find((t) => t.type === "captions");
-    if (captionTrack?.captionStyle) return captionTrack.captionStyle;
-    // Fall back to Hormozi preset if no style set
-    return { ...CAPTION_PRESETS.hormozi, preset: "hormozi" };
-  };
+  const captionStyle: CaptionStyle | null = clip ? resolveCaptionStyle(clip) : null;
+  const subtitleConfig = captionStyle ? toSubtitleConfig(captionStyle) : null;
 
-  const captionStyle = getCaptionStyle();
+  const currentPositionX = subtitleConfig?.positionX ?? 50;
+  const currentPositionY = subtitleConfig?.positionY ?? 50;
 
-  // Get current position (from style or default to center)
-  const currentPositionX = captionStyle?.positionX ?? 50;
-  const currentPositionY = captionStyle?.positionY ?? 50;
+  const FPS = 30;
+  const wordTimings = useMemo(
+    () => (clip ? toWordTimings(clip.words, clip.startTime, clip.endTime, FPS) : []),
+    [clip]
+  );
 
   // Get current words to display
   const getCurrentWords = () => {
-    if (!clip) return [];
+    if (!clip || wordTimings.length === 0) return [];
 
-    const absoluteTime = clip.startTime + currentTime;
-    const wordsPerGroup = captionStyle?.wordsPerLine || template?.subtitle?.wordsPerGroup || 3;
+    const currentFrame = Math.round(currentTime * FPS);
+    const wordsPerGroup = subtitleConfig?.wordsPerGroup || 4;
 
-    let currentWordIndex = clip.words.findIndex(
-      (w) => w.start <= absoluteTime && w.end >= absoluteTime
+    let currentWordIndex = wordTimings.findIndex(
+      (w) => currentFrame >= w.startFrame && currentFrame <= w.endFrame
     );
 
     if (currentWordIndex === -1) {
-      currentWordIndex = clip.words.findIndex((w) => w.start > absoluteTime);
+      currentWordIndex = wordTimings.findIndex((w) => w.startFrame > currentFrame);
       if (currentWordIndex > 0) currentWordIndex--;
     }
     if (currentWordIndex === -1) currentWordIndex = 0;
 
     const groupStart = Math.floor(currentWordIndex / wordsPerGroup) * wordsPerGroup;
-    return clip.words.slice(groupStart, groupStart + wordsPerGroup);
+    return wordTimings.slice(groupStart, groupStart + wordsPerGroup);
   };
 
   // Find the current active word for highlighting
   const getActiveWordIndex = () => {
-    if (!clip) return -1;
-    const absoluteTime = clip.startTime + currentTime;
-    return clip.words.findIndex((w) => w.start <= absoluteTime && w.end >= absoluteTime);
+    if (!clip || wordTimings.length === 0) return -1;
+    const currentFrame = Math.round(currentTime * FPS);
+    return wordTimings.findIndex((w) => currentFrame >= w.startFrame && currentFrame <= w.endFrame);
   };
 
   const words = getCurrentWords();
@@ -199,17 +204,24 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
   let previewWidth: number;
   let previewHeight: number;
 
-  const aspectRatio = formatConfig.width / formatConfig.height;
-
-  if (aspectRatio > 1) {
-    // Landscape
-    previewWidth = Math.min(previewMaxWidth, previewMaxHeight * aspectRatio);
-    previewHeight = previewWidth / aspectRatio;
+  if (typeof previewScale === "number" && Number.isFinite(previewScale)) {
+    previewWidth = Math.max(1, formatConfig.width * previewScale);
+    previewHeight = Math.max(1, formatConfig.height * previewScale);
   } else {
-    // Portrait or square
-    previewHeight = previewMaxHeight;
-    previewWidth = previewHeight * aspectRatio;
+    const aspectRatio = formatConfig.width / formatConfig.height;
+
+    if (aspectRatio > 1) {
+      // Landscape
+      previewWidth = Math.min(previewMaxWidth, previewMaxHeight * aspectRatio);
+      previewHeight = previewWidth / aspectRatio;
+    } else {
+      // Portrait or square
+      previewHeight = previewMaxHeight;
+      previewWidth = previewHeight * aspectRatio;
+    }
   }
+
+  const resolvedPreviewScale = previewHeight / formatConfig.height;
 
   const backgroundStyle: React.CSSProperties = {};
   if (bg.type === "solid") {
@@ -342,28 +354,32 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-[hsl(var(--bg-elevated))] p-4">
       {/* Format selector tabs */}
-      <div className="mb-4 flex items-center gap-1 rounded-lg bg-[hsl(var(--bg-surface))] p-1">
-        {Object.values(VIDEO_FORMATS).map((f) => (
-          <button
-            key={f.id}
-            onClick={() => onFormatChange(f.id)}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-              format === f.id
-                ? "bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text))] shadow-sm"
-                : "text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text))]"
-            )}
-          >
-            {f.aspectRatio}
-          </button>
-        ))}
-      </div>
+      {showFormatControls && (
+        <div className="mb-4 flex items-center gap-1 rounded-lg bg-[hsl(var(--bg-surface))] p-1">
+          {Object.values(VIDEO_FORMATS).map((f) => (
+            <button
+              key={f.id}
+              onClick={() => onFormatChange(f.id)}
+              className={cn(
+                "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                format === f.id
+                  ? "bg-[hsl(var(--bg-elevated))] text-[hsl(var(--text))] shadow-sm"
+                  : "text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text))]"
+              )}
+            >
+              {f.aspectRatio}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Preview container */}
       <div
         ref={previewRef}
+        data-video-test="frame"
         className={cn(
-          "relative overflow-hidden rounded-lg shadow-lg",
+          "relative overflow-hidden",
+          showFrameDecorations && "rounded-lg shadow-lg",
           (isCaptionsTrackSelected || isVideoTrackSelected) &&
             "ring-2 ring-[hsl(var(--cyan))] ring-offset-2 ring-offset-[hsl(var(--bg-elevated))]"
         )}
@@ -446,7 +462,12 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
                     isVideoTrackSelected ? (e) => handleAnimationDragStart(e, anim) : undefined
                   }
                 >
-                  <div className="h-24 w-24">
+                  <div
+                    style={{
+                      width: 200 * resolvedPreviewScale,
+                      height: 200 * resolvedPreviewScale,
+                    }}
+                  >
                     <AnimationOverlay url={anim.assetUrl!} source={anim.assetSource} />
                   </div>
                 </div>
@@ -470,32 +491,37 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
             >
               <div
                 className={cn(
-                  "rounded px-2 py-1",
+                  "",
                   isCaptionsTrackSelected && isDraggingCaption && "ring-2 ring-[hsl(var(--cyan))]"
                 )}
                 style={{
-                  backgroundColor: captionStyle?.backgroundColor || undefined,
+                  backgroundColor: subtitleConfig?.backgroundColor || undefined,
+                  padding: `${4 * resolvedPreviewScale}px ${8 * resolvedPreviewScale}px`,
+                  borderRadius: `${4 * resolvedPreviewScale}px`,
                 }}
               >
                 <p
                   style={{
-                    fontFamily: captionStyle?.fontFamily || "Inter",
-                    fontSize: `${(captionStyle?.fontSize || 36) * 0.35}px`,
-                    fontWeight: captionStyle?.fontWeight || 600,
+                    fontFamily: resolveFontFamily(subtitleConfig?.fontFamily),
+                    fontSize: `${(subtitleConfig?.fontSize || 36) * resolvedPreviewScale}px`,
+                    fontWeight: subtitleConfig?.fontWeight || 600,
+                    lineHeight: 1.2,
                     textAlign: "center",
+                    WebkitFontSmoothing: "antialiased",
+                    MozOsxFontSmoothing: "grayscale",
+                    textRendering: "geometricPrecision",
                   }}
                 >
                   {words.map((w, i) => {
-                    const globalIndex = clip.words.indexOf(w);
+                    const globalIndex = wordTimings.indexOf(w);
                     const isActive = globalIndex === activeWordIndex;
                     return (
                       <span
                         key={i}
                         style={{
                           color: isActive
-                            ? captionStyle?.highlightColor || "#FFD700"
-                            : captionStyle?.primaryColor || "#FFFFFF",
-                          transition: "color 0.1s ease-out",
+                            ? subtitleConfig?.highlightColor || subtitleConfig?.color || "#FFD700"
+                            : subtitleConfig?.color || "#FFFFFF",
                         }}
                       >
                         {w.text}
@@ -508,43 +534,50 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
             </div>
 
             {/* Drag hint when captions track selected */}
-            {isCaptionsTrackSelected && !isDragging && (
+            {showUiOverlays && isCaptionsTrackSelected && !isDragging && (
               <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded bg-black/60 px-2 py-1 text-[9px] text-white/80">
                 Drag captions to reposition
               </div>
             )}
 
             {/* Drag hint when video track selected */}
-            {isVideoTrackSelected && !isDragging && activeAnimations.length > 0 && (
-              <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded bg-black/60 px-2 py-1 text-[9px] text-white/80">
-                Drag animations to reposition
-              </div>
-            )}
+            {showUiOverlays &&
+              isVideoTrackSelected &&
+              !isDragging &&
+              activeAnimations.length > 0 && (
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 rounded bg-black/60 px-2 py-1 text-[9px] text-white/80">
+                  Drag animations to reposition
+                </div>
+              )}
 
             {/* Progress bar */}
-            <div className="absolute right-3 bottom-3 left-3">
-              <div className="h-1 overflow-hidden rounded-full bg-white/20">
-                <div
-                  className="h-full rounded-full bg-white/80 transition-all duration-100"
-                  style={{
-                    width: `${(currentTime / (clip.endTime - clip.startTime)) * 100}%`,
-                  }}
-                />
+            {showUiOverlays && (
+              <div className="absolute right-3 bottom-3 left-3">
+                <div className="h-1 overflow-hidden rounded-full bg-white/20">
+                  <div
+                    className="h-full rounded-full bg-white/80 transition-all duration-100"
+                    style={{
+                      width: `${(currentTime / (clip.endTime - clip.startTime)) * 100}%`,
+                    }}
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
       </div>
 
       {/* Format info */}
-      <div className="mt-3 text-center">
-        <p className="text-xs text-[hsl(var(--text-muted))]">
-          {formatConfig.name} ({formatConfig.width} x {formatConfig.height})
-        </p>
-        <p className="mt-0.5 text-[10px] text-[hsl(var(--text-tertiary))]">
-          {formatConfig.useCases.join(", ")}
-        </p>
-      </div>
+      {showFormatInfo && (
+        <div className="mt-3 text-center">
+          <p className="text-xs text-[hsl(var(--text-muted))]">
+            {formatConfig.name} ({formatConfig.width} x {formatConfig.height})
+          </p>
+          <p className="mt-0.5 text-[10px] text-[hsl(var(--text-tertiary))]">
+            {formatConfig.useCases.join(", ")}
+          </p>
+        </div>
+      )}
     </div>
   );
 };

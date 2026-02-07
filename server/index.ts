@@ -1,6 +1,7 @@
 import express, { ErrorRequestHandler } from "express";
 import cors from "cors";
 import multer from "multer";
+import path from "node:path";
 import { transcribeRouter } from "./routes/transcribe.js";
 import { analyzeClipsRouter } from "./routes/analyze-clips.js";
 import { oauthRouter } from "./routes/oauth.js";
@@ -11,6 +12,12 @@ import { episodesRouter } from "./routes/episodes.js";
 import { textSnippetsRouter } from "./routes/text-snippets.js";
 import { generateSnippetRouter } from "./routes/generate-snippet.js";
 import { uploadsRouter } from "./routes/uploads.js";
+import { youtubeUploadRouter } from "./routes/youtube-upload.js";
+import { instagramUploadRouter } from "./routes/instagram-upload.js";
+import { tiktokUploadRouter } from "./routes/tiktok-upload.js";
+import { xUploadRouter } from "./routes/x-upload.js";
+import { renderRouter } from "./routes/render.js";
+import { uploadEventsRouter } from "./routes/upload-events.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { initializeDatabase } from "./lib/token-storage.js";
 import { initializeMediaTables } from "./lib/media-storage.js";
@@ -39,6 +46,9 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+// Serve locally stored media (dev fallback when R2 is not configured)
+app.use("/api/local-media", express.static(path.join(process.cwd(), ".context", "local-media")));
+
 // Auth routes - handles registration, login, logout
 // Rate limiting is applied per-route in the auth router
 app.use("/api/auth", authRouter);
@@ -64,6 +74,12 @@ app.use("/api", authMiddleware);
 app.use("/api", transcribeRouter);
 app.use("/api", analyzeClipsRouter);
 app.use("/api", projectsRouter);
+app.use("/api", youtubeUploadRouter);
+app.use("/api", instagramUploadRouter);
+app.use("/api", tiktokUploadRouter);
+app.use("/api", xUploadRouter);
+app.use("/api", renderRouter);
+app.use("/api", uploadEventsRouter);
 
 // AI snippet generation (JWT auth handled internally)
 app.use("/api", generateSnippetRouter);

@@ -34,10 +34,13 @@ export const Settings: React.FC = () => {
   const [googleClientId, setGoogleClientId] = useState(settings.googleClientId || "");
   const [googleApiKey, setGoogleApiKey] = useState(settings.googleApiKey || "");
   const [pexelsApiKey, setPexelsApiKey] = useState(settings.pexelsApiKey || "");
+  const [anthropicApiKey, setAnthropicApiKey] = useState(settings.anthropicApiKey || "");
+  const [showAnthropicKey, setShowAnthropicKey] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isBackendSaved, setIsBackendSaved] = useState(false);
   const [isGoogleSaved, setIsGoogleSaved] = useState(false);
   const [isPexelsSaved, setIsPexelsSaved] = useState(false);
+  const [isAnthropicSaved, setIsAnthropicSaved] = useState(false);
 
   const hasBackendConfig = !!(settings.backendUrl && settings.accessCode);
 
@@ -63,6 +66,12 @@ export const Settings: React.FC = () => {
     updateSettings({ pexelsApiKey });
     setIsPexelsSaved(true);
     setTimeout(() => setIsPexelsSaved(false), 2000);
+  };
+
+  const handleSaveAnthropicApiKey = () => {
+    updateSettings({ anthropicApiKey });
+    setIsAnthropicSaved(true);
+    setTimeout(() => setIsAnthropicSaved(false), 2000);
   };
 
   const toggleDefaultFormat = (format: VideoFormat) => {
@@ -268,6 +277,84 @@ export const Settings: React.FC = () => {
                     className="text-[hsl(var(--cyan))] hover:underline"
                   >
                     platform.openai.com
+                  </a>
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Anthropic API (Text Generation) */}
+          <Card variant="default">
+            <CardContent className="p-5">
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(25_50%_15%/0.5)]"
+                  )}
+                >
+                  <span className="font-mono text-xs font-bold text-[hsl(25_80%_55%)]">CL</span>
+                </div>
+                <div>
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
+                    Anthropic API (Claude)
+                  </p>
+                  <p className="text-xs text-[hsl(var(--text-muted))]">
+                    Used for AI text generation (snippets, captions)
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
+                  Anthropic API Key
+                </label>
+                <div className="flex gap-3">
+                  <div className="relative flex-1">
+                    <Input
+                      type={showAnthropicKey ? "text" : "password"}
+                      value={anthropicApiKey}
+                      onChange={(e) => setAnthropicApiKey(e.target.value)}
+                      placeholder="sk-ant-..."
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAnthropicKey(!showAnthropicKey)}
+                      className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
+                    >
+                      {showAnthropicKey ? (
+                        <EyeClosedIcon className="h-4 w-4" />
+                      ) : (
+                        <EyeOpenIcon className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  <Button
+                    onClick={handleSaveAnthropicApiKey}
+                    disabled={!anthropicApiKey}
+                    variant={isAnthropicSaved ? "secondary" : "primary"}
+                  >
+                    {isAnthropicSaved ? (
+                      <>
+                        <CheckIcon className="h-4 w-4" />
+                        Saved
+                      </>
+                    ) : (
+                      "Save Key"
+                    )}
+                  </Button>
+                </div>
+                <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
+                  <InfoCircledIcon className="h-3.5 w-3.5" />
+                  Get your API key from{" "}
+                  <a
+                    href="https://console.anthropic.com/settings/keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[hsl(var(--cyan))] hover:underline"
+                  >
+                    console.anthropic.com
                   </a>
                 </p>
               </div>

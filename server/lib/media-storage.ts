@@ -1,6 +1,7 @@
 import { neon } from "@neondatabase/serverless";
-import { readFileSync } from "fs";
-import { uploadToR2, deleteFromR2ByUrl, listR2Objects } from "./r2-storage.js";
+import { readFileSync, copyFileSync, mkdirSync, statSync, writeFileSync } from "fs";
+import path from "node:path";
+import { uploadToR2, deleteFromR2ByUrl, listR2Objects, isR2Configured } from "./r2-storage.js";
 
 // Get database connection
 function getDb() {
@@ -9,6 +10,31 @@ function getDb() {
     throw new Error("DATABASE_URL environment variable is required");
   }
   return neon(databaseUrl);
+}
+
+const LOCAL_MEDIA_ROOT = path.join(process.cwd(), ".context", "local-media");
+
+function getLocalMediaBaseUrl(): string {
+  if (process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL;
+  }
+  const port = process.env.PORT || "3001";
+  return `http://localhost:${port}`;
+}
+
+function getLocalMediaPath(folder: string, filename: string): { key: string; path: string } {
+  const safeFilename = `${Date.now()}-${filename}`;
+  const key = `${folder}/${safeFilename}`;
+  const dir = path.join(LOCAL_MEDIA_ROOT, folder);
+  mkdirSync(dir, { recursive: true });
+  return {
+    key,
+    path: path.join(dir, safeFilename),
+  };
+}
+
+function buildLocalMediaUrl(key: string): string {
+  return `${getLocalMediaBaseUrl()}/api/local-media/${key}`;
 }
 
 // Initialize media tables
@@ -39,11 +65,16 @@ export async function initializeMediaTables(): Promise<void> {
       end_time FLOAT NOT NULL,
       transcript_segments JSONB,
       template_id VARCHAR(255),
+      background JSONB,
+      subtitle JSONB,
       format VARCHAR(50),
       created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
       updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
     )
   `;
+
+  await sql`ALTER TABLE clips ADD COLUMN IF NOT EXISTS background JSONB`;
+  await sql`ALTER TABLE clips ADD COLUMN IF NOT EXISTS subtitle JSONB`;
 
   // Media assets table - stores uploaded media files
   await sql`
@@ -85,8 +116,18 @@ export async function uploadMedia(
   contentType: string,
   folder: string = "media"
 ): Promise<{ url: string; size: number }> {
-  const key = `${folder}/${Date.now()}-${filename}`;
-  return uploadToR2(key, file, contentType);
+  if (isR2Configured()) {
+    const key = `${folder}/${Date.now()}-${filename}`;
+    return uploadToR2(key, file, contentType);
+  }
+
+  const local = getLocalMediaPath(folder, filename);
+  writeFileSync(local.path, file);
+
+  return {
+    url: buildLocalMediaUrl(local.key),
+    size: file.length,
+  };
 }
 
 // Upload a file from disk path to R2
@@ -96,9 +137,20 @@ export async function uploadMediaFromPath(
   contentType: string,
   folder: string = "media"
 ): Promise<{ url: string; size: number }> {
-  const key = `${folder}/${Date.now()}-${filename}`;
-  const fileBuffer = readFileSync(filePath);
-  return uploadToR2(key, fileBuffer, contentType);
+  if (isR2Configured()) {
+    const key = `${folder}/${Date.now()}-${filename}`;
+    const fileBuffer = readFileSync(filePath);
+    return uploadToR2(key, fileBuffer, contentType);
+  }
+
+  const local = getLocalMediaPath(folder, filename);
+  copyFileSync(filePath, local.path);
+  const { size } = statSync(local.path);
+
+  return {
+    url: buildLocalMediaUrl(local.key),
+    size,
+  };
 }
 
 // Delete a file from R2
@@ -252,12 +304,14 @@ export async function saveClip(clip: {
   transcriptSegments?: object;
   templateId?: string;
   format?: string;
+  background?: object;
+  subtitle?: object;
 }): Promise<void> {
   const sql = getDb();
 
   await sql`
-    INSERT INTO clips (id, project_id, name, start_time, end_time, transcript_segments, template_id, format, updated_at)
-    VALUES (${clip.id}, ${clip.projectId}, ${clip.name}, ${clip.startTime}, ${clip.endTime}, ${JSON.stringify(clip.transcriptSegments) || null}, ${clip.templateId || null}, ${clip.format || null}, NOW())
+    INSERT INTO clips (id, project_id, name, start_time, end_time, transcript_segments, template_id, background, subtitle, format, updated_at)
+    VALUES (${clip.id}, ${clip.projectId}, ${clip.name}, ${clip.startTime}, ${clip.endTime}, ${JSON.stringify(clip.transcriptSegments) || null}, ${clip.templateId || null}, ${JSON.stringify(clip.background) || null}, ${JSON.stringify(clip.subtitle) || null}, ${clip.format || null}, NOW())
     ON CONFLICT (id)
     DO UPDATE SET
       name = ${clip.name},
@@ -265,6 +319,8 @@ export async function saveClip(clip: {
       end_time = ${clip.endTime},
       transcript_segments = COALESCE(${JSON.stringify(clip.transcriptSegments) || null}, clips.transcript_segments),
       template_id = COALESCE(${clip.templateId || null}, clips.template_id),
+      background = COALESCE(${JSON.stringify(clip.background) || null}, clips.background),
+      subtitle = COALESCE(${JSON.stringify(clip.subtitle) || null}, clips.subtitle),
       format = COALESCE(${clip.format || null}, clips.format),
       updated_at = NOW()
   `;
@@ -279,6 +335,8 @@ export async function getClipsForProject(projectId: string): Promise<
     endTime: number;
     transcriptSegments?: object;
     templateId?: string;
+    background?: object;
+    subtitle?: object;
     format?: string;
     createdAt: string;
     updatedAt: string;
@@ -287,7 +345,7 @@ export async function getClipsForProject(projectId: string): Promise<
   const sql = getDb();
 
   const rows = await sql`
-    SELECT id, name, start_time, end_time, transcript_segments, template_id, format, created_at, updated_at
+    SELECT id, name, start_time, end_time, transcript_segments, template_id, background, subtitle, format, created_at, updated_at
     FROM clips
     WHERE project_id = ${projectId}
     ORDER BY start_time ASC
@@ -300,6 +358,8 @@ export async function getClipsForProject(projectId: string): Promise<
     endTime: row.end_time as number,
     transcriptSegments: row.transcript_segments as object | undefined,
     templateId: row.template_id as string | undefined,
+    background: row.background as object | undefined,
+    subtitle: row.subtitle as object | undefined,
     format: row.format as string | undefined,
     createdAt: (row.created_at as Date).toISOString(),
     updatedAt: (row.updated_at as Date).toISOString(),

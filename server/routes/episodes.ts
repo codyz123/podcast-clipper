@@ -183,6 +183,7 @@ router.put(
         "showNotes",
         "explicit",
         "guests",
+        "audioDuration",
       ];
       const filteredUpdates: Record<string, unknown> = {};
       for (const key of allowedFields) {
@@ -548,6 +549,9 @@ router.post(
           words: clipData.words || [],
           clippabilityScore: clipData.clippabilityScore,
           isManual: clipData.isManual || false,
+          templateId: clipData.templateId,
+          background: clipData.background,
+          subtitle: clipData.subtitle,
           tracks: clipData.tracks,
           captionStyle: clipData.captionStyle,
           format: clipData.format,
@@ -606,6 +610,9 @@ router.put(
               tracks: clipData.tracks,
               captionStyle: clipData.captionStyle,
               format: clipData.format,
+              templateId: clipData.templateId,
+              background: clipData.background,
+              subtitle: clipData.subtitle,
               updatedAt: new Date(),
             })
             .where(eq(clips.id, clipData.id))
@@ -624,6 +631,9 @@ router.put(
               words: clipData.words || [],
               clippabilityScore: clipData.clippabilityScore,
               isManual: clipData.isManual || false,
+              templateId: clipData.templateId,
+              background: clipData.background,
+              subtitle: clipData.subtitle,
               tracks: clipData.tracks,
               captionStyle: clipData.captionStyle,
               format: clipData.format,

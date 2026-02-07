@@ -15,7 +15,9 @@ import { TextContent } from "./components/TextContent";
 import { PlaceholderPage } from "./components/PlaceholderPage";
 import { PodcastInfoPage } from "./components/PodcastInfo/PodcastInfoPage";
 import { PodcastSettingsPage } from "./components/Settings/PodcastSettingsPage";
+import { Settings } from "./components/Settings/Settings";
 import { OAuthCallback } from "./pages/OAuthCallback";
+import { VideoTestPage } from "./pages/VideoTestPage";
 import { AuthScreen, LoadingScreen, CreatePodcastScreen } from "./components/Auth";
 import { useProjectStore } from "./stores/projectStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
@@ -140,6 +142,8 @@ type RouteInfo =
   | { kind: "oauth" }
   | { kind: "login" }
   | { kind: "create-podcast" }
+  | { kind: "app-settings" }
+  | { kind: "video-test" }
   | { kind: "episodes-list"; section: WorkspaceSection; view: ViewType }
   | { kind: "section"; section: WorkspaceSection }
   | { kind: "episode-route"; slugOrId: string; stageSegment?: string; subStageSegment?: string }
@@ -157,11 +161,19 @@ const parseRoute = (pathname: string): RouteInfo => {
     return { kind: "redirect", to: "/episodes" };
   }
 
+  if (segments[0] === "__video-test") {
+    return import.meta.env.MODE === "production"
+      ? { kind: "redirect", to: "/episodes" }
+      : { kind: "video-test" };
+  }
+
   switch (segments[0]) {
     case "login":
       return { kind: "login" };
     case "create-podcast":
       return { kind: "create-podcast" };
+    case "app-settings":
+      return { kind: "app-settings" };
     case "dashboard":
       return { kind: "section", section: "dashboard" };
     case "outreach":
@@ -350,6 +362,9 @@ function App() {
       tracks: c.tracks as Clip["tracks"],
       captionStyle: c.captionStyle as Clip["captionStyle"],
       format: c.format as Clip["format"],
+      templateId: c.templateId as Clip["templateId"],
+      background: c.background as Clip["background"],
+      subtitle: c.subtitle as Clip["subtitle"],
     }));
 
     return {
@@ -434,7 +449,12 @@ function App() {
   // Ensure unauthenticated users land on login route
   useEffect(() => {
     if (authLoading) return;
-    if (!isAuthenticated && route.kind !== "login" && route.kind !== "oauth") {
+    if (
+      !isAuthenticated &&
+      route.kind !== "login" &&
+      route.kind !== "oauth" &&
+      route.kind !== "video-test"
+    ) {
       navigate("/login", { replace: true, state: { from: location.pathname } });
     }
   }, [authLoading, isAuthenticated, route.kind, location.pathname, navigate]);
@@ -607,10 +627,6 @@ function App() {
                 ? "/outreach"
                 : "/analytics";
     navigate(target);
-  };
-
-  const handleOpenSettings = () => {
-    navigate("/settings");
   };
 
   const handleStageChange = (stage: EpisodeStage) => {
@@ -831,6 +847,10 @@ function App() {
     return <OAuthCallback />;
   }
 
+  if (route.kind === "video-test") {
+    return <VideoTestPage />;
+  }
+
   if (
     authLoading ||
     (route.kind === "episode-route" &&
@@ -852,9 +872,30 @@ function App() {
     );
   }
 
+  // Global app settings (not podcast-specific)
+  if (route.kind === "app-settings") {
+    return (
+      <AppShell
+        episodeName={undefined}
+        episodes={episodesList}
+        onBackToEpisodes={() => navigate("/episodes")}
+        onSelectEpisode={handleSelectEpisode}
+      >
+        <ErrorBoundary>
+          <WorkspaceLayout activeSection={lastSection} onNavigate={handleSectionNavigate}>
+            <div className="h-full overflow-auto">
+              <div className="px-6 py-8 sm:px-8 lg:px-12 lg:py-10">
+                <Settings />
+              </div>
+            </div>
+          </WorkspaceLayout>
+        </ErrorBoundary>
+      </AppShell>
+    );
+  }
+
   return (
     <AppShell
-      onSettingsClick={handleOpenSettings}
       episodeName={hasEpisodeContext ? currentProject?.name : undefined}
       episodes={episodesList}
       onBackToEpisodes={() => navigate("/episodes")}

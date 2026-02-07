@@ -1,110 +1,61 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
 import { RocketIcon, CrossCircledIcon, CheckCircledIcon, ReloadIcon } from "@radix-ui/react-icons";
-import { Button, Card, CardContent, StatusDropdown } from "../ui";
+import { Button, Card, CardContent } from "../ui";
 import { Progress, Spinner } from "../ui/Progress";
 import { useProjectStore } from "../../stores/projectStore";
 import { usePublishStore } from "../../stores/publishStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
-import { useEpisodes } from "../../hooks/useEpisodes";
-import type { SocialPlatform } from "../../lib/publish";
+import { useTextSnippets } from "../../hooks/useTextSnippets";
+import type { SocialPlatform, PublishDestinationType } from "../../lib/publish";
+import { PLATFORM_CONFIGS, buildPostText } from "../../lib/publish";
+import * as publishUtils from "../../lib/publish";
 import { cn } from "../../lib/utils";
-import { ConnectedAccountsBar } from "./ConnectedAccountsBar";
-import { ClipPublishCard } from "./ClipPublishCard";
+import { PostCard } from "./PostCard";
+import { AddPostButton } from "./AddPostButton";
 import { startOAuthFlow, getOAuthStatus, type OAuthPlatform } from "../../services/oauth";
-import { STAGE_SUB_STEPS, SUB_STEP_LABELS, type StageStatus } from "../../lib/statusConfig";
+import { ensureRenderedClip } from "../../services/rendering/renderClip";
+import { initializeYouTubeUpload, pollUploadProgress } from "../../services/youtube/uploadProgress";
+import {
+  initializeInstagramUpload,
+  pollInstagramUploadProgress,
+} from "../../services/instagram/uploadProgress";
+import {
+  initializeTikTokUpload,
+  pollTikTokUploadProgress,
+} from "../../services/tiktok/uploadProgress";
+import { initializeXUpload, pollXUploadProgress } from "../../services/x/uploadProgress";
 
 export const PublishPanel: React.FC = () => {
   const currentProject = useProjectStore((s) => s.currentProject);
-  const updateProject = useProjectStore((s) => s.updateProject);
+  const connections = useWorkspaceStore((s) => s.connections);
   const connectAccount = useWorkspaceStore((s) => s.connectAccount);
-  const { updateSubStepStatus } = useEpisodes();
+  const { snippets, fetchSnippets } = useTextSnippets();
 
-  // Marketing sub-steps for the dropdown
-  const marketingSubSteps = STAGE_SUB_STEPS.marketing;
-  const marketingItems = marketingSubSteps.map((subStepId) => {
-    const subStepEntry = currentProject?.stageStatus?.subSteps?.[subStepId];
-    const status = (subStepEntry?.status as StageStatus) || "not-started";
-    return {
-      id: subStepId,
-      label: SUB_STEP_LABELS[subStepId],
-      status,
-    };
-  });
-
-  const handleMarketingStatusChange = async (subStepId: string, newStatus: StageStatus) => {
-    if (!currentProject?.id) return;
-
-    // Optimistically update local state
-    const prevSubSteps = currentProject?.stageStatus?.subSteps || {};
-    const updatedSubSteps = {
-      ...prevSubSteps,
-      [subStepId]: { status: newStatus, updatedAt: new Date().toISOString() },
-    };
-
-    updateProject({
-      stageStatus: {
-        ...currentProject.stageStatus,
-        subSteps: updatedSubSteps,
-      },
-    });
-
-    const result = await updateSubStepStatus(currentProject.id, subStepId, newStatus);
-
-    if (!result) {
-      // Rollback on failure
-      updateProject({
-        stageStatus: {
-          ...currentProject.stageStatus,
-          subSteps: prevSubSteps,
-        },
-      });
-    }
-  };
-
+  // Publish store state
   const {
+    posts,
     isPublishing,
-    initializeForClips,
     startPublishing,
     cancelPublishing,
     retryAllFailed,
-    getInstancesForClip,
-    getEnabledInstances,
-    getFailedInstances,
+    resetStuckPosts,
+    getEnabledPosts,
+    getFailedPosts,
+    getNextInQueue,
     getOverallProgress,
+    updatePostStatus,
+    markPostComplete,
+    markPostFailed,
   } = usePublishStore();
-
-  const [expandedClipIds, setExpandedClipIds] = useState<Set<string>>(new Set());
-  const [connectingPlatform, setConnectingPlatform] = useState<SocialPlatform | null>(null);
 
   const projectClips = currentProject?.clips || [];
 
-  // Initialize publish instances for all clips
+  // Fetch snippets when project changes
   useEffect(() => {
-    if (projectClips.length > 0) {
-      const clipIds = projectClips.map((c) => c.id);
-      initializeForClips(clipIds, (clipId) => {
-        const clip = projectClips.find((c) => c.id === clipId);
-        return clip?.transcript.slice(0, 100) || "";
-      });
-
-      // Expand first clip by default
-      if (expandedClipIds.size === 0 && clipIds.length > 0) {
-        setExpandedClipIds(new Set([clipIds[0]]));
-      }
+    if (currentProject?.id) {
+      fetchSnippets(currentProject.id);
     }
-  }, [projectClips.length]);
-
-  const toggleClipExpanded = (clipId: string) => {
-    setExpandedClipIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(clipId)) {
-        next.delete(clipId);
-      } else {
-        next.add(clipId);
-      }
-      return next;
-    });
-  };
+  }, [currentProject?.id, fetchSnippets]);
 
   // Sync OAuth status on mount
   useEffect(() => {
@@ -123,15 +74,17 @@ export const PublishPanel: React.FC = () => {
     syncStatus();
   }, [connectAccount]);
 
+  // Check if a platform is connected
+  const isPlatformConnected = useCallback(
+    (destination: PublishDestinationType) => {
+      const config = PLATFORM_CONFIGS[destination];
+      if (!config.connectionPlatform) return true; // Local doesn't need auth
+      return connections.some((c) => c.platform === config.connectionPlatform && c.connected);
+    },
+    [connections]
+  );
+
   const handleConnect = async (platform: SocialPlatform) => {
-    // Only YouTube is supported for now
-    if (platform !== "youtube") {
-      console.log(`OAuth for ${platform} is not yet implemented`);
-      return;
-    }
-
-    setConnectingPlatform(platform);
-
     try {
       const result = await startOAuthFlow(platform as OAuthPlatform);
       if (result.success && result.accountName) {
@@ -141,100 +94,377 @@ export const PublishPanel: React.FC = () => {
       }
     } catch (err) {
       console.error("OAuth error:", err);
-    } finally {
-      setConnectingPlatform(null);
     }
   };
+
+  // Get connection handler for a specific destination
+  const getConnectHandler = useCallback(
+    (destination: PublishDestinationType) => {
+      const config = PLATFORM_CONFIGS[destination];
+      if (!config.connectionPlatform || !config.supportsDirectUpload) return undefined;
+      return () => handleConnect(config.connectionPlatform!);
+    },
+    [handleConnect]
+  );
 
   const handlePublish = () => {
     startPublishing();
-    // In production, this would trigger the actual render/upload pipeline
-    // For now, we'll simulate it
-    simulatePublishing();
+    // Trigger the actual publish pipeline
+    processPublishQueue();
   };
 
-  const simulatePublishing = async () => {
-    const { processNextInQueue, updateInstanceStatus, markInstanceComplete, markInstanceFailed } =
-      usePublishStore.getState();
+  const handleRetryFailed = () => {
+    retryAllFailed();
+    // Also need to mark as publishing and process the queue
+    usePublishStore.setState({ isPublishing: true });
+    processPublishQueue();
+  };
 
+  // Process the publish queue
+  const processPublishQueue = async () => {
     while (true) {
-      const instance = processNextInQueue();
-      if (!instance) break;
+      const post = getNextInQueue();
+      if (!post) break;
 
-      // Simulate rendering
-      for (let progress = 0; progress <= 100; progress += 20) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
-        updateInstanceStatus(instance.id, {
+      const config = PLATFORM_CONFIGS[post.destination];
+      const isConnected = isPlatformConnected(post.destination);
+      const clip = post.clipId ? projectClips.find((c) => c.id === post.clipId) : undefined;
+      const format = post.format || config.defaultFormat;
+      let uploadedUrl: string | undefined;
+      let renderedClipUrl: string | undefined;
+
+      if (post.clipId) {
+        if (!clip) {
+          markPostFailed(post.id, "Rendering failed: Clip not found");
+          continue;
+        }
+
+        updatePostStatus(post.id, {
           status: "rendering",
-          progress,
-          stage: progress < 80 ? "encoding" : "processing",
+          progress: 0,
+          stage: "encoding",
         });
-      }
 
-      // Simulate uploading (50% chance of needing upload)
-      if (Math.random() > 0.3) {
-        updateInstanceStatus(instance.id, { status: "uploading", progress: 0 });
-        for (let progress = 0; progress <= 100; progress += 25) {
-          await new Promise((resolve) => setTimeout(resolve, 200));
-          updateInstanceStatus(instance.id, { status: "uploading", progress });
+        try {
+          const renderOverrides = clip
+            ? {
+                background: clip.background,
+                subtitle: clip.subtitle,
+                captionStyle: clip.captionStyle,
+                tracks: clip.tracks,
+                startTime: clip.startTime,
+                endTime: clip.endTime,
+                words: clip.words,
+                renderScale: post.renderScale ?? 1,
+              }
+            : undefined;
+          const result = await ensureRenderedClip(post.clipId, format, {
+            onProgress: (status) => {
+              const progress = Math.max(0, Math.min(100, status.progress || 0));
+              updatePostStatus(post.id, {
+                status: "rendering",
+                progress,
+                stage: progress >= 95 ? "processing" : "encoding",
+              });
+            },
+            overrides: renderOverrides,
+          });
+          renderedClipUrl = result.renderedClipUrl;
+        } catch (error) {
+          markPostFailed(post.id, (error as Error).message || "Rendering failed");
+          continue;
         }
       }
 
-      // Complete (90% success rate)
-      if (Math.random() > 0.1) {
-        markInstanceComplete(
-          instance.id,
-          `/exports/${instance.clipId}_${instance.destination}.mp4`,
-          Math.random() > 0.5 ? `https://example.com/${instance.destination}/video123` : undefined
-        );
-      } else {
-        markInstanceFailed(instance.id, "Upload failed: Network error");
+      const canDirectUpload = config.supportsDirectUpload && config.requiresAuth && isConnected;
+      if (canDirectUpload) {
+        const isYouTube =
+          post.destination === "youtube-shorts" || post.destination === "youtube-video";
+
+        if (isYouTube) {
+          if (!post.clipId || !clip) {
+            markPostFailed(post.id, "Upload failed: Missing clip");
+            continue;
+          }
+
+          try {
+            updatePostStatus(post.id, { status: "uploading", progress: 0, stage: "uploading" });
+
+            const clipDurationSeconds = clip.endTime - clip.startTime;
+            const inferredShort = format === "9:16" && clipDurationSeconds <= 60;
+            const isShort = post.destination === "youtube-shorts" || inferredShort;
+
+            const titleBase = post.title?.trim() || post.textContent?.split("\n")[0]?.trim();
+            const title = (titleBase || clip.name || "Untitled").slice(0, 100);
+            const description = post.description ?? post.textContent ?? "";
+
+            const { uploadId } = await initializeYouTubeUpload({
+              postId: post.id,
+              clipId: post.clipId,
+              title,
+              description,
+              tags: post.hashtags,
+              privacyStatus: "public",
+              isShort,
+              format,
+            });
+
+            uploadedUrl = await pollUploadProgress(uploadId, (status) => {
+              if (status.status === "completed" || status.status === "failed") return;
+
+              const progress =
+                status.status === "processing"
+                  ? 50 + Math.round((status.processingProgress || 0) / 2)
+                  : Math.round((status.uploadProgress || 0) / 2);
+
+              const stage = status.status === "processing" ? "processing" : "uploading";
+
+              updatePostStatus(post.id, {
+                status: "uploading",
+                progress: Math.max(0, Math.min(100, progress)),
+                stage,
+              });
+            });
+          } catch (error) {
+            markPostFailed(post.id, (error as Error).message || "Upload failed");
+            continue;
+          }
+        } else if (
+          post.destination === "instagram-reels" ||
+          post.destination === "instagram-post"
+        ) {
+          if (!post.clipId || !clip) {
+            markPostFailed(post.id, "Upload failed: Missing clip");
+            continue;
+          }
+
+          try {
+            updatePostStatus(post.id, { status: "uploading", progress: 0, stage: "processing" });
+
+            const caption = buildPostText(post, config);
+            const isReel = post.destination === "instagram-reels";
+
+            const { uploadId } = await initializeInstagramUpload({
+              postId: post.id,
+              clipId: post.clipId,
+              caption,
+              format,
+              mediaType: isReel ? "REELS" : "VIDEO",
+              shareToFeed: !isReel,
+            });
+
+            uploadedUrl = await pollInstagramUploadProgress(uploadId, (status) => {
+              if (status.status === "completed" || status.status === "failed") return;
+
+              const progress =
+                status.status === "publishing"
+                  ? 70 + Math.round((status.processingProgress || 0) / 3)
+                  : Math.round(status.processingProgress || status.uploadProgress || 0);
+
+              const stage = status.status === "publishing" ? "publishing" : "processing";
+
+              updatePostStatus(post.id, {
+                status: "uploading",
+                progress: Math.max(0, Math.min(100, progress)),
+                stage,
+              });
+            });
+          } catch (error) {
+            markPostFailed(post.id, (error as Error).message || "Upload failed");
+            continue;
+          }
+        } else if (post.destination === "tiktok") {
+          if (!post.clipId || !clip) {
+            markPostFailed(post.id, "Upload failed: Missing clip");
+            continue;
+          }
+
+          try {
+            updatePostStatus(post.id, { status: "uploading", progress: 0, stage: "processing" });
+
+            const caption = buildPostText(post, config);
+
+            const { uploadId } = await initializeTikTokUpload({
+              postId: post.id,
+              clipId: post.clipId,
+              caption,
+              format,
+            });
+
+            uploadedUrl = await pollTikTokUploadProgress(uploadId, (status) => {
+              if (status.status === "completed" || status.status === "failed") return;
+
+              const progress = Math.round(status.processingProgress || status.uploadProgress || 0);
+
+              updatePostStatus(post.id, {
+                status: "uploading",
+                progress: Math.max(0, Math.min(100, progress)),
+                stage: "processing",
+              });
+            });
+          } catch (error) {
+            markPostFailed(post.id, (error as Error).message || "Upload failed");
+            continue;
+          }
+        } else if (post.destination === "x") {
+          if (!post.clipId || !clip) {
+            markPostFailed(post.id, "Upload failed: Missing clip");
+            continue;
+          }
+
+          try {
+            updatePostStatus(post.id, { status: "uploading", progress: 0, stage: "uploading" });
+
+            const caption = buildPostText(post, config);
+
+            const { uploadId } = await initializeXUpload({
+              postId: post.id,
+              clipId: post.clipId,
+              text: caption,
+              format,
+            });
+
+            uploadedUrl = await pollXUploadProgress(uploadId, (status) => {
+              if (status.status === "completed" || status.status === "failed") return;
+
+              const progress =
+                status.status === "processing" || status.status === "posting"
+                  ? 70 + Math.round((status.processingProgress || 0) / 3)
+                  : Math.round(status.uploadProgress || 0);
+
+              const stage =
+                status.status === "processing"
+                  ? "processing"
+                  : status.status === "posting"
+                    ? "posting"
+                    : "uploading";
+
+              updatePostStatus(post.id, {
+                status: "uploading",
+                progress: Math.max(0, Math.min(100, progress)),
+                stage,
+              });
+            });
+          } catch (error) {
+            markPostFailed(post.id, (error as Error).message || "Upload failed");
+            continue;
+          }
+        }
       }
+
+      markPostComplete(post.id, renderedClipUrl, uploadedUrl);
     }
   };
 
-  const enabledInstances = getEnabledInstances();
-  const failedInstances = getFailedInstances();
+  const enabledPosts = getEnabledPosts();
+  const failedPosts = getFailedPosts();
   const progress = getOverallProgress();
+  const validationIssues = useMemo(
+    () =>
+      enabledPosts.flatMap((post) => {
+        const config = PLATFORM_CONFIGS[post.destination];
+        const clip = post.clipId ? projectClips.find((c) => c.id === post.clipId) : undefined;
+        const validation = publishUtils.validatePost?.(
+          post,
+          clip,
+          config,
+          isPlatformConnected(post.destination)
+        ) ?? {
+          valid: true,
+          canPublish: true,
+          warnings: [],
+          errors: [],
+        };
+        return validation.errors.length > 0 ? validation.errors : [];
+      }),
+    [enabledPosts, projectClips, isPlatformConnected]
+  );
+  const hasBlockingErrors = validationIssues.length > 0;
+  const stuckPosts = useMemo(
+    () =>
+      posts.filter(
+        (p) =>
+          !isPublishing &&
+          (p.statusData.status === "queued" ||
+            p.statusData.status === "rendering" ||
+            p.statusData.status === "uploading")
+      ),
+    [posts, isPublishing]
+  );
+  const activePost = useMemo(
+    () =>
+      enabledPosts.find(
+        (p) => p.statusData.status === "rendering" || p.statusData.status === "uploading"
+      ),
+    [enabledPosts]
+  );
+
+  const progressLabel = useMemo(() => {
+    if (activePost) {
+      if (activePost.statusData.status === "rendering") {
+        const stage =
+          activePost.statusData.stage === "processing" ? "Processing render" : "Rendering";
+        return `${stage} clip`;
+      }
+
+      const stage =
+        activePost.statusData.status === "uploading" ? activePost.statusData.stage : undefined;
+      const stageLabel =
+        stage === "processing"
+          ? "Processing"
+          : stage === "publishing"
+            ? "Publishing"
+            : stage === "posting"
+              ? "Posting"
+              : "Uploading";
+      const platform = PLATFORM_CONFIGS[activePost.destination].shortName;
+      const preposition = stageLabel === "Uploading" ? "to" : "on";
+      return `${stageLabel} ${preposition} ${platform}`;
+    }
+
+    if (progress.queued > 0) {
+      return `Queued ${progress.queued} post${progress.queued !== 1 ? "s" : ""}`;
+    }
+
+    return "Preparing...";
+  }, [activePost, progress.queued]);
 
   const allComplete = useMemo(() => {
     return (
-      enabledInstances.length > 0 &&
-      enabledInstances.every(
-        (i) => i.statusData.status === "completed" || i.statusData.status === "failed"
+      enabledPosts.length > 0 &&
+      enabledPosts.every(
+        (p) => p.statusData.status === "completed" || p.statusData.status === "failed"
       )
     );
-  }, [enabledInstances]);
+  }, [enabledPosts]);
 
-  const hasValidationErrors = useMemo(() => {
-    // Check if any enabled instance has validation errors
-    // This would use the validatePublishInstance function in a real implementation
-    return false;
-  }, [enabledInstances]);
+  const publishTriggeredRef = useRef(false);
+  const [showCompletionSummary, setShowCompletionSummary] = useState(false);
+
+  useEffect(() => {
+    if (isPublishing) {
+      publishTriggeredRef.current = true;
+      setShowCompletionSummary(false);
+    }
+  }, [isPublishing]);
+
+  useEffect(() => {
+    if (!isPublishing && allComplete && publishTriggeredRef.current) {
+      setShowCompletionSummary(true);
+    }
+  }, [isPublishing, allComplete]);
 
   return (
     <div className="min-h-full">
       <div className="mx-auto max-w-5xl">
         {/* Header */}
-        <div className="mb-8 flex items-start justify-between sm:mb-10">
-          <div>
-            <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
-              Publish
-            </h1>
-            <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
-              Render and upload your clips to social platforms
-            </p>
-          </div>
-          <StatusDropdown
-            label="Marketing"
-            items={marketingItems}
-            onStatusChange={handleMarketingStatusChange}
-          />
-        </div>
-
-        {/* Connected Accounts */}
-        <div className="mb-6">
-          <ConnectedAccountsBar onConnect={handleConnect} connectingPlatform={connectingPlatform} />
+        <div className="mb-8 sm:mb-10">
+          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
+            Publish
+          </h1>
+          <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
+            Create posts and publish to social platforms
+          </p>
         </div>
 
         {/* Publishing Progress */}
@@ -246,58 +476,76 @@ export const PublishPanel: React.FC = () => {
                   <Spinner size="md" />
                   <div>
                     <p className="text-sm font-semibold text-[hsl(var(--text))]">Publishing...</p>
-                    <p className="text-xs text-[hsl(var(--text-muted))]">
-                      {progress.currentItem ? `Currently: ${progress.currentItem}` : "Preparing..."}
-                    </p>
+                    <p className="text-xs text-[hsl(var(--text-muted))]">{progressLabel}</p>
                   </div>
                 </div>
                 <Button variant="outline" size="sm" onClick={cancelPublishing}>
                   Cancel
                 </Button>
               </div>
-              <Progress
-                value={(progress.completed / progress.total) * 100}
-                variant="cyan"
-                size="md"
-              />
+              <Progress value={progress.percent} variant="cyan" size="md" />
               <p className="mt-2 text-right text-xs text-[hsl(var(--text-muted))]">
-                {progress.completed} of {progress.total} complete
+                {progress.completed + progress.failed} of {progress.total} complete
               </p>
             </CardContent>
           </Card>
         )}
 
+        {stuckPosts.length > 0 && (
+          <Card variant="default" className="animate-fadeIn mb-6 border-[hsl(var(--warning)/0.3)]">
+            <CardContent className="flex items-center justify-between gap-4 p-5">
+              <div>
+                <p className="text-sm font-semibold text-[hsl(var(--text))]">
+                  Stuck publish jobs detected
+                </p>
+                <p className="text-xs text-[hsl(var(--text-muted))]">
+                  {stuckPosts.length} job{stuckPosts.length !== 1 ? "s" : ""} not actively running.
+                  Reset them to publish again.
+                </p>
+              </div>
+              <Button variant="outline" size="sm" onClick={resetStuckPosts}>
+                Clear Stuck Jobs
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Completion Summary */}
-        {allComplete && !isPublishing && (
+        {allComplete && !isPublishing && showCompletionSummary && (
           <Card
             variant="default"
             className={cn(
               "animate-fadeIn mb-6",
-              failedInstances.length > 0
+              failedPosts.length > 0
                 ? "border-[hsl(var(--warning)/0.3)] bg-[hsl(var(--warning)/0.05)]"
                 : "border-[hsl(var(--success)/0.3)] bg-[hsl(var(--success)/0.05)]"
             )}
           >
             <CardContent className="p-5">
               <div className="flex items-center gap-3">
-                {failedInstances.length === 0 ? (
+                {failedPosts.length === 0 ? (
                   <CheckCircledIcon className="h-6 w-6 text-[hsl(var(--success))]" />
                 ) : (
                   <CrossCircledIcon className="h-6 w-6 text-[hsl(var(--warning))]" />
                 )}
                 <div>
                   <p className="text-sm font-semibold text-[hsl(var(--text))]">
-                    {failedInstances.length === 0
+                    {failedPosts.length === 0
                       ? "Publishing Complete"
                       : "Publishing Complete (with errors)"}
                   </p>
                   <p className="text-xs text-[hsl(var(--text-muted))]">
-                    {progress.completed - progress.failed} uploaded successfully
+                    {progress.completed} published successfully
                     {progress.failed > 0 && ` · ${progress.failed} failed`}
                   </p>
                 </div>
-                {failedInstances.length > 0 && (
-                  <Button variant="outline" size="sm" onClick={retryAllFailed} className="ml-auto">
+                {failedPosts.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRetryFailed}
+                    className="ml-auto"
+                  >
                     <ReloadIcon className="mr-1 h-3 w-3" />
                     Retry Failed
                   </Button>
@@ -307,36 +555,49 @@ export const PublishPanel: React.FC = () => {
           </Card>
         )}
 
-        {/* Clip Cards */}
-        <div className="space-y-4">
-          {projectClips.map((clip) => (
-            <ClipPublishCard
-              key={clip.id}
-              clip={clip}
-              instances={getInstancesForClip(clip.id)}
-              isExpanded={expandedClipIds.has(clip.id)}
-              onToggleExpand={() => toggleClipExpanded(clip.id)}
-              onConnect={handleConnect}
-              isPublishing={isPublishing}
-            />
-          ))}
+        {/* Add Post Button */}
+        <div className="mb-4">
+          <AddPostButton disabled={isPublishing} />
         </div>
+
+        {/* Post Cards */}
+        {posts.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-[hsl(var(--glass-border))] bg-[hsl(var(--surface)/0.5)] p-12 text-center">
+            <p className="text-sm text-[hsl(var(--text-muted))]">
+              No posts yet. Click "Add Post" to create one.
+            </p>
+          </div>
+        ) : (
+          <div role="list" className="space-y-4">
+            {posts.map((post) => (
+              <PostCard
+                key={post.id}
+                post={post}
+                clips={projectClips}
+                snippets={snippets}
+                isConnected={isPlatformConnected(post.destination)}
+                onConnect={getConnectHandler(post.destination)}
+                isPublishing={isPublishing}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Footer */}
         <div className="mt-8 flex items-center justify-between">
           <div className="text-sm text-[hsl(var(--text-muted))]">
-            {enabledInstances.length} video{enabledInstances.length !== 1 ? "s" : ""} will be
-            published
-            {failedInstances.length > 0 && (
-              <span className="ml-2 text-[hsl(var(--warning))]">
-                ({failedInstances.length} failed)
-              </span>
+            {enabledPosts.length} post{enabledPosts.length !== 1 ? "s" : ""} will be published
+            {failedPosts.length > 0 && (
+              <span className="ml-2 text-[hsl(var(--warning))]">({failedPosts.length} failed)</span>
+            )}
+            {hasBlockingErrors && (
+              <span className="ml-2 text-[hsl(var(--error))]">(fix errors to publish)</span>
             )}
           </div>
           <Button
             onClick={handlePublish}
-            disabled={isPublishing || enabledInstances.length === 0 || hasValidationErrors}
-            glow={!isPublishing && enabledInstances.length > 0}
+            disabled={isPublishing || enabledPosts.length === 0 || hasBlockingErrors}
+            glow={!isPublishing && enabledPosts.length > 0 && !hasBlockingErrors}
           >
             {isPublishing ? (
               <>
@@ -346,7 +607,7 @@ export const PublishPanel: React.FC = () => {
             ) : (
               <>
                 <RocketIcon className="h-4 w-4" />
-                Publish {enabledInstances.length} Video{enabledInstances.length !== 1 ? "s" : ""}
+                Publish {enabledPosts.length} Post{enabledPosts.length !== 1 ? "s" : ""}
               </>
             )}
           </Button>

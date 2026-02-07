@@ -11,20 +11,23 @@ interface GenerateRequest {
   projectId: string;
   prompt: string;
   focusClipId?: string;
+  anthropicApiKey?: string;
 }
 
 router.use(jwtAuthMiddleware);
 
 router.post("/generate-snippet", async (req: Request, res: Response) => {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const { projectId, prompt, focusClipId, anthropicApiKey } = req.body as GenerateRequest;
+
+  // Use API key from request (settings) or fall back to environment variable
+  const apiKey = anthropicApiKey || process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
-    res
-      .status(500)
-      .json({ error: "Anthropic API key not configured. Add ANTHROPIC_API_KEY to environment." });
+    res.status(500).json({
+      error:
+        "Anthropic API key not configured. Add it in Settings or set ANTHROPIC_API_KEY environment variable.",
+    });
     return;
   }
-
-  const { projectId, prompt, focusClipId } = req.body as GenerateRequest;
 
   if (!projectId || !prompt) {
     res.status(400).json({ error: "projectId and prompt are required" });

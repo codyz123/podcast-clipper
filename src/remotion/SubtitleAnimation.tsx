@@ -2,6 +2,7 @@ import React from "react";
 import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
 import { SubtitleConfig } from "../lib/types";
 import { WordTiming } from "./types";
+import { resolveFontFamily } from "../lib/fonts";
 
 interface SubtitleAnimationProps {
   words: WordTiming[];
@@ -11,28 +12,34 @@ interface SubtitleAnimationProps {
 export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({ words, config }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const currentTimeSeconds = frame / fps;
 
-  // Group words based on wordsPerGroup
-  const groups: WordTiming[][] = [];
-  for (let i = 0; i < words.length; i += config.wordsPerGroup) {
-    groups.push(words.slice(i, i + config.wordsPerGroup));
+  const wordsPerGroup = Math.max(1, config.wordsPerGroup);
+  const isWithinWord = (word: WordTiming) => {
+    if (typeof word.startTime === "number" && typeof word.endTime === "number") {
+      return currentTimeSeconds >= word.startTime && currentTimeSeconds <= word.endTime;
+    }
+    return frame >= word.startFrame && frame <= word.endFrame;
+  };
+  const getWordStart = (word: WordTiming) =>
+    typeof word.startTime === "number" ? word.startTime : word.startFrame / fps;
+
+  const activeWordIndex = words.findIndex((word) => isWithinWord(word));
+  let currentWordIndex = activeWordIndex;
+
+  if (currentWordIndex === -1) {
+    const nextIndex = words.findIndex((word) => getWordStart(word) > currentTimeSeconds);
+    if (nextIndex > 0) {
+      currentWordIndex = nextIndex - 1;
+    } else if (nextIndex === 0) {
+      currentWordIndex = 0;
+    }
   }
 
-  // Find the current group based on frame
-  const currentGroupIndex = groups.findIndex((group) => {
-    const groupStart = group[0]?.startFrame || 0;
-    const groupEnd = group[group.length - 1]?.endFrame || 0;
-    return frame >= groupStart && frame <= groupEnd;
-  });
+  if (currentWordIndex === -1) currentWordIndex = 0;
 
-  // If no group is active, find the next one
-  const activeGroupIndex =
-    currentGroupIndex >= 0
-      ? currentGroupIndex
-      : groups.findIndex((group) => (group[0]?.startFrame || 0) > frame);
-
-  // Get the current active group
-  const currentGroup = groups[activeGroupIndex >= 0 ? activeGroupIndex : 0];
+  const groupStartIndex = Math.floor(currentWordIndex / wordsPerGroup) * wordsPerGroup;
+  const currentGroup = words.slice(groupStartIndex, groupStartIndex + wordsPerGroup);
 
   if (!currentGroup || currentGroup.length === 0) {
     return null;
@@ -112,44 +119,59 @@ export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({ words, con
     }
   };
 
-  const getWordStyle = (word: WordTiming): React.CSSProperties => {
-    if (config.animation === "karaoke") {
-      const isActive = frame >= word.startFrame && frame <= word.endFrame;
-      const progress = interpolate(frame, [word.startFrame, word.endFrame], [0, 1], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-      });
+  const getWordStyle = (word: WordTiming, isActive: boolean): React.CSSProperties => {
+    const highlightColor = config.highlightColor || config.color;
+    const highlightScale = config.animation === "karaoke" ? (config.highlightScale ?? 0) : 0;
+    const color = isActive ? highlightColor : config.color;
+    const scale =
+      isActive && highlightScale > 0
+        ? 1 +
+          interpolate(frame, [word.startFrame, word.endFrame], [0, highlightScale], {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          })
+        : 1;
 
+    if (highlightScale > 0) {
       return {
-        color: isActive ? "#FFD700" : config.color,
-        transform: isActive ? `scale(${1 + progress * 0.1})` : "scale(1)",
+        color,
+        transform: `scale(${scale})`,
         display: "inline-block",
-        marginRight: "0.3em",
-        transition: "transform 0.1s ease",
       };
     }
 
     return {
-      color: config.color,
-      display: "inline-block",
-      marginRight: "0.3em",
+      color,
+      display: "inline",
     };
   };
 
-  const positionStyle: React.CSSProperties = {
-    position: "absolute",
-    left: "5%",
-    right: "5%",
-    textAlign: "center",
-    ...(config.position === "top"
-      ? { top: "15%" }
-      : config.position === "bottom"
-        ? { bottom: "15%" }
-        : { top: "50%", transform: "translateY(-50%)" }),
-  };
+  const hasCustomPosition =
+    typeof config.positionX === "number" || typeof config.positionY === "number";
+
+  const positionStyle: React.CSSProperties = hasCustomPosition
+    ? {
+        position: "absolute",
+        left: `${config.positionX ?? 50}%`,
+        top: `${config.positionY ?? 50}%`,
+        transform: "translate(-50%, -50%)",
+        width: "90%",
+        textAlign: "center",
+      }
+    : {
+        position: "absolute",
+        left: "5%",
+        right: "5%",
+        textAlign: "center",
+        ...(config.position === "top"
+          ? { top: "15%" }
+          : config.position === "bottom"
+            ? { bottom: "15%" }
+            : { top: "50%", transform: "translateY(-50%)" }),
+      };
 
   const textStyle: React.CSSProperties = {
-    fontFamily: config.fontFamily,
+    fontFamily: resolveFontFamily(config.fontFamily),
     fontSize: config.fontSize,
     fontWeight: config.fontWeight,
     textShadow: config.shadowColor
@@ -158,18 +180,40 @@ export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({ words, con
     WebkitTextStroke: config.outlineWidth
       ? `${config.outlineWidth}px ${config.outlineColor}`
       : undefined,
-    lineHeight: 1.4,
+    WebkitFontSmoothing: "antialiased",
+    MozOsxFontSmoothing: "grayscale",
+    textRendering: "geometricPrecision",
+    lineHeight: 1.2,
+    wordWrap: "break-word",
+    overflowWrap: "break-word",
+    whiteSpace: "normal",
     ...getAnimationStyle(),
   };
 
+  const backgroundStyle: React.CSSProperties | undefined = config.backgroundColor
+    ? {
+        backgroundColor: config.backgroundColor,
+        padding: "4px 8px",
+        borderRadius: "4px",
+        display: "inline-block",
+      }
+    : undefined;
+
   return (
     <div style={positionStyle}>
-      <div style={textStyle}>
-        {currentGroup.map((word, index) => (
-          <span key={index} style={getWordStyle(word)}>
-            {word.text}
-          </span>
-        ))}
+      <div style={backgroundStyle}>
+        <div style={textStyle}>
+          {currentGroup.map((word, index) => {
+            const wordIndex = groupStartIndex + index;
+            const isActive = wordIndex === activeWordIndex;
+            return (
+              <span key={`${word.startFrame}-${index}`} style={getWordStyle(word, isActive)}>
+                {word.text}
+                {index < currentGroup.length - 1 ? " " : ""}
+              </span>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

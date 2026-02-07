@@ -30,6 +30,48 @@ const ENV_VARS: EnvVar[] = [
     required: false,
     description: "Frontend URL for email links (e.g., https://app.yourdomain.com)",
   },
+  { name: "YOUTUBE_CLIENT_ID", required: false, description: "YouTube OAuth client ID" },
+  { name: "YOUTUBE_CLIENT_SECRET", required: false, description: "YouTube OAuth client secret" },
+  { name: "YOUTUBE_REDIRECT_URI", required: false, description: "YouTube OAuth redirect URI" },
+  { name: "INSTAGRAM_CLIENT_ID", required: false, description: "Instagram/Facebook app ID" },
+  {
+    name: "INSTAGRAM_CLIENT_SECRET",
+    required: false,
+    description: "Instagram/Facebook app secret",
+  },
+  {
+    name: "INSTAGRAM_REDIRECT_URI",
+    required: false,
+    description: "Instagram OAuth redirect URI",
+  },
+  {
+    name: "INSTAGRAM_GRAPH_VERSION",
+    required: false,
+    description: "Instagram Graph API version",
+  },
+  {
+    name: "INSTAGRAM_PAGE_ID",
+    required: false,
+    description: "Preferred Facebook Page ID with Instagram Business account",
+  },
+  { name: "TIKTOK_CLIENT_KEY", required: false, description: "TikTok OAuth client key" },
+  {
+    name: "TIKTOK_CLIENT_SECRET",
+    required: false,
+    description: "TikTok OAuth client secret",
+  },
+  {
+    name: "TIKTOK_REDIRECT_URI",
+    required: false,
+    description: "TikTok OAuth redirect URI",
+  },
+  { name: "X_CONSUMER_KEY", required: false, description: "X OAuth 1.0a consumer key" },
+  {
+    name: "X_CONSUMER_SECRET",
+    required: false,
+    description: "X OAuth 1.0a consumer secret",
+  },
+  { name: "X_REDIRECT_URI", required: false, description: "X OAuth redirect URI" },
 ];
 
 export function validateEnv(): void {

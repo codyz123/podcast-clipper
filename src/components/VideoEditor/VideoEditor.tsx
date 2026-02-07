@@ -13,9 +13,12 @@ import { useProjectStore, getAudioBlob } from "../../stores/projectStore";
 import { useEditorStore, createDefaultTracks } from "../../stores/editorStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
+import { useEpisodes } from "../../hooks/useEpisodes";
 import {
   VideoFormat,
   VIDEO_FORMATS,
+  Clip,
+  VideoTemplate,
   Track,
   TrackType,
   TrackClip,
@@ -39,6 +42,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
   const { currentProject, updateClip, removeClip } = useProjectStore();
   const { templates, settings } = useSettingsStore();
   const { brandColors } = useWorkspaceStore();
+  const { saveClips } = useEpisodes();
   const {
     activeClipId,
     setActiveClip,
@@ -76,11 +80,88 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
   const audioRef = useRef<HTMLAudioElement>(null);
   const animationRef = useRef<number | null>(null);
   const colorPickerButtonRef = useRef<HTMLButtonElement>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedSignatureRef = useRef<string>("");
 
   const clips = currentProject?.clips || [];
   const activeClip = clips.find((c) => c.id === activeClipId) || clips[0] || null;
   const activeClipIndex = clips.findIndex((c) => c.id === activeClipId);
   const clipDuration = activeClip ? activeClip.endTime - activeClip.startTime : 0;
+
+  // Persist clip changes (captions, templates, tracks) with a debounce
+  useEffect(() => {
+    if (!currentProject?.id || clips.length === 0) return;
+
+    const payload = clips.map((clip) => ({
+      id: clip.id,
+      name: clip.name,
+      startTime: clip.startTime,
+      endTime: clip.endTime,
+      transcript: clip.transcript,
+      words: clip.words,
+      clippabilityScore: clip.clippabilityScore,
+      isManual: clip.isManual,
+      tracks: clip.tracks,
+      captionStyle: clip.captionStyle,
+      format: clip.format,
+      templateId: clip.templateId,
+      background: clip.background,
+      subtitle: clip.subtitle,
+    }));
+
+    const signature = JSON.stringify(payload);
+    if (signature === lastSavedSignatureRef.current) return;
+    lastSavedSignatureRef.current = signature;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = setTimeout(() => {
+      saveClips(currentProject.id, payload).catch((err) => {
+        console.error("[VideoEditor] Failed to sync clips:", err);
+      });
+    }, 1500);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [clips, currentProject?.id, saveClips]);
+
+  // Keep selected template in sync with the active clip
+  useEffect(() => {
+    if (!activeClip) return;
+    const nextTemplateId = activeClip.templateId || settings.defaultTemplate;
+    setSelectedTemplateId(nextTemplateId);
+  }, [activeClip?.id, activeClip?.templateId, settings.defaultTemplate]);
+
+  // Initialize template snapshot on clips that don't have one yet
+  useEffect(() => {
+    if (!activeClip) return;
+    const fallbackTemplate =
+      templates.find((t) => t.id === (activeClip.templateId || settings.defaultTemplate)) ||
+      templates[0];
+    if (!fallbackTemplate) return;
+
+    const updates: Partial<Clip> = {};
+    if (!activeClip.templateId) updates.templateId = fallbackTemplate.id;
+    if (!activeClip.background) updates.background = fallbackTemplate.background;
+    if (!activeClip.subtitle) updates.subtitle = fallbackTemplate.subtitle;
+
+    if (Object.keys(updates).length > 0) {
+      updateClip(activeClip.id, updates);
+    }
+  }, [
+    activeClip?.id,
+    activeClip?.templateId,
+    activeClip?.background,
+    activeClip?.subtitle,
+    settings.defaultTemplate,
+    templates,
+    updateClip,
+  ]);
 
   // Get the podcast audio track for fade settings
   const podcastTrack = useMemo(
@@ -534,7 +615,37 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     [activeClip, currentTime, updateClip, pushSnapshot]
   );
 
-  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) || templates[0];
+  const selectedTemplate = useMemo<VideoTemplate>(() => {
+    const fallback = templates.find((t) => t.id === selectedTemplateId) || templates[0]!;
+    if (activeClip?.background || activeClip?.subtitle) {
+      return {
+        ...fallback,
+        id: activeClip.templateId || fallback.id,
+        background: activeClip.background || fallback.background,
+        subtitle: activeClip.subtitle || fallback.subtitle,
+      };
+    }
+    return fallback;
+  }, [
+    activeClip?.background,
+    activeClip?.subtitle,
+    activeClip?.templateId,
+    selectedTemplateId,
+    templates,
+  ]);
+
+  const handleTemplateSelect = useCallback(
+    (template: VideoTemplate) => {
+      if (!template || !activeClip) return;
+      setSelectedTemplateId(template.id);
+      updateClip(activeClip.id, {
+        templateId: template.id,
+        background: template.background,
+        subtitle: template.subtitle,
+      });
+    },
+    [activeClip, updateClip]
+  );
 
   return (
     <div className="flex h-full flex-col bg-[hsl(var(--bg-base))]">
@@ -759,7 +870,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
                     {templates.slice(0, 4).map((template) => (
                       <button
                         key={template.id}
-                        onClick={() => setSelectedTemplateId(template.id)}
+                        onClick={() => handleTemplateSelect(template)}
                         className={cn(
                           "flex w-full items-center gap-2 rounded-md border p-2 text-left transition-colors",
                           selectedTemplateId === template.id

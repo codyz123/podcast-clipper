@@ -8,6 +8,34 @@
       "when": 1770055631654,
       "tag": "0000_right_norman_osborn",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1770210828563,
+      "tag": "0001_youtube_uploads",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770216000000,
+      "tag": "0002_social_uploads",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1770225000000,
+      "tag": "0003_upload_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1770235000000,
+      "tag": "0004_clip_templates",
+      "breakpoints": true
     }
   ]
 }

@@ -52,7 +52,7 @@ export const PlatformIcon: React.FC<PlatformIconProps> = ({
 }) => {
   // Map destination types to icon keys
   const iconKey =
-    platform === "youtube-shorts"
+    platform === "youtube-shorts" || platform === "youtube-video"
       ? "youtube"
       : platform === "instagram-reels" || platform === "instagram-post"
         ? "instagram"

@@ -83,6 +83,9 @@ export interface Clip {
   tracks?: Track[];
   captionStyle?: CaptionStyle;
   format?: VideoFormat;
+  templateId?: string;
+  background?: BackgroundConfig;
+  subtitle?: SubtitleConfig;
   generatedAssets?: GeneratedAsset[];
   hookAnalysis?: HookAnalysis;
 }
@@ -153,11 +156,16 @@ export interface SubtitleConfig {
   fontSize: number;
   fontWeight: number;
   color: string;
+  highlightColor?: string;
+  highlightScale?: number;
+  backgroundColor?: string;
   outlineColor?: string;
   outlineWidth?: number;
   shadowColor?: string;
   shadowBlur?: number;
   position: "center" | "top" | "bottom";
+  positionX?: number; // 0-100, optional override for position
+  positionY?: number; // 0-100, optional override for position
   animation: "fade" | "pop" | "karaoke" | "typewriter";
   wordsPerGroup: number; // how many words to show at once
 }
@@ -255,6 +263,9 @@ export interface AppSettings {
 
   // Legacy: direct API key (used when no backend configured)
   openaiApiKey?: string;
+
+  // Anthropic API for AI text generation
+  anthropicApiKey?: string;
 
   // Pexels API for B-roll search
   pexelsApiKey?: string;
@@ -391,7 +402,7 @@ export const CAPTION_PRESETS: Record<CaptionPreset, Omit<CaptionStyle, "preset">
   },
   "tiktok-default": {
     animation: "karaoke",
-    fontFamily: "Arial",
+    fontFamily: "Inter",
     fontSize: 40,
     fontWeight: 600,
     primaryColor: "#FFFFFF",

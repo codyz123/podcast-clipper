@@ -71,6 +71,9 @@ export interface Clip {
   tracks?: unknown;
   captionStyle?: unknown;
   format?: string;
+  templateId?: string;
+  background?: unknown;
+  subtitle?: unknown;
   createdAt: string;
   updatedAt: string;
 }
@@ -619,6 +622,9 @@ export function useEpisodes() {
                     tracks: c.tracks,
                     captionStyle: c.captionStyle,
                     format: c.format,
+                    templateId: c.templateId,
+                    background: c.background,
+                    subtitle: c.subtitle,
                   })),
                 }),
               }

@@ -2,316 +2,336 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { VideoFormat } from "../lib/types";
 import {
-  DEFAULT_DESTINATIONS,
   PLATFORM_CONFIGS,
   type PublishDestinationType,
-  type PublishInstance,
-  type PublishInstanceStatus,
+  type Post,
+  type PostStatus,
+  isPostInProgress,
+  isPostQueued,
+  isValidPostTransition,
+  canRetryPost,
 } from "../lib/publish";
 import { generateId } from "../lib/utils";
 
-interface PublishState {
-  // Core state
-  instances: PublishInstance[];
+// ============ Store Interface ============
+
+interface PostPublishState {
+  // Persisted state (only posts are saved to localStorage)
+  posts: Post[];
+
+  // Derived/runtime state (NOT persisted)
   isPublishing: boolean;
-  activeQueueIndex: number;
 
   // CRUD operations
-  initializeForClips: (clipIds: string[], defaultCaption?: (clipId: string) => string) => void;
-  addInstance: (clipId: string, destination: PublishDestinationType) => PublishInstance;
-  removeInstance: (instanceId: string) => void;
-  toggleInstance: (instanceId: string) => void;
-  setInstanceFormat: (instanceId: string, format: VideoFormat) => void;
-  setInstanceCaption: (instanceId: string, caption: string) => void;
-  setInstanceHashtags: (instanceId: string, hashtags: string[]) => void;
-  updateInstanceStatus: (instanceId: string, statusData: PublishInstanceStatus) => void;
+  createPost: (destination: PublishDestinationType) => Post;
+  removePost: (postId: string) => void;
+  duplicatePost: (postId: string) => Post | null;
+
+  // Content setters
+  setPostClip: (postId: string, clipId: string | undefined) => void;
+  setPostText: (postId: string, text: string, fromSnippetId?: string) => void;
+  setPostTitle: (postId: string, title: string) => void;
+  setPostDescription: (postId: string, description: string, fromSnippetId?: string) => void;
+  setPostFormat: (postId: string, format: VideoFormat) => void;
+  setPostRenderScale: (postId: string, renderScale: number) => void;
+  setPostHashtags: (postId: string, hashtags: string[]) => void;
+  togglePost: (postId: string) => void;
+
+  // Status updates with transition validation
+  updatePostStatus: (postId: string, statusData: PostStatus) => boolean;
 
   // Batch operations
-  enableAllForClip: (clipId: string) => void;
-  disableAllForClip: (clipId: string) => void;
-  enableAllForDestination: (destination: PublishDestinationType) => void;
-  disableAllForDestination: (destination: PublishDestinationType) => void;
-  applyDefaultCaptionToAll: (clipId: string, caption: string) => void;
+  enableAll: () => void;
+  disableAll: () => void;
+  removeCompleted: () => void;
 
-  // Publishing workflow
+  // Publishing workflow - queue derived from status, not stored
   startPublishing: () => void;
   cancelPublishing: () => void;
-  retryInstance: (instanceId: string) => void;
+  retryPost: (postId: string) => void;
   retryAllFailed: () => void;
-  processNextInQueue: () => PublishInstance | null;
-  markInstanceComplete: (instanceId: string, outputPath: string, uploadedUrl?: string) => void;
-  markInstanceFailed: (instanceId: string, error: string) => void;
+  resetStuckPosts: () => void;
+  markPostComplete: (postId: string, outputPath?: string, uploadedUrl?: string) => void;
+  markPostFailed: (postId: string, error: string) => void;
 
-  // Selectors (getters)
-  getInstancesForClip: (clipId: string) => PublishInstance[];
-  getEnabledInstances: () => PublishInstance[];
-  getFailedInstances: () => PublishInstance[];
-  getQueuedInstances: () => PublishInstance[];
-  getAvailableDestinations: (clipId: string) => PublishDestinationType[];
+  // Selectors (derive queue from status)
+  getEnabledPosts: () => Post[];
+  getQueuedPosts: () => Post[];
+  getNextInQueue: () => Post | null;
+  getFailedPosts: () => Post[];
+  getInProgressPost: () => Post | null;
   getOverallProgress: () => {
     completed: number;
     total: number;
-    currentItem?: string;
     failed: number;
+    inProgress: number;
+    queued: number;
+    percent: number;
   };
-  getInstance: (instanceId: string) => PublishInstance | undefined;
+  getPost: (postId: string) => Post | undefined;
 
   // Reset
   resetPublishState: () => void;
-  clearInstancesForClip: (clipId: string) => void;
 }
 
+// ============ Initial State ============
+
 const INITIAL_STATE = {
-  instances: [] as PublishInstance[],
+  posts: [] as Post[],
   isPublishing: false,
-  activeQueueIndex: 0,
 };
 
-export const usePublishStore = create<PublishState>()(
+// ============ Store Implementation ============
+
+export const usePublishStore = create<PostPublishState>()(
   persist(
     (set, get) => ({
       ...INITIAL_STATE,
 
-      // Initialize instances for a set of clips
-      initializeForClips: (clipIds, defaultCaption) => {
-        set((state) => {
-          const existingClipIds = new Set(state.instances.map((i) => i.clipId));
-          const newInstances: PublishInstance[] = [];
+      // ============ CRUD Operations ============
 
-          for (const clipId of clipIds) {
-            if (existingClipIds.has(clipId)) continue;
-
-            for (const destination of DEFAULT_DESTINATIONS) {
-              const config = PLATFORM_CONFIGS[destination];
-              newInstances.push({
-                id: generateId(),
-                clipId,
-                destination,
-                format: config.defaultFormat,
-                enabled: true,
-                createdAt: new Date().toISOString(),
-                caption: defaultCaption?.(clipId) || "",
-                hashtags: [],
-                statusData: { status: "idle" },
-              });
-            }
-          }
-
-          return { instances: [...state.instances, ...newInstances] };
-        });
-      },
-
-      // Add a single instance
-      addInstance: (clipId, destination) => {
+      createPost: (destination) => {
         const config = PLATFORM_CONFIGS[destination];
-        const instance: PublishInstance = {
+        const post: Post = {
           id: generateId(),
-          clipId,
           destination,
           format: config.defaultFormat,
+          renderScale: 1,
+          hashtags: [],
+          statusData: { status: "idle" },
           enabled: true,
           createdAt: new Date().toISOString(),
-          caption: "",
-          hashtags: [],
+        };
+
+        set((state) => ({
+          posts: [...state.posts, post],
+        }));
+
+        return post;
+      },
+
+      removePost: (postId) => {
+        set((state) => ({
+          posts: state.posts.filter((p) => p.id !== postId),
+        }));
+      },
+
+      duplicatePost: (postId) => {
+        const original = get().posts.find((p) => p.id === postId);
+        if (!original) return null;
+
+        const duplicate: Post = {
+          ...original,
+          id: generateId(),
+          createdAt: new Date().toISOString(),
           statusData: { status: "idle" },
         };
 
         set((state) => ({
-          instances: [...state.instances, instance],
+          posts: [...state.posts, duplicate],
         }));
 
-        return instance;
+        return duplicate;
       },
 
-      // Remove an instance
-      removeInstance: (instanceId) => {
+      // ============ Content Setters ============
+
+      setPostClip: (postId, clipId) => {
         set((state) => ({
-          instances: state.instances.filter((i) => i.id !== instanceId),
-        }));
-      },
-
-      // Toggle enabled state
-      toggleInstance: (instanceId) => {
-        set((state) => ({
-          instances: state.instances.map((i) =>
-            i.id === instanceId ? { ...i, enabled: !i.enabled } : i
-          ),
-        }));
-      },
-
-      // Update format
-      setInstanceFormat: (instanceId, format) => {
-        set((state) => ({
-          instances: state.instances.map((i) => (i.id === instanceId ? { ...i, format } : i)),
-        }));
-      },
-
-      // Update caption
-      setInstanceCaption: (instanceId, caption) => {
-        set((state) => ({
-          instances: state.instances.map((i) => (i.id === instanceId ? { ...i, caption } : i)),
-        }));
-      },
-
-      // Update hashtags
-      setInstanceHashtags: (instanceId, hashtags) => {
-        set((state) => ({
-          instances: state.instances.map((i) => (i.id === instanceId ? { ...i, hashtags } : i)),
-        }));
-      },
-
-      // Update status
-      updateInstanceStatus: (instanceId, statusData) => {
-        set((state) => ({
-          instances: state.instances.map((i) => (i.id === instanceId ? { ...i, statusData } : i)),
-        }));
-      },
-
-      // Batch: enable all for a clip
-      enableAllForClip: (clipId) => {
-        set((state) => ({
-          instances: state.instances.map((i) =>
-            i.clipId === clipId ? { ...i, enabled: true } : i
-          ),
-        }));
-      },
-
-      // Batch: disable all for a clip
-      disableAllForClip: (clipId) => {
-        set((state) => ({
-          instances: state.instances.map((i) =>
-            i.clipId === clipId ? { ...i, enabled: false } : i
-          ),
-        }));
-      },
-
-      // Batch: enable all for a destination
-      enableAllForDestination: (destination) => {
-        set((state) => ({
-          instances: state.instances.map((i) =>
-            i.destination === destination ? { ...i, enabled: true } : i
-          ),
-        }));
-      },
-
-      // Batch: disable all for a destination
-      disableAllForDestination: (destination) => {
-        set((state) => ({
-          instances: state.instances.map((i) =>
-            i.destination === destination ? { ...i, enabled: false } : i
-          ),
-        }));
-      },
-
-      // Apply default caption to all instances for a clip that don't have one
-      applyDefaultCaptionToAll: (clipId, caption) => {
-        set((state) => ({
-          instances: state.instances.map((i) =>
-            i.clipId === clipId && !i.caption ? { ...i, caption } : i
-          ),
-        }));
-      },
-
-      // Start publishing workflow
-      startPublishing: () => {
-        set((state) => {
-          let queuePosition = 0;
-
-          return {
-            isPublishing: true,
-            activeQueueIndex: 0,
-            instances: state.instances.map((i) => {
-              if (i.enabled && i.statusData.status === "idle") {
-                const pos = queuePosition++;
-                return { ...i, statusData: { status: "queued" as const, queuePosition: pos } };
-              }
-              return i;
-            }),
-          };
-        });
-      },
-
-      // Cancel publishing
-      cancelPublishing: () => {
-        set((state) => ({
-          isPublishing: false,
-          activeQueueIndex: 0,
-          instances: state.instances.map((i) => {
-            // Reset queued instances back to idle
-            if (i.statusData.status === "queued") {
-              return { ...i, statusData: { status: "idle" as const } };
-            }
-            // Leave completed, failed, and in-progress instances as-is
-            return i;
+          posts: state.posts.map((p) => {
+            if (p.id !== postId) return p;
+            // When setting a clip, also set the default format for the destination
+            const config = PLATFORM_CONFIGS[p.destination];
+            return {
+              ...p,
+              clipId,
+              format: clipId ? p.format || config.defaultFormat : undefined,
+            };
           }),
         }));
       },
 
-      // Retry a single failed instance
-      retryInstance: (instanceId) => {
+      setPostText: (postId, text, fromSnippetId) => {
         set((state) => ({
-          instances: state.instances.map((i) =>
-            i.id === instanceId && i.statusData.status === "failed"
-              ? { ...i, statusData: { status: "queued" as const, queuePosition: 0 } }
-              : i
+          posts: state.posts.map((p) =>
+            p.id === postId
+              ? {
+                  ...p,
+                  textContent: text,
+                  // If text differs from snippet, clear the attribution (set to null)
+                  // If fromSnippetId is explicitly provided, use it
+                  sourceSnippetId: fromSnippetId !== undefined ? fromSnippetId : p.sourceSnippetId,
+                }
+              : p
           ),
         }));
       },
 
-      // Retry all failed instances
-      retryAllFailed: () => {
+      setPostTitle: (postId, title) => {
+        set((state) => ({
+          posts: state.posts.map((p) => (p.id === postId ? { ...p, title } : p)),
+        }));
+      },
+
+      setPostDescription: (postId, description, fromSnippetId) => {
+        set((state) => ({
+          posts: state.posts.map((p) =>
+            p.id === postId
+              ? {
+                  ...p,
+                  description,
+                  sourceSnippetId: fromSnippetId !== undefined ? fromSnippetId : p.sourceSnippetId,
+                }
+              : p
+          ),
+        }));
+      },
+
+      setPostFormat: (postId, format) => {
+        set((state) => ({
+          posts: state.posts.map((p) => (p.id === postId ? { ...p, format } : p)),
+        }));
+      },
+
+      setPostRenderScale: (postId, renderScale) => {
+        set((state) => ({
+          posts: state.posts.map((p) => (p.id === postId ? { ...p, renderScale } : p)),
+        }));
+      },
+
+      setPostHashtags: (postId, hashtags) => {
+        set((state) => ({
+          posts: state.posts.map((p) => (p.id === postId ? { ...p, hashtags } : p)),
+        }));
+      },
+
+      togglePost: (postId) => {
+        set((state) => ({
+          posts: state.posts.map((p) => (p.id === postId ? { ...p, enabled: !p.enabled } : p)),
+        }));
+      },
+
+      // ============ Status Updates with Transition Validation ============
+
+      updatePostStatus: (postId, newStatusData) => {
+        const post = get().posts.find((p) => p.id === postId);
+        if (!post) return false;
+
+        // Enforce valid state transitions
+        if (!isValidPostTransition(post.statusData.status, newStatusData.status)) {
+          console.warn(
+            `[PublishStore] Invalid transition: ${post.statusData.status} → ${newStatusData.status}`
+          );
+          return false;
+        }
+
+        set((state) => ({
+          posts: state.posts.map((p) =>
+            p.id === postId ? { ...p, statusData: newStatusData } : p
+          ),
+        }));
+        return true;
+      },
+
+      // ============ Batch Operations ============
+
+      enableAll: () => {
+        set((state) => ({
+          posts: state.posts.map((p) => ({ ...p, enabled: true })),
+        }));
+      },
+
+      disableAll: () => {
+        set((state) => ({
+          posts: state.posts.map((p) => ({ ...p, enabled: false })),
+        }));
+      },
+
+      removeCompleted: () => {
+        set((state) => ({
+          posts: state.posts.filter((p) => p.statusData.status !== "completed"),
+        }));
+      },
+
+      // ============ Publishing Workflow ============
+
+      startPublishing: () => {
         set((state) => {
-          let queuePosition = 0;
+          const shouldResetInProgress = !state.isPublishing;
+          const posts = state.posts.map((p) => {
+            if (!p.enabled) return p;
+            if (
+              (p.statusData.status === "rendering" || p.statusData.status === "uploading") &&
+              !shouldResetInProgress
+            ) {
+              return p;
+            }
+            return { ...p, statusData: { status: "queued" as const } };
+          });
+
+          const queuedCount = posts.filter((p) => p.statusData.status === "queued").length;
+
           return {
-            instances: state.instances.map((i) => {
-              if (i.statusData.status === "failed" && i.statusData.retryCount < 3) {
-                return {
-                  ...i,
-                  statusData: { status: "queued" as const, queuePosition: queuePosition++ },
-                };
-              }
-              return i;
-            }),
+            isPublishing: queuedCount > 0,
+            posts,
           };
         });
       },
 
-      // Get next instance in queue and mark as rendering
-      processNextInQueue: () => {
-        const state = get();
-        const nextInstance = state.instances.find((i) => i.statusData.status === "queued");
-
-        if (!nextInstance) {
-          set({ isPublishing: false });
-          return null;
-        }
-
-        set((s) => ({
-          activeQueueIndex: s.activeQueueIndex + 1,
-          instances: s.instances.map((i) =>
-            i.id === nextInstance.id
-              ? {
-                  ...i,
-                  statusData: {
-                    status: "rendering" as const,
-                    progress: 0,
-                    stage: "encoding" as const,
-                  },
-                }
-              : i
-          ),
+      cancelPublishing: () => {
+        set((state) => ({
+          isPublishing: false,
+          posts: state.posts.map((p) => {
+            // Reset queued posts back to idle
+            if (p.statusData.status === "queued") {
+              return { ...p, statusData: { status: "idle" as const } };
+            }
+            return p;
+          }),
         }));
-
-        return nextInstance;
       },
 
-      // Mark instance as complete
-      markInstanceComplete: (instanceId, outputPath, uploadedUrl) => {
+      retryPost: (postId) => {
+        const post = get().posts.find((p) => p.id === postId);
+        if (!post || !canRetryPost(post)) return;
+
+        // Use updatePostStatus to enforce transition rules
+        get().updatePostStatus(postId, { status: "queued" });
+      },
+
+      retryAllFailed: () => {
+        const failedPosts = get()
+          .posts.filter((p) => canRetryPost(p))
+          .map((p) => p.id);
+
+        // Retry each failed post
+        failedPosts.forEach((postId) => {
+          get().updatePostStatus(postId, { status: "queued" });
+        });
+      },
+
+      resetStuckPosts: () => {
         set((state) => ({
-          instances: state.instances.map((i) =>
-            i.id === instanceId
+          isPublishing: false,
+          posts: state.posts.map((p) => {
+            if (
+              p.statusData.status === "queued" ||
+              p.statusData.status === "rendering" ||
+              p.statusData.status === "uploading"
+            ) {
+              return { ...p, statusData: { status: "idle" as const } };
+            }
+            return p;
+          }),
+        }));
+      },
+
+      markPostComplete: (postId, outputPath, uploadedUrl) => {
+        set((state) => ({
+          posts: state.posts.map((p) =>
+            p.id === postId
               ? {
-                  ...i,
+                  ...p,
                   statusData: {
                     status: "completed" as const,
                     outputPath,
@@ -319,110 +339,179 @@ export const usePublishStore = create<PublishState>()(
                     completedAt: new Date().toISOString(),
                   },
                 }
-              : i
+              : p
           ),
         }));
+
+        // Check if we're done publishing
+        const remaining = get().getQueuedPosts();
+        const inProgress = get().getInProgressPost();
+        if (remaining.length === 0 && !inProgress) {
+          set({ isPublishing: false });
+        }
       },
 
-      // Mark instance as failed
-      markInstanceFailed: (instanceId, error) => {
+      markPostFailed: (postId, error) => {
+        const post = get().posts.find((p) => p.id === postId);
+        if (!post) return;
+
+        // Get current retry count (0 if not failed before)
+        const currentRetryCount =
+          post.statusData.status === "failed" ? post.statusData.retryCount : 0;
+
         set((state) => ({
-          instances: state.instances.map((i) => {
-            if (i.id !== instanceId) return i;
-
-            const retryCount = i.statusData.status === "failed" ? i.statusData.retryCount + 1 : 1;
-
-            return {
-              ...i,
-              statusData: {
-                status: "failed" as const,
-                error,
-                failedAt: new Date().toISOString(),
-                retryCount,
-              },
-            };
-          }),
+          posts: state.posts.map((p) =>
+            p.id === postId
+              ? {
+                  ...p,
+                  statusData: {
+                    status: "failed" as const,
+                    error,
+                    failedAt: new Date().toISOString(),
+                    retryCount: currentRetryCount + 1,
+                  },
+                }
+              : p
+          ),
         }));
+
+        // Check if we're done publishing
+        const remaining = get().getQueuedPosts();
+        const inProgress = get().getInProgressPost();
+        if (remaining.length === 0 && !inProgress) {
+          set({ isPublishing: false });
+        }
       },
 
-      // Get instances for a specific clip
-      getInstancesForClip: (clipId) => {
-        return get().instances.filter((i) => i.clipId === clipId);
+      // ============ Selectors (Derived from Status) ============
+
+      getEnabledPosts: () => {
+        return get().posts.filter((p) => p.enabled);
       },
 
-      // Get all enabled instances
-      getEnabledInstances: () => {
-        return get().instances.filter((i) => i.enabled);
+      // Queue derived from status, ordered by createdAt (FIFO)
+      getQueuedPosts: () => {
+        return get()
+          .posts.filter((p) => p.statusData.status === "queued")
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
       },
 
-      // Get all failed instances
-      getFailedInstances: () => {
-        return get().instances.filter((i) => i.statusData.status === "failed");
+      getNextInQueue: () => {
+        return get().getQueuedPosts()[0] ?? null;
       },
 
-      // Get all queued instances
-      getQueuedInstances: () => {
-        return get().instances.filter((i) => i.statusData.status === "queued");
+      getFailedPosts: () => {
+        return get().posts.filter((p) => p.statusData.status === "failed");
       },
 
-      // Get destinations not yet added for a clip
-      getAvailableDestinations: (clipId) => {
-        const existingDestinations = new Set(
-          get()
-            .instances.filter((i) => i.clipId === clipId)
-            .map((i) => i.destination)
+      getInProgressPost: () => {
+        return (
+          get().posts.find(
+            (p) => p.statusData.status === "rendering" || p.statusData.status === "uploading"
+          ) ?? null
         );
-
-        return (Object.keys(PLATFORM_CONFIGS) as PublishDestinationType[]).filter(
-          (d) => !existingDestinations.has(d)
-        );
       },
 
-      // Get overall progress
       getOverallProgress: () => {
-        const instances = get().instances.filter((i) => i.enabled);
-        const completed = instances.filter((i) => i.statusData.status === "completed").length;
-        const failed = instances.filter((i) => i.statusData.status === "failed").length;
-        const inProgress = instances.find(
-          (i) => i.statusData.status === "rendering" || i.statusData.status === "uploading"
-        );
+        const enabledPosts = get().posts.filter((p) => p.enabled);
+        const completed = enabledPosts.filter((p) => p.statusData.status === "completed").length;
+        const failed = enabledPosts.filter((p) => p.statusData.status === "failed").length;
+        const inProgress = enabledPosts.filter(
+          (p) => p.statusData.status === "rendering" || p.statusData.status === "uploading"
+        ).length;
+        const queued = enabledPosts.filter((p) => p.statusData.status === "queued").length;
+
+        const progressSum = enabledPosts.reduce((sum, post) => {
+          switch (post.statusData.status) {
+            case "completed":
+            case "failed":
+              return sum + 100;
+            case "rendering":
+            case "uploading":
+              return sum + Math.max(0, Math.min(100, post.statusData.progress));
+            default:
+              return sum;
+          }
+        }, 0);
+
+        const percent =
+          enabledPosts.length === 0 ? 0 : Math.round(progressSum / enabledPosts.length);
 
         return {
           completed,
-          total: instances.length,
+          total: enabledPosts.length,
           failed,
-          currentItem: inProgress ? PLATFORM_CONFIGS[inProgress.destination].shortName : undefined,
+          inProgress,
+          queued,
+          percent,
         };
       },
 
-      // Get a single instance by ID
-      getInstance: (instanceId) => {
-        return get().instances.find((i) => i.id === instanceId);
+      getPost: (postId) => {
+        return get().posts.find((p) => p.id === postId);
       },
 
-      // Reset entire state
+      // ============ Reset ============
+
       resetPublishState: () => {
         set(INITIAL_STATE);
-      },
-
-      // Clear instances for a specific clip
-      clearInstancesForClip: (clipId) => {
-        set((state) => ({
-          instances: state.instances.filter((i) => i.clipId !== clipId),
-        }));
       },
     }),
     {
       name: "podcastomatic-publish",
-      version: 1,
-      partialize: (state) => ({
-        // Persist instances but reset in-progress states
-        instances: state.instances.map((i) => ({
-          ...i,
-          statusData:
-            i.statusData.status === "completed" ? i.statusData : { status: "idle" as const },
-        })),
-      }),
+      version: 3,
+
+      // Only persist posts array - derive runtime state on load
+      partialize: (state) => ({ posts: state.posts }),
+
+      migrate: (persistedState: unknown, version: number) => {
+        if (version < 2) {
+          // Old clip-centric state structure is incompatible
+          // User content (clips, snippets) is in database - this is just export queue
+          console.log("[PublishStore] Migrating to v2 - resetting export queue");
+          return { posts: [] };
+        }
+        if (version < 3) {
+          const state = persistedState as { posts?: Post[] };
+          if (!state?.posts) return persistedState;
+          return {
+            ...state,
+            posts: state.posts.map((post) => {
+              if (
+                (post.destination === "youtube-shorts" || post.destination === "youtube-video") &&
+                post.textContent &&
+                (!post.title || !post.description)
+              ) {
+                const firstLine = post.textContent.split("\n")[0]?.trim();
+                return {
+                  ...post,
+                  title: post.title || firstLine || post.title,
+                  description: post.description || post.textContent,
+                };
+              }
+              return post;
+            }),
+          };
+        }
+        return persistedState;
+      },
+
+      // Clean up any stale in-progress states on load (immutable approach)
+      onRehydrateStorage: () => (state, error) => {
+        if (error || !state) return;
+
+        // Use setState for proper immutable update, not direct mutation
+        usePublishStore.setState({
+          posts: state.posts.map((p) => {
+            // Reset any stuck in-progress or queued posts to idle
+            if (isPostInProgress(p) || isPostQueued(p)) {
+              return { ...p, statusData: { status: "idle" as const } };
+            }
+            return p;
+          }),
+          isPublishing: false,
+        });
+      },
     }
   )
 );

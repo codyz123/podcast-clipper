@@ -309,6 +309,9 @@ export const clips = pgTable(
       explanation: string;
     }>(),
     isManual: boolean("is_manual").default(false),
+    templateId: varchar("template_id", { length: 255 }),
+    background: jsonb("background"),
+    subtitle: jsonb("subtitle"),
     tracks: jsonb("tracks"), // Track[] from types.ts
     captionStyle: jsonb("caption_style"), // CaptionStyle from types.ts
     format: varchar("format", { length: 10 }),
@@ -386,6 +389,191 @@ export const renderedClips = pgTable(
   (table) => [index("rendered_clips_v2_clip_id_idx").on(table.clipId)]
 );
 
+// ============ YouTube Uploads ============
+
+export const youtubeUploads = pgTable(
+  "youtube_uploads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: varchar("post_id", { length: 255 }).notNull(),
+    clipId: uuid("clip_id").references(() => clips.id, { onDelete: "set null" }),
+
+    // YouTube session
+    youtubeUploadUri: text("youtube_upload_uri"),
+    youtubeVideoId: varchar("youtube_video_id", { length: 50 }),
+
+    // Metadata
+    title: varchar("title", { length: 100 }).notNull(),
+    description: text("description"),
+    tags: text("tags").array(),
+    privacyStatus: varchar("privacy_status", { length: 20 }).default("public"),
+    categoryId: varchar("category_id", { length: 10 }).default("22"),
+    isShort: boolean("is_short").default(false),
+
+    // Source
+    sourceUrl: text("source_url").notNull(),
+    sourceSizeBytes: bigint("source_size_bytes", { mode: "number" }),
+
+    // Progress
+    status: varchar("status", { length: 20 }).default("pending"),
+    bytesUploaded: bigint("bytes_uploaded", { mode: "number" }).default(0),
+    uploadProgress: integer("upload_progress").default(0),
+    processingProgress: integer("processing_progress").default(0),
+
+    // Error handling
+    errorMessage: text("error_message"),
+    retryCount: integer("retry_count").default(0),
+
+    // Timestamps
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id),
+  },
+  (table) => [
+    index("youtube_uploads_post_id_idx").on(table.postId),
+    index("youtube_uploads_clip_id_idx").on(table.clipId),
+    index("youtube_uploads_status_idx").on(table.status),
+  ]
+);
+
+// ============ Instagram Uploads ============
+
+export const instagramUploads = pgTable(
+  "instagram_uploads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: varchar("post_id", { length: 255 }).notNull(),
+    clipId: uuid("clip_id").references(() => clips.id, { onDelete: "set null" }),
+
+    // Instagram session
+    instagramContainerId: text("instagram_container_id"),
+    instagramMediaId: text("instagram_media_id"),
+
+    // Metadata
+    caption: text("caption"),
+    mediaType: varchar("media_type", { length: 20 }).default("REELS"),
+    shareToFeed: boolean("share_to_feed").default(false),
+
+    // Source
+    sourceUrl: text("source_url").notNull(),
+    sourceSizeBytes: bigint("source_size_bytes", { mode: "number" }),
+
+    // Progress
+    status: varchar("status", { length: 20 }).default("pending"),
+    bytesUploaded: bigint("bytes_uploaded", { mode: "number" }).default(0),
+    uploadProgress: integer("upload_progress").default(0),
+    processingProgress: integer("processing_progress").default(0),
+
+    // Error handling
+    errorMessage: text("error_message"),
+    retryCount: integer("retry_count").default(0),
+
+    // Timestamps
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id),
+  },
+  (table) => [index("instagram_uploads_post_id_idx").on(table.postId)]
+);
+
+// ============ TikTok Uploads ============
+
+export const tiktokUploads = pgTable(
+  "tiktok_uploads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: varchar("post_id", { length: 255 }).notNull(),
+    clipId: uuid("clip_id").references(() => clips.id, { onDelete: "set null" }),
+
+    // TikTok session
+    tiktokPublishId: text("tiktok_publish_id"),
+    tiktokVideoId: text("tiktok_video_id"),
+
+    // Metadata
+    caption: text("caption"),
+    privacyLevel: varchar("privacy_level", { length: 50 }),
+
+    // Source
+    sourceUrl: text("source_url").notNull(),
+    sourceSizeBytes: bigint("source_size_bytes", { mode: "number" }),
+
+    // Progress
+    status: varchar("status", { length: 20 }).default("pending"),
+    uploadProgress: integer("upload_progress").default(0),
+    processingProgress: integer("processing_progress").default(0),
+
+    // Error handling
+    errorMessage: text("error_message"),
+    retryCount: integer("retry_count").default(0),
+
+    // Timestamps
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id),
+  },
+  (table) => [index("tiktok_uploads_post_id_idx").on(table.postId)]
+);
+
+// ============ X Uploads ============
+
+export const xUploads = pgTable(
+  "x_uploads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: varchar("post_id", { length: 255 }).notNull(),
+    clipId: uuid("clip_id").references(() => clips.id, { onDelete: "set null" }),
+
+    // X session
+    xMediaId: text("x_media_id"),
+    xTweetId: text("x_tweet_id"),
+
+    // Metadata
+    textContent: text("text_content"),
+
+    // Source
+    sourceUrl: text("source_url").notNull(),
+    sourceSizeBytes: bigint("source_size_bytes", { mode: "number" }),
+
+    // Progress
+    status: varchar("status", { length: 20 }).default("pending"),
+    bytesUploaded: bigint("bytes_uploaded", { mode: "number" }).default(0),
+    uploadProgress: integer("upload_progress").default(0),
+    processingProgress: integer("processing_progress").default(0),
+
+    // Error handling
+    errorMessage: text("error_message"),
+    retryCount: integer("retry_count").default(0),
+
+    // Timestamps
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdById: uuid("created_by_id").references(() => users.id),
+  },
+  (table) => [index("x_uploads_post_id_idx").on(table.postId)]
+);
+
+// ============ Upload Events (Diagnostics) ============
+
+export const uploadEvents = pgTable(
+  "upload_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    platform: varchar("platform", { length: 50 }).notNull(),
+    uploadId: varchar("upload_id", { length: 255 }).notNull(),
+    event: varchar("event", { length: 100 }).notNull(),
+    detail: jsonb("detail"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("upload_events_platform_upload_idx").on(table.platform, table.uploadId),
+    index("upload_events_created_at_idx").on(table.createdAt),
+  ]
+);
+
 // ============ OAuth Tokens (migrated from legacy) ============
 
 export const oauthTokens = pgTable(
@@ -416,6 +604,10 @@ export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   podcastMemberships: many(podcastMembers),
   createdPodcasts: many(podcasts),
+  youtubeUploads: many(youtubeUploads),
+  instagramUploads: many(instagramUploads),
+  tiktokUploads: many(tiktokUploads),
+  xUploads: many(xUploads),
 }));
 
 export const sessionsRelations = relations(sessions, ({ one }) => ({
@@ -512,6 +704,10 @@ export const clipsRelations = relations(clips, ({ one, many }) => ({
   }),
   renderedClips: many(renderedClips),
   textSnippets: many(textSnippets),
+  youtubeUploads: many(youtubeUploads),
+  instagramUploads: many(instagramUploads),
+  tiktokUploads: many(tiktokUploads),
+  xUploads: many(xUploads),
 }));
 
 export const textSnippetsRelations = relations(textSnippets, ({ one }) => ({
@@ -542,6 +738,52 @@ export const renderedClipsRelations = relations(renderedClips, ({ one }) => ({
     references: [clips.id],
   }),
 }));
+
+export const youtubeUploadsRelations = relations(youtubeUploads, ({ one }) => ({
+  clip: one(clips, {
+    fields: [youtubeUploads.clipId],
+    references: [clips.id],
+  }),
+  createdBy: one(users, {
+    fields: [youtubeUploads.createdById],
+    references: [users.id],
+  }),
+}));
+
+export const instagramUploadsRelations = relations(instagramUploads, ({ one }) => ({
+  clip: one(clips, {
+    fields: [instagramUploads.clipId],
+    references: [clips.id],
+  }),
+  createdBy: one(users, {
+    fields: [instagramUploads.createdById],
+    references: [users.id],
+  }),
+}));
+
+export const tiktokUploadsRelations = relations(tiktokUploads, ({ one }) => ({
+  clip: one(clips, {
+    fields: [tiktokUploads.clipId],
+    references: [clips.id],
+  }),
+  createdBy: one(users, {
+    fields: [tiktokUploads.createdById],
+    references: [users.id],
+  }),
+}));
+
+export const xUploadsRelations = relations(xUploads, ({ one }) => ({
+  clip: one(clips, {
+    fields: [xUploads.clipId],
+    references: [clips.id],
+  }),
+  createdBy: one(users, {
+    fields: [xUploads.createdById],
+    references: [users.id],
+  }),
+}));
+
+export const uploadEventsRelations = relations(uploadEvents, () => ({}));
 
 export const oauthTokensRelations = relations(oauthTokens, ({ one }) => ({
   podcast: one(podcasts, {
@@ -574,6 +816,16 @@ export type MediaAsset = typeof mediaAssets.$inferSelect;
 export type NewMediaAsset = typeof mediaAssets.$inferInsert;
 export type RenderedClip = typeof renderedClips.$inferSelect;
 export type NewRenderedClip = typeof renderedClips.$inferInsert;
+export type YouTubeUpload = typeof youtubeUploads.$inferSelect;
+export type NewYouTubeUpload = typeof youtubeUploads.$inferInsert;
+export type InstagramUpload = typeof instagramUploads.$inferSelect;
+export type NewInstagramUpload = typeof instagramUploads.$inferInsert;
+export type TikTokUpload = typeof tiktokUploads.$inferSelect;
+export type NewTikTokUpload = typeof tiktokUploads.$inferInsert;
+export type XUpload = typeof xUploads.$inferSelect;
+export type NewXUpload = typeof xUploads.$inferInsert;
+export type UploadEvent = typeof uploadEvents.$inferSelect;
+export type NewUploadEvent = typeof uploadEvents.$inferInsert;
 export type OAuthToken = typeof oauthTokens.$inferSelect;
 export type NewOAuthToken = typeof oauthTokens.$inferInsert;
 export type UploadSession = typeof uploadSessions.$inferSelect;
