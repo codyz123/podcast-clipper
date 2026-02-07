@@ -95,9 +95,10 @@ describe("Error Handling", () => {
     expect(response.body.error).toBeDefined();
   });
 
-  it("should handle missing OPENAI_API_KEY", async () => {
+  it("should handle missing transcription API keys", async () => {
     delete process.env.OPENAI_API_KEY;
-    app = createTestApp(); // Recreate app without API key
+    delete process.env.ASSEMBLYAI_API_KEY;
+    app = createTestApp(); // Recreate app without API keys
 
     const audioBuffer = await readFile(join(FIXTURES_PATH, "short-5s.mp3"));
 
@@ -107,7 +108,7 @@ describe("Error Handling", () => {
       .attach("file", audioBuffer, "test.mp3");
 
     expect(response.status).toBe(500);
-    expect(response.body.error).toBe("OpenAI API key not configured on server");
+    expect(response.body.error).toBe("No transcription API key configured. Set ASSEMBLYAI_API_KEY or OPENAI_API_KEY.");
   });
 
   it("should provide actionable error messages", async () => {

@@ -22,7 +22,6 @@ import { generateId, cn } from "../../lib/utils";
 import { formatTimestamp, formatRelativeTime } from "../../lib/formats";
 import { authFetch } from "../../lib/api";
 
-interface TranscriptEditorProps {}
 
 interface ProgressState {
   stage: string;
