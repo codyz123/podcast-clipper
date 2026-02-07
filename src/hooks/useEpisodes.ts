@@ -39,9 +39,18 @@ export interface Transcript {
     end: number;
     confidence: number;
   }>;
+  segments?: Array<{
+    speakerLabel: string;
+    speakerId?: string;
+    startWordIndex: number;
+    endWordIndex: number;
+    startTime: number;
+    endTime: number;
+  }>;
   language?: string;
   name?: string;
   audioFingerprint?: string;
+  service?: string;
   createdAt: string;
 }
 
@@ -67,6 +76,14 @@ export interface Clip {
     overall: number;
     explanation: string;
   };
+  segments?: Array<{
+    speakerLabel: string;
+    speakerId?: string;
+    startWordIndex: number;
+    endWordIndex: number;
+    startTime: number;
+    endTime: number;
+  }>;
   isManual?: boolean;
   tracks?: unknown;
   captionStyle?: unknown;
@@ -310,9 +327,11 @@ export function useEpisodes() {
       transcript: {
         text: string;
         words: Transcript["words"];
+        segments?: Transcript["segments"];
         language?: string;
         name?: string;
         audioFingerprint?: string;
+        service?: string;
       }
     ): Promise<Transcript | null> => {
       if (!currentPodcastId) return null;
@@ -348,6 +367,72 @@ export function useEpisodes() {
       }
     },
     [currentPodcastId, currentEpisode]
+  );
+
+  // Save transcript segments (speaker labels)
+  const saveTranscriptSegments = useCallback(
+    async (
+      episodeId: string,
+      transcriptId: string,
+      segments: NonNullable<Transcript["segments"]>
+    ): Promise<boolean> => {
+      if (!currentPodcastId) return false;
+
+      try {
+        const res = await authFetch(
+          `${getApiBase()}/api/podcasts/${currentPodcastId}/episodes/${episodeId}/transcripts/${transcriptId}/segments`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ segments }),
+          }
+        );
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Failed to save transcript segments");
+        }
+
+        return true;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to save transcript segments");
+        return false;
+      }
+    },
+    [currentPodcastId]
+  );
+
+  // Update transcript content (words, text, segments) — for persisting word edits
+  const updateTranscript = useCallback(
+    async (
+      episodeId: string,
+      transcriptId: string,
+      data: { text: string; words: Transcript["words"]; segments?: Transcript["segments"] }
+    ): Promise<boolean> => {
+      if (!currentPodcastId) return false;
+
+      try {
+        const res = await authFetch(
+          `${getApiBase()}/api/podcasts/${currentPodcastId}/episodes/${episodeId}/transcripts/${transcriptId}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          }
+        );
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || "Failed to update transcript");
+        }
+
+        return true;
+      } catch (err) {
+        console.error("[useEpisodes] updateTranscript failed:", err);
+        return false;
+      }
+    },
+    [currentPodcastId]
   );
 
   // Save clips (bulk)
@@ -696,6 +781,8 @@ export function useEpisodes() {
     deleteEpisode,
     uploadAudio,
     saveTranscript,
+    saveTranscriptSegments,
+    updateTranscript,
     saveClips,
     clearCurrentEpisode,
     updateStageStatus,

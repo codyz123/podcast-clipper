@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   ImageIcon,
   Link2Icon,
@@ -6,14 +6,18 @@ import {
   TrashIcon,
   PersonIcon,
   EnvelopeClosedIcon,
+  Cross2Icon,
+  CameraIcon,
 } from "@radix-ui/react-icons";
 import { cn, debounce } from "../../lib/utils";
 import { useWorkspaceStore, PodcastMetadata } from "../../stores/workspaceStore";
 import { extractBrandColors, parseBrandColorsFromStorage } from "../../lib/colorExtractor";
 import { usePodcast } from "../../hooks/usePodcast";
+import { usePodcastPeople } from "../../hooks/usePodcastPeople";
 import { useAuthStore } from "../../stores/authStore";
 import { getApiBase } from "../../lib/api";
 import { ConfirmationDialog } from "../ui/ConfirmationDialog";
+import type { PodcastPerson } from "../../lib/types";
 
 // Categories based on Apple Podcasts categories
 const PODCAST_CATEGORIES = [
@@ -61,6 +65,13 @@ export const PodcastInfoPage: React.FC = () => {
 
   // Podcast data
   const { podcast, isOwner, updatePodcast, deletePodcast } = usePodcast();
+
+  // Podcast people (hosts & guests)
+  const { people, createPerson, updatePerson, deletePerson, uploadPhoto } = usePodcastPeople();
+  const [isAddingPerson, setIsAddingPerson] = useState(false);
+  const [newPersonName, setNewPersonName] = useState("");
+  const [newPersonRole, setNewPersonRole] = useState<"host" | "guest">("guest");
+  const [deletingPersonId, setDeletingPersonId] = useState<string | null>(null);
 
   // Danger zone state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -204,6 +215,25 @@ export const PodcastInfoPage: React.FC = () => {
       console.error("Failed to delete workspace:", err);
       setIsDeleting(false);
     }
+  };
+
+  const handleAddPerson = async () => {
+    if (!newPersonName.trim()) return;
+    await createPerson({ name: newPersonName.trim(), role: newPersonRole });
+    setNewPersonName("");
+    setNewPersonRole("guest");
+    setIsAddingPerson(false);
+  };
+
+  const handleDeletePerson = async (personId: string) => {
+    await deletePerson(personId);
+    setDeletingPersonId(null);
+  };
+
+  const handlePersonPhotoUpload = async (personId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    await uploadPhoto(personId, file);
   };
 
   return (
@@ -544,6 +574,115 @@ export const PodcastInfoPage: React.FC = () => {
             </div>
           </section>
 
+          {/* Hosts & Guests Section */}
+          <section>
+            <h2 className="mb-4 flex items-center gap-2 text-sm font-medium tracking-wider text-[hsl(var(--text-muted))] uppercase">
+              <PersonIcon className="h-4 w-4" />
+              Hosts & Guests
+            </h2>
+            <div className="rounded-xl border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface)/0.5)] p-5">
+              <p className="mb-4 text-sm text-[hsl(var(--text-muted))]">
+                Recurring hosts and guests for this podcast. These will appear as options when editing speakers in transcripts.
+              </p>
+
+              {/* People list */}
+              {people.length > 0 && (
+                <div className="mb-4 space-y-3">
+                  {people.map((person) => (
+                    <PersonCard
+                      key={person.id}
+                      person={person}
+                      onUpdate={updatePerson}
+                      onDelete={(id) => setDeletingPersonId(id)}
+                      onPhotoUpload={handlePersonPhotoUpload}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Add person form */}
+              {isAddingPerson ? (
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={newPersonName}
+                    onChange={(e) => setNewPersonName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleAddPerson();
+                      if (e.key === "Escape") setIsAddingPerson(false);
+                    }}
+                    placeholder="Name..."
+                    autoFocus
+                    className={cn(
+                      "flex-1 rounded-lg px-3 py-2",
+                      "bg-[hsl(var(--bg-base))]",
+                      "border border-[hsl(var(--border-subtle))]",
+                      "text-sm text-[hsl(var(--text))] placeholder:text-[hsl(var(--text-ghost))]",
+                      "focus:border-[hsl(var(--cyan))] focus:ring-1 focus:ring-[hsl(var(--cyan)/0.3)] focus:outline-none"
+                    )}
+                  />
+                  <select
+                    value={newPersonRole}
+                    onChange={(e) => setNewPersonRole(e.target.value as "host" | "guest")}
+                    className={cn(
+                      "rounded-lg px-3 py-2",
+                      "bg-[hsl(var(--bg-base))]",
+                      "border border-[hsl(var(--border-subtle))]",
+                      "text-sm text-[hsl(var(--text))]"
+                    )}
+                  >
+                    <option value="host">Host</option>
+                    <option value="guest">Guest</option>
+                  </select>
+                  <button
+                    onClick={handleAddPerson}
+                    disabled={!newPersonName.trim()}
+                    className={cn(
+                      "rounded-lg px-4 py-2 text-sm font-medium",
+                      "bg-[hsl(var(--cyan))] text-white",
+                      "hover:bg-[hsl(var(--cyan)/0.9)]",
+                      "disabled:opacity-50 disabled:cursor-not-allowed",
+                      "transition-colors"
+                    )}
+                  >
+                    Add
+                  </button>
+                  <button
+                    onClick={() => { setIsAddingPerson(false); setNewPersonName(""); }}
+                    className="rounded-lg p-2 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text))] transition-colors"
+                  >
+                    <Cross2Icon className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setIsAddingPerson(true)}
+                  className={cn(
+                    "inline-flex items-center gap-2 rounded-lg px-4 py-2",
+                    "bg-[hsl(var(--surface))] text-sm text-[hsl(var(--text))]",
+                    "border border-[hsl(var(--border-subtle))]",
+                    "hover:bg-[hsl(var(--surface-hover))]",
+                    "transition-colors"
+                  )}
+                >
+                  <PersonIcon className="h-4 w-4" />
+                  Add Person
+                </button>
+              )}
+            </div>
+          </section>
+
+          {/* Delete person confirmation */}
+          <ConfirmationDialog
+            isOpen={!!deletingPersonId}
+            onClose={() => setDeletingPersonId(null)}
+            onConfirm={() => deletingPersonId && handleDeletePerson(deletingPersonId)}
+            title="Remove Person?"
+            description="This will remove this person from your podcast's recurring people list. Speaker labels in existing transcripts will be preserved."
+            confirmText="Remove"
+            variant="danger"
+          />
+
           {/* Danger Zone */}
           {isOwner && (
             <section>
@@ -585,6 +724,115 @@ export const PodcastInfoPage: React.FC = () => {
         variant="danger"
         isLoading={isDeleting}
       />
+    </div>
+  );
+};
+
+// Inline person card component
+const PersonCard: React.FC<{
+  person: PodcastPerson;
+  onUpdate: (id: string, updates: Partial<PodcastPerson>) => Promise<PodcastPerson | null>;
+  onDelete: (id: string) => void;
+  onPhotoUpload: (id: string, e: React.ChangeEvent<HTMLInputElement>) => void;
+}> = ({ person, onUpdate, onDelete, onPhotoUpload }) => {
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState(person.name);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const initials = person.name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const saveName = () => {
+    if (nameValue.trim() && nameValue.trim() !== person.name) {
+      onUpdate(person.id, { name: nameValue.trim() });
+    }
+    setIsEditingName(false);
+  };
+
+  return (
+    <div className="flex items-center gap-3 rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-base)/0.5)] p-3">
+      {/* Avatar */}
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        className="group relative h-10 w-10 flex-shrink-0 overflow-hidden rounded-full bg-[hsl(var(--surface))] border border-[hsl(var(--border-subtle))]"
+        title="Upload photo"
+      >
+        {person.photoUrl ? (
+          <img src={person.photoUrl} alt={person.name} className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center text-xs font-medium text-[hsl(var(--text-muted))]">
+            {initials}
+          </span>
+        )}
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+          <CameraIcon className="h-4 w-4 text-white" />
+        </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={(e) => onPhotoUpload(person.id, e)}
+          className="hidden"
+        />
+      </button>
+
+      {/* Name */}
+      <div className="flex-1 min-w-0">
+        {isEditingName ? (
+          <input
+            type="text"
+            value={nameValue}
+            onChange={(e) => setNameValue(e.target.value)}
+            onBlur={saveName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveName();
+              if (e.key === "Escape") { setNameValue(person.name); setIsEditingName(false); }
+            }}
+            autoFocus
+            className={cn(
+              "w-full rounded px-2 py-1 text-sm",
+              "bg-[hsl(var(--bg-base))]",
+              "border border-[hsl(var(--cyan))]",
+              "text-[hsl(var(--text))]",
+              "focus:outline-none"
+            )}
+          />
+        ) : (
+          <button
+            onClick={() => setIsEditingName(true)}
+            className="truncate text-sm font-medium text-[hsl(var(--text))] hover:text-[hsl(var(--cyan))] transition-colors"
+          >
+            {person.name}
+          </button>
+        )}
+      </div>
+
+      {/* Role badge */}
+      <button
+        onClick={() => onUpdate(person.id, { role: person.role === "host" ? "guest" : "host" })}
+        className={cn(
+          "rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors",
+          person.role === "host"
+            ? "bg-[hsl(var(--cyan)/0.15)] text-[hsl(var(--cyan))]"
+            : "bg-[hsl(var(--surface))] text-[hsl(var(--text-muted))]"
+        )}
+        title="Click to toggle role"
+      >
+        {person.role === "host" ? "Host" : "Guest"}
+      </button>
+
+      {/* Delete */}
+      <button
+        onClick={() => onDelete(person.id)}
+        className="rounded p-1.5 text-[hsl(var(--text-ghost))] hover:text-[hsl(var(--error))] transition-colors"
+        title="Remove person"
+      >
+        <Cross2Icon className="h-3.5 w-3.5" />
+      </button>
     </div>
   );
 };

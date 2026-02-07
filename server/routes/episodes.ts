@@ -2,20 +2,15 @@ import { Router, Request, Response } from "express";
 import multer from "multer";
 import { eq, and, desc } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { projects, podcastMembers, transcripts, clips } from "../db/schema.js";
+import { projects, transcripts, clips } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
+import { getParam, verifyPodcastAccess } from "../middleware/podcast-access.js";
 import { uploadMediaFromPath, deleteMedia } from "../lib/media-storage.js";
 import { randomUUID } from "crypto";
 import { unlink } from "fs/promises";
 import { tmpdir } from "os";
 
 const router = Router();
-
-// Helper to extract string param
-function getParam(param: string | string[] | undefined): string {
-  if (Array.isArray(param)) return param[0] || "";
-  return param || "";
-}
 
 // Configure multer for large file uploads (5GB limit for podcast audio)
 // Uses disk storage to avoid memory issues with large files
@@ -26,31 +21,6 @@ const upload = multer({
   }),
   limits: { fileSize: 5 * 1024 * 1024 * 1024 }, // 5GB
 });
-
-// Middleware to verify podcast membership
-async function verifyPodcastAccess(req: Request, res: Response, next: () => void) {
-  const podcastId = getParam(req.params.podcastId);
-  const userId = req.user?.userId;
-
-  if (!userId) {
-    res.status(401).json({ error: "Authentication required" });
-    return;
-  }
-
-  const [membership] = await db
-    .select()
-    .from(podcastMembers)
-    .where(and(eq(podcastMembers.podcastId, podcastId), eq(podcastMembers.userId, userId)));
-
-  if (!membership) {
-    res.status(403).json({ error: "Access denied to this podcast" });
-    return;
-  }
-
-  // Attach membership to request for role checks if needed
-  req.podcastMembership = membership;
-  next();
-}
 
 // All routes require JWT auth
 router.use(jwtAuthMiddleware);
@@ -480,7 +450,7 @@ router.post(
       const podcastId = getParam(req.params.podcastId);
       const episodeId = getParam(req.params.episodeId);
       const userId = req.user!.userId;
-      const { text, words, language, name, audioFingerprint } = req.body;
+      const { text, words, segments, language, name, audioFingerprint, service } = req.body;
 
       // Verify episode exists
       const [episode] = await db
@@ -499,9 +469,11 @@ router.post(
           projectId: episodeId,
           text,
           words,
+          segments,
           language,
           name,
           audioFingerprint,
+          service,
           createdById: userId,
         })
         .returning();
@@ -509,6 +481,92 @@ router.post(
       res.json({ transcript });
     } catch (error) {
       console.error("Error saving transcript:", error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  }
+);
+
+// Update transcript segments (speaker labels)
+router.put(
+  "/:podcastId/episodes/:episodeId/transcripts/:transcriptId/segments",
+  verifyPodcastAccess,
+  async (req: Request, res: Response) => {
+    try {
+      const transcriptId = getParam(req.params.transcriptId);
+      const { segments } = req.body;
+
+      if (!Array.isArray(segments)) {
+        res.status(400).json({ error: "segments must be an array" });
+        return;
+      }
+
+      for (const seg of segments) {
+        if (
+          typeof seg.speakerLabel !== "string" ||
+          !Number.isFinite(seg.startWordIndex) ||
+          !Number.isFinite(seg.endWordIndex)
+        ) {
+          res.status(400).json({ error: "Invalid segment structure" });
+          return;
+        }
+      }
+
+      const [updated] = await db
+        .update(transcripts)
+        .set({ segments })
+        .where(eq(transcripts.id, transcriptId))
+        .returning();
+
+      if (!updated) {
+        res.status(404).json({ error: "Transcript not found" });
+        return;
+      }
+
+      res.json({ transcript: updated });
+    } catch (error) {
+      console.error("Error updating transcript segments:", error);
+      res.status(500).json({ error: (error as Error).message });
+    }
+  }
+);
+
+// Update transcript content (words, text, and optionally segments)
+router.put(
+  "/:podcastId/episodes/:episodeId/transcripts/:transcriptId",
+  verifyPodcastAccess,
+  async (req: Request, res: Response) => {
+    try {
+      const transcriptId = getParam(req.params.transcriptId);
+      const { text, words, segments } = req.body;
+
+      if (typeof text !== "string") {
+        res.status(400).json({ error: "text must be a string" });
+        return;
+      }
+      if (!Array.isArray(words)) {
+        res.status(400).json({ error: "words must be an array" });
+        return;
+      }
+
+      const updateData: Record<string, unknown> = { text, words };
+      if (segments !== undefined) {
+        updateData.segments = segments;
+      }
+
+      const [updated] = await db
+        .update(transcripts)
+        .set(updateData)
+        .where(eq(transcripts.id, transcriptId))
+        .returning();
+
+      if (!updated) {
+        res.status(404).json({ error: "Transcript not found" });
+        return;
+      }
+
+      res.json({ transcript: updated });
+    } catch (error) {
+      console.error("Error updating transcript:", error);
       res.status(500).json({ error: (error as Error).message });
     }
   }
@@ -554,6 +612,7 @@ router.post(
           subtitle: clipData.subtitle,
           tracks: clipData.tracks,
           captionStyle: clipData.captionStyle,
+          segments: clipData.segments,
           format: clipData.format,
           createdById: userId,
         })
@@ -609,6 +668,7 @@ router.put(
               clippabilityScore: clipData.clippabilityScore,
               tracks: clipData.tracks,
               captionStyle: clipData.captionStyle,
+              segments: clipData.segments,
               format: clipData.format,
               templateId: clipData.templateId,
               background: clipData.background,
@@ -636,6 +696,7 @@ router.put(
               subtitle: clipData.subtitle,
               tracks: clipData.tracks,
               captionStyle: clipData.captionStyle,
+              segments: clipData.segments,
               format: clipData.format,
               createdById: userId,
             })

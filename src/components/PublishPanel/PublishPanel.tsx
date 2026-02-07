@@ -457,15 +457,6 @@ export const PublishPanel: React.FC = () => {
   return (
     <div className="min-h-full">
       <div className="mx-auto max-w-5xl">
-        {/* Header */}
-        <div className="mb-8 sm:mb-10">
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
-            Publish
-          </h1>
-          <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
-            Create posts and publish to social platforms
-          </p>
-        </div>
 
         {/* Publishing Progress */}
         {isPublishing && (

@@ -49,15 +49,39 @@ export interface Guest {
   twitter?: string;
 }
 
+export interface SpeakerSegment {
+  speakerLabel: string;
+  speakerId?: string;
+  startWordIndex: number;
+  endWordIndex: number; // exclusive
+  startTime: number;
+  endTime: number;
+}
+
+export interface PodcastPerson {
+  id: string;
+  podcastId: string;
+  name: string;
+  role: "host" | "guest";
+  photoUrl?: string;
+  bio?: string;
+  website?: string;
+  twitter?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Transcript {
   id: string;
   projectId: string;
   audioFingerprint?: string; // Links transcript to specific audio file
   text: string;
   words: Word[];
+  segments?: SpeakerSegment[];
   language: string;
   createdAt: string;
   name?: string; // Optional user-given name for this transcript version
+  service?: string; // Transcription service used (e.g. "assemblyai", "openai-whisper")
 }
 
 export interface Word {
@@ -76,6 +100,7 @@ export interface Clip {
   transcript: string;
   words: Word[];
   clippabilityScore?: ClippabilityScore;
+  segments?: SpeakerSegment[];
   isManual: boolean; // true if user-selected, false if AI-suggested
   createdAt: string;
 
@@ -267,6 +292,9 @@ export interface AppSettings {
   // Anthropic API for AI text generation
   anthropicApiKey?: string;
 
+  // AssemblyAI API for transcription with speaker diarization
+  assemblyaiApiKey?: string;
+
   // Pexels API for B-roll search
   pexelsApiKey?: string;
 
@@ -278,6 +306,7 @@ export interface AppSettings {
   defaultFormats: VideoFormat[];
   defaultClipDuration: number; // seconds
   autoSaveInterval: number; // seconds
+  confidenceThreshold: number; // 0-1, words below this confidence are filtered (music/noise)
 }
 
 export interface OAuthCredentials {

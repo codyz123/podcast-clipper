@@ -9,6 +9,7 @@ import { projectsRouter } from "./routes/projects.js";
 import { authRouter } from "./routes/auth.js";
 import { podcastsRouter } from "./routes/podcasts.js";
 import { episodesRouter } from "./routes/episodes.js";
+import { podcastPeopleRouter } from "./routes/podcast-people.js";
 import { textSnippetsRouter } from "./routes/text-snippets.js";
 import { generateSnippetRouter } from "./routes/generate-snippet.js";
 import { uploadsRouter } from "./routes/uploads.js";
@@ -62,6 +63,9 @@ app.use("/api/podcasts", podcastsRouter);
 
 // Episodes routes - scoped to podcast (JWT auth handled internally)
 app.use("/api/podcasts", episodesRouter);
+
+// Podcast people routes - recurring hosts & guests (JWT auth handled internally)
+app.use("/api/podcasts", podcastPeopleRouter);
 
 // Multipart upload routes for large files (JWT auth handled internally)
 app.use("/api/podcasts", uploadsRouter);

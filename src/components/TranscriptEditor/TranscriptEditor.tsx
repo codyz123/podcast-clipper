@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo, useImperativeHandle } from "react";
+import { createPortal } from "react-dom";
 import {
   ReloadIcon,
   CheckIcon,
@@ -14,14 +15,14 @@ import { useProjectStore, getAudioBlob } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useAuthStore } from "../../stores/authStore";
 import { useEpisodes } from "../../hooks/useEpisodes";
-import { Transcript, Word } from "../../lib/types";
+import { usePodcastPeople } from "../../hooks/usePodcastPeople";
+import { SpeakerLineup } from "./SpeakerLineup";
+import { Transcript, Word, SpeakerSegment, PodcastPerson } from "../../lib/types";
 import { generateId, cn } from "../../lib/utils";
 import { formatTimestamp, formatRelativeTime } from "../../lib/formats";
 import { authFetch } from "../../lib/api";
 
-interface TranscriptEditorProps {
-  onComplete: () => void;
-}
+interface TranscriptEditorProps {}
 
 interface ProgressState {
   stage: string;
@@ -33,7 +34,269 @@ interface ProgressState {
 const TRANSCRIPTION_PROMPT =
   "This is a podcast conversation with natural speech. Transcribe only spoken words; ignore music, singing, and other non-speech audio. Do not include lyrics or music notation.";
 
-export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }) => {
+const SERVICE_LABELS: Record<string, string> = {
+  assemblyai: "AssemblyAI",
+  "openai-whisper": "Whisper",
+};
+
+function formatServiceName(service: string): string {
+  return SERVICE_LABELS[service] || service;
+}
+
+// --- Transcript version selector extracted to avoid re-rendering word spans on open/close ---
+
+interface TranscriptVersionSelectorProps {
+  transcripts: Transcript[];
+  activeTranscriptId: string;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+}
+
+const TranscriptVersionSelector = React.memo<TranscriptVersionSelectorProps>(
+  ({ transcripts, activeTranscriptId, onSelect, onDelete }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const ref = useRef<HTMLDivElement>(null);
+
+    const activeTranscript = transcripts.find((t) => t.id === activeTranscriptId);
+    const activeIndex = transcripts.findIndex((t) => t.id === activeTranscriptId);
+
+    useEffect(() => {
+      if (!isOpen) return;
+      const handleClickOutside = (e: MouseEvent) => {
+        if (ref.current && !ref.current.contains(e.target as Node)) {
+          setIsOpen(false);
+        }
+      };
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, [isOpen]);
+
+    if (!activeTranscript) return null;
+
+    return (
+      <div className="mb-4 border-b border-[hsl(var(--glass-border))] pb-4">
+        <div className="relative" ref={ref}>
+          <button
+            onClick={() => setIsOpen(!isOpen)}
+            className={cn(
+              "flex w-full items-center justify-between rounded-lg p-3",
+              "bg-[hsl(var(--surface))]",
+              "border border-[hsl(var(--glass-border))]",
+              "hover:bg-[hsl(var(--raised))]",
+              "transition-colors"
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-medium text-[hsl(var(--text))]">
+                Version {activeIndex + 1} of {transcripts.length}
+              </span>
+              <span className="text-xs text-[hsl(var(--text-muted))]">
+                · {formatRelativeTime(activeTranscript.createdAt)}
+                {activeTranscript.service && (
+                  <> · {formatServiceName(activeTranscript.service)}</>
+                )}
+              </span>
+            </div>
+            <ChevronDownIcon
+              className={cn(
+                "h-4 w-4 text-[hsl(var(--text-muted))] transition-transform",
+                isOpen && "rotate-180"
+              )}
+            />
+          </button>
+
+          {isOpen && (
+            <div
+              className={cn(
+                "absolute top-full right-0 left-0 z-10 mt-1",
+                "bg-[hsl(var(--raised))]",
+                "border border-[hsl(var(--glass-border))]",
+                "overflow-hidden rounded-lg shadow-lg"
+              )}
+            >
+              {transcripts.map((t, idx) => (
+                <div
+                  key={t.id}
+                  onClick={() => {
+                    onSelect(t.id);
+                    setIsOpen(false);
+                  }}
+                  className={cn(
+                    "flex cursor-pointer items-center justify-between p-3",
+                    "hover:bg-[hsl(var(--surface))]",
+                    t.id === activeTranscriptId && "bg-[hsl(185_50%_15%/0.3)]"
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-[hsl(var(--text))]">
+                        Version {idx + 1}
+                      </span>
+                      {t.id === activeTranscriptId && (
+                        <span
+                          className={cn(
+                            "rounded px-1.5 py-0.5 text-[10px] font-semibold",
+                            "bg-[hsl(var(--cyan))]",
+                            "text-[hsl(var(--bg))]"
+                          )}
+                        >
+                          ACTIVE
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-[hsl(var(--text-muted))]">
+                      {t.words.length.toLocaleString()} words ·{" "}
+                      {formatRelativeTime(t.createdAt)}
+                      {t.service && (
+                        <> · {formatServiceName(t.service)}</>
+                      )}
+                    </p>
+                  </div>
+                  {transcripts.length > 1 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (confirm("Delete this transcript version?")) {
+                          onDelete(t.id);
+                        }
+                      }}
+                      className={cn(
+                        "rounded-lg p-2",
+                        "hover:bg-[hsl(var(--error)/0.1)]",
+                        "text-[hsl(var(--text-muted))]",
+                        "hover:text-[hsl(var(--error))]"
+                      )}
+                    >
+                      <TrashIcon className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+);
+
+// --- Context menu extracted as its own component to avoid re-rendering the word spans ---
+
+interface ContextMenuData {
+  x: number;
+  y: number;
+  nearestIndex: number;
+  secondNearestIndex: number;
+  segmentIndex: number;
+  clickedBefore: boolean;
+  nearestWord: string;
+  leftWord: string;
+  rightWord: string;
+  isBetween: boolean;
+  canSplit: boolean;
+  canMerge: boolean;
+}
+
+interface ContextMenuHandle {
+  show: (data: ContextMenuData) => void;
+  hide: () => void;
+}
+
+interface ContextMenuProps {
+  onEdit: (nearestIndex: number) => void;
+  onRemove: (nearestIndex: number) => void;
+  onInsert: (nearestIndex: number, secondNearestIndex: number, clickedBefore: boolean) => void;
+  onSplit: (nearestIndex: number, segmentIndex: number) => void;
+  onMerge: (nearestIndex: number, segmentIndex: number) => void;
+}
+
+const TranscriptContextMenu = React.memo(
+  React.forwardRef<ContextMenuHandle, ContextMenuProps>(
+    ({ onEdit, onRemove, onInsert, onSplit, onMerge }, ref) => {
+      const [data, setData] = useState<ContextMenuData | null>(null);
+      const menuRef = useRef<HTMLDivElement>(null);
+
+      useImperativeHandle(ref, () => ({
+        show: (d) => setData(d),
+        hide: () => setData(null),
+      }));
+
+      useEffect(() => {
+        if (!data) return;
+        const handleClick = (e: MouseEvent) => {
+          if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+            setData(null);
+          }
+        };
+        document.addEventListener("mousedown", handleClick);
+        return () => document.removeEventListener("mousedown", handleClick);
+      }, [data]);
+
+      if (!data) return null;
+
+      return createPortal(
+        <div
+          ref={menuRef}
+          className={cn(
+            "fixed z-50 min-w-[200px]",
+            "rounded-lg border border-[hsl(var(--glass-border))]",
+            "bg-[hsl(var(--raised))] py-1 shadow-xl"
+          )}
+          style={{ left: data.x, top: data.y }}
+        >
+          <button
+            onClick={() => { onEdit(data.nearestIndex); setData(null); }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[hsl(var(--text))] hover:bg-[hsl(var(--surface))]"
+          >
+            Edit &ldquo;{data.nearestWord}&rdquo;
+          </button>
+          <button
+            onClick={() => { onRemove(data.nearestIndex); setData(null); }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[hsl(var(--error))] hover:bg-[hsl(var(--surface))]"
+          >
+            Remove &ldquo;{data.nearestWord}&rdquo;
+          </button>
+          <div className="my-1 border-t border-[hsl(var(--glass-border))]" />
+          <button
+            onClick={() => { onInsert(data.nearestIndex, data.secondNearestIndex, data.clickedBefore); setData(null); }}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[hsl(var(--text))] hover:bg-[hsl(var(--surface))]"
+          >
+            {data.isBetween
+              ? <>Add word between &ldquo;{data.leftWord}&rdquo; and &ldquo;{data.rightWord}&rdquo;</>
+              : data.clickedBefore
+                ? <>Add word before &ldquo;{data.nearestWord}&rdquo;</>
+                : <>Add word after &ldquo;{data.nearestWord}&rdquo;</>
+            }
+          </button>
+          {(data.canSplit || data.canMerge) && (
+            <>
+              <div className="my-1 border-t border-[hsl(var(--glass-border))]" />
+              {data.canSplit && (
+                <button
+                  onClick={() => { onSplit(data.nearestIndex, data.segmentIndex); setData(null); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[hsl(var(--text))] hover:bg-[hsl(var(--surface))]"
+                >
+                  Split speaker from &ldquo;{data.nearestWord}&rdquo;
+                </button>
+              )}
+              {data.canMerge && (
+                <button
+                  onClick={() => { onMerge(data.nearestIndex, data.segmentIndex); setData(null); }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[hsl(var(--text))] hover:bg-[hsl(var(--surface))]"
+                >
+                  Merge with next speaker from &ldquo;{data.nearestWord}&rdquo;
+                </button>
+              )}
+            </>
+          )}
+        </div>,
+        document.body
+      );
+    }
+  )
+);
+
+export const TranscriptEditor: React.FC<TranscriptEditorProps> = () => {
   const {
     currentProject,
     addTranscript,
@@ -41,10 +304,15 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     deleteTranscript,
     getActiveTranscript,
     updateTranscriptWord,
+    updateTranscriptSegments,
+    removeTranscriptWord,
+    insertTranscriptWord,
+    deleteSegmentWithWords,
   } = useProjectStore();
-  const { settings } = useSettingsStore();
+  const { settings, updateSettings } = useSettingsStore();
   const accessToken = useAuthStore((state) => state.accessToken);
-  const { saveTranscript } = useEpisodes();
+  const { saveTranscript, saveTranscriptSegments, updateTranscript } = useEpisodes();
+  const { people: podcastPeople, createPerson } = usePodcastPeople();
 
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [progressState, setProgressState] = useState<ProgressState>({
@@ -55,17 +323,36 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
   const [error, setError] = useState<string | null>(null);
   const [editingWordIndex, setEditingWordIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
-  const [showTranscriptSelector, setShowTranscriptSelector] = useState(false);
+
+  // Transcription guard - ref persists across renders to prevent concurrent requests
+  const transcribingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Audio playback state
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [activeWordIndex, setActiveWordIndex] = useState<number>(-1);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const wordRefs = useRef<(HTMLSpanElement | null)[]>([]);
   const activeWordIndexRef = useRef<number>(-1);
-  const lastTimeRef = useRef<number>(0);
+  const currentTimeDisplayRef = useRef<HTMLSpanElement>(null);
+  const wordsContainerRef = useRef<HTMLDivElement>(null);
+
+  // Speaker editing state
+  const [editingSpeakerIdx, setEditingSpeakerIdx] = useState<number | null>(null);
+  const [confirmDeleteSegIdx, setConfirmDeleteSegIdx] = useState<number | null>(null);
+  const confirmDeleteRef = useRef<HTMLDivElement>(null);
+  const [speakerNameInput, setSpeakerNameInput] = useState("");
+  const [applyToAllSpeakers, setApplyToAllSpeakers] = useState(true);
+
+  // Context menu ref (extracted component manages its own state)
+  const contextMenuApiRef = useRef<ContextMenuHandle>(null);
+
+  // Ref for click-outside dismissal
+  const speakerPopoverRef = useRef<HTMLDivElement>(null);
+
+  // --- Debounced backend sync for transcript word edits ---
+  // Tracks the text at time of last backend sync to avoid saving on initial load
+  const lastSyncedTextRef = useRef<string | null>(null);
 
   // Get active transcript (handles both legacy and new format)
   const activeTranscript = getActiveTranscript();
@@ -117,6 +404,36 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
 
     loadAudio();
   }, [currentProject?.id, currentProject?.audioPath]);
+
+  // Click-outside handler for speaker popover
+  useEffect(() => {
+    if (editingSpeakerIdx === null) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        speakerPopoverRef.current &&
+        !speakerPopoverRef.current.contains(e.target as Node)
+      ) {
+        setEditingSpeakerIdx(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [editingSpeakerIdx]);
+
+  // Click-outside handler for delete confirmation popover
+  useEffect(() => {
+    if (confirmDeleteSegIdx === null) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        confirmDeleteRef.current &&
+        !confirmDeleteRef.current.contains(e.target as Node)
+      ) {
+        setConfirmDeleteSegIdx(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [confirmDeleteSegIdx]);
 
   // Find active word based on current playback time using binary search
   // Returns the active word, accounting for duplicate start times and missing end timestamps.
@@ -173,6 +490,25 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
         }
       }
 
+      // Gap handling: for short gaps between words, use midpoint advancement
+      // (smooth handoff). For long silences (>1s), drop the highlight entirely.
+      const currentEnd = getEffectiveEnd(result);
+      if (time > currentEnd) {
+        if (result + 1 < words.length) {
+          const nextStart = words[result + 1].start;
+          const gap = nextStart - currentEnd;
+          if (gap > 1) {
+            // Long silence — no highlight until the next word starts
+            return -1;
+          }
+          // Short gap — midpoint advancement for smooth feel
+          const midpoint = (currentEnd + nextStart) / 2;
+          return time >= midpoint ? result + 1 : result;
+        }
+        // Past the last word's end — no highlight
+        return -1;
+      }
+
       return result;
     },
     [timedWords]
@@ -189,22 +525,37 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     const updateTime = () => {
       if (audio && isPlayingLocal) {
         const time = audio.currentTime;
-        setCurrentTime(time);
+
+        // Update time display directly (no React re-render)
+        if (currentTimeDisplayRef.current) {
+          currentTimeDisplayRef.current.textContent = formatTimestamp(time);
+        }
+
         const newActiveIndex = findActiveWord(time);
         const prevIndex = activeWordIndexRef.current;
-        const timeJump = Math.abs(time - lastTimeRef.current) > 0.75;
 
-        let nextIndex = newActiveIndex;
-        if (!timeJump && prevIndex >= 0 && newActiveIndex > prevIndex + 1) {
-          nextIndex = prevIndex + 1;
+        if (newActiveIndex !== prevIndex) {
+          // Direct DOM manipulation — toggle data-active attribute
+          const prevEl = wordRefs.current[prevIndex];
+          const nextEl = wordRefs.current[newActiveIndex];
+          if (prevEl) prevEl.removeAttribute("data-active");
+          if (nextEl) {
+            nextEl.setAttribute("data-active", "");
+            // Auto-scroll within transcript container only (not the page)
+            const container = wordsContainerRef.current;
+            if (container) {
+              const elTop = nextEl.offsetTop - container.offsetTop;
+              const elBottom = elTop + nextEl.offsetHeight;
+              const viewTop = container.scrollTop;
+              const viewBottom = viewTop + container.clientHeight;
+              if (elTop < viewTop + 40 || elBottom > viewBottom - 40) {
+                container.scrollTo({ top: elTop - container.clientHeight / 2, behavior: "smooth" });
+              }
+            }
+          }
+          activeWordIndexRef.current = newActiveIndex;
         }
 
-        if (nextIndex !== prevIndex) {
-          setActiveWordIndex(nextIndex);
-          activeWordIndexRef.current = nextIndex;
-        }
-
-        lastTimeRef.current = time;
         animationFrameId = requestAnimationFrame(updateTime);
       }
     };
@@ -212,7 +563,7 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     const handlePlay = () => {
       setIsPlaying(true);
       isPlayingLocal = true;
-      lastTimeRef.current = audio.currentTime;
+
       animationFrameId = requestAnimationFrame(updateTime);
     };
 
@@ -225,7 +576,9 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     const handleEnded = () => {
       setIsPlaying(false);
       isPlayingLocal = false;
-      setActiveWordIndex(-1);
+      // Clear highlight via DOM
+      const prevEl = wordRefs.current[activeWordIndexRef.current];
+      if (prevEl) prevEl.removeAttribute("data-active");
       activeWordIndexRef.current = -1;
       cancelAnimationFrame(animationFrameId);
     };
@@ -233,11 +586,16 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     // Also update on seek (when clicking words)
     const handleSeeked = () => {
       const time = audio.currentTime;
-      setCurrentTime(time);
+      if (currentTimeDisplayRef.current) {
+        currentTimeDisplayRef.current.textContent = formatTimestamp(time);
+      }
       const nextIndex = findActiveWord(time);
-      setActiveWordIndex(nextIndex);
+      // Update highlight via DOM
+      const prevEl = wordRefs.current[activeWordIndexRef.current];
+      const nextEl = wordRefs.current[nextIndex];
+      if (prevEl) prevEl.removeAttribute("data-active");
+      if (nextEl) nextEl.setAttribute("data-active", "");
       activeWordIndexRef.current = nextIndex;
-      lastTimeRef.current = time;
     };
 
     audio.addEventListener("play", handlePlay);
@@ -254,15 +612,59 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     };
   }, [findActiveWord, audioUrl]);
 
-  // Auto-scroll to keep active word visible
+  // --- Debounced backend sync: save transcript word edits to server ---
+  // Reset sync ref when switching transcripts so initial text isn't treated as a change
   useEffect(() => {
-    if (activeWordIndex >= 0 && wordRefs.current[activeWordIndex]) {
-      wordRefs.current[activeWordIndex]?.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-      });
+    lastSyncedTextRef.current = null;
+  }, [activeTranscript?.id]);
+
+  useEffect(() => {
+    if (!activeTranscript || !currentProject) return;
+
+    // On first render or transcript switch, record current text — don't save
+    if (lastSyncedTextRef.current === null) {
+      lastSyncedTextRef.current = activeTranscript.text;
+      return;
     }
-  }, [activeWordIndex]);
+
+    // If text hasn't changed from last sync, nothing to do
+    if (activeTranscript.text === lastSyncedTextRef.current) return;
+
+    // Debounce: save 2 seconds after last change
+    const timer = setTimeout(() => {
+      updateTranscript(currentProject.id, activeTranscript.id, {
+        text: activeTranscript.text,
+        words: activeTranscript.words,
+        segments: activeTranscript.segments,
+      }).then((ok) => {
+        if (ok) lastSyncedTextRef.current = activeTranscript.text;
+      });
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [activeTranscript?.text, activeTranscript?.id, currentProject?.id, updateTranscript]);
+
+  // Flush pending transcript save on unmount (e.g., navigating away)
+  useEffect(() => {
+    return () => {
+      const state = useProjectStore.getState();
+      const transcript = state.getActiveTranscript?.();
+      const project = state.currentProject;
+      if (
+        transcript &&
+        project &&
+        lastSyncedTextRef.current !== null &&
+        transcript.text !== lastSyncedTextRef.current
+      ) {
+        // Fire-and-forget — component is unmounting
+        updateTranscript(project.id, transcript.id, {
+          text: transcript.text,
+          words: transcript.words,
+          segments: transcript.segments,
+        });
+      }
+    };
+  }, [updateTranscript]);
 
   // Play/pause toggle
   const togglePlayback = () => {
@@ -281,7 +683,11 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
 
     const word = timedWords[index];
     audioRef.current.currentTime = word.start;
-    setActiveWordIndex(index);
+    // Update highlight via DOM
+    const prevEl = wordRefs.current[activeWordIndexRef.current];
+    const nextEl = wordRefs.current[index];
+    if (prevEl) prevEl.removeAttribute("data-active");
+    if (nextEl) nextEl.setAttribute("data-active", "");
     activeWordIndexRef.current = index;
 
     // If not playing, start playback
@@ -311,37 +717,101 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     return false;
   };
 
-  const buildTranscriptWords = (rawWords: any[], fallbackText?: string): Word[] => {
+  const buildTranscriptWords = (
+    rawWords: any[],
+    fallbackText?: string
+  ): { words: Word[]; indexMap: number[] } => {
     const mapped =
       rawWords?.map((w: any) => ({
         text: w.word,
         start: w.start,
         end: w.end,
-        confidence: w.probability ?? 1,
+        confidence: w.confidence ?? w.probability ?? 1,
       })) || [];
 
-    let filtered = mapped.filter((w) => !shouldDropWord(w.text));
+    // Build index mapping: indexMap[oldIndex] = newIndex (or -1 if dropped)
+    const indexMap: number[] = [];
+    let newIdx = 0;
+    const filtered: Word[] = [];
+
+    for (let i = 0; i < mapped.length; i++) {
+      if (!shouldDropWord(mapped[i].text)) {
+        indexMap.push(newIdx);
+        filtered.push(mapped[i]);
+        newIdx++;
+      } else {
+        indexMap.push(-1);
+      }
+    }
 
     if (filtered.length === 0 && fallbackText) {
       const textWords = fallbackText.split(/\s+/).filter((word) => !shouldDropWord(word));
       const duration = currentProject?.audioDuration || 60;
       const avgWordDuration = textWords.length > 0 ? duration / textWords.length : 0.2;
 
-      filtered = textWords.map((word: string, i: number) => ({
-        text: word,
-        start: i * avgWordDuration,
-        end: (i + 1) * avgWordDuration,
-        confidence: 0.8,
-      }));
+      return {
+        words: textWords.map((word: string, i: number) => ({
+          text: word,
+          start: i * avgWordDuration,
+          end: (i + 1) * avgWordDuration,
+          confidence: 0.8,
+        })),
+        indexMap: [], // No meaningful mapping for fallback words
+      };
     }
 
-    return filtered;
+    return { words: filtered, indexMap };
+  };
+
+  /** Remap segment indices when words have been filtered */
+  const remapSegments = (
+    segments: SpeakerSegment[],
+    indexMap: number[],
+    filteredWordCount: number
+  ): SpeakerSegment[] => {
+    if (indexMap.length === 0 || segments.length === 0) return segments;
+
+    return segments
+      .map((seg) => {
+        // Find the new start index (first non-dropped word at or after original start)
+        let newStart = -1;
+        for (let i = seg.startWordIndex; i < indexMap.length && i < seg.endWordIndex; i++) {
+          if (indexMap[i] !== -1) {
+            newStart = indexMap[i];
+            break;
+          }
+        }
+
+        // Find the new end index (last non-dropped word before original end, + 1)
+        let newEnd = -1;
+        for (let i = Math.min(seg.endWordIndex - 1, indexMap.length - 1); i >= seg.startWordIndex; i--) {
+          if (indexMap[i] !== -1) {
+            newEnd = indexMap[i] + 1;
+            break;
+          }
+        }
+
+        // Skip segment if all its words were dropped
+        if (newStart === -1 || newEnd === -1 || newStart >= newEnd) return null;
+
+        return {
+          ...seg,
+          startWordIndex: newStart,
+          endWordIndex: Math.min(newEnd, filteredWordCount),
+        };
+      })
+      .filter((seg): seg is SpeakerSegment => seg !== null);
   };
 
   // Check if backend is configured
   const useBackend = !!settings.backendUrl;
 
   const startTranscription = async () => {
+    // Prevent concurrent transcription requests
+    if (transcribingRef.current) {
+      return;
+    }
+
     if (!currentProject?.id) {
       setError("No episode selected");
       return;
@@ -369,8 +839,13 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
       }
     }
 
+    transcribingRef.current = true;
     setIsTranscribing(true);
     setError(null);
+
+    // Create AbortController for this request
+    abortControllerRef.current = new AbortController();
+
     setProgressState({
       stage: "preparing",
       progress: 2,
@@ -450,11 +925,15 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
         if (settings.openaiApiKey) {
           headers.set("X-OpenAI-Key", settings.openaiApiKey);
         }
+        if (settings.assemblyaiApiKey) {
+          headers.set("X-AssemblyAI-Key", settings.assemblyaiApiKey);
+        }
 
         const response = await authFetch(`${settings.backendUrl}/api/transcribe`, {
           method: "POST",
           headers,
           body: formData,
+          signal: abortControllerRef.current?.signal,
         });
 
         if (!response.ok) {
@@ -518,12 +997,18 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
 
         // Process the response
         const rawWords = transcriptResponse.words || [];
-        const words: Word[] = buildTranscriptWords(rawWords, transcriptResponse.text);
+        const { words, indexMap } = buildTranscriptWords(rawWords, transcriptResponse.text);
         const hadFiltering = Array.isArray(rawWords) && words.length < rawWords.length;
         const transcriptText =
           hadFiltering || !transcriptResponse.text
             ? words.map((w) => w.text).join(" ")
             : transcriptResponse.text;
+
+        // Include segments from diarization (AssemblyAI), remapping indices if words were filtered
+        const rawSegments: SpeakerSegment[] = transcriptResponse.segments || [];
+        const segments = hadFiltering
+          ? remapSegments(rawSegments, indexMap, words.length)
+          : rawSegments;
 
         const transcript: Transcript = {
           id: generateId(),
@@ -531,8 +1016,10 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
           audioFingerprint: currentProject.audioFingerprint,
           text: transcriptText,
           words,
+          segments: segments.length > 0 ? segments : undefined,
           language: transcriptResponse.language || "en",
           createdAt: new Date().toISOString(),
+          service: transcriptResponse.service || "assemblyai",
         };
 
         addTranscript(transcript);
@@ -541,16 +1028,18 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
         saveTranscript(currentProject.id, {
           text: transcript.text,
           words: transcript.words,
+          segments: transcript.segments,
           language: transcript.language,
           name: transcript.name,
           audioFingerprint: transcript.audioFingerprint,
+          service: transcript.service,
         }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
 
         setProgressState({
           stage: "complete",
           progress: 100,
           message: "Transcription complete",
-          detail: `${words.length.toLocaleString()} words`,
+          detail: `${words.length.toLocaleString()} words${segments.length > 0 ? `, ${new Set(segments.map((s: SpeakerSegment) => s.speakerLabel)).size} speakers` : ""}`,
         });
       } else {
         // Direct OpenAI call (legacy mode - no streaming)
@@ -590,7 +1079,7 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
         const transcriptResponse = await res.json();
 
         const rawWords = transcriptResponse.words || [];
-        const words: Word[] = buildTranscriptWords(rawWords, transcriptResponse.text);
+        const { words } = buildTranscriptWords(rawWords, transcriptResponse.text);
         const hadFiltering = Array.isArray(rawWords) && words.length < rawWords.length;
         const transcriptText =
           hadFiltering || !transcriptResponse.text
@@ -605,17 +1094,19 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
           words,
           language: transcriptResponse.language || "en",
           createdAt: new Date().toISOString(),
+          service: "openai-whisper",
         };
 
         addTranscript(transcript);
 
-        // Sync to backend
+        // Sync to backend (direct OpenAI mode — no segments)
         saveTranscript(currentProject.id, {
           text: transcript.text,
           words: transcript.words,
           language: transcript.language,
           name: transcript.name,
           audioFingerprint: transcript.audioFingerprint,
+          service: transcript.service,
         }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
 
         setProgressState({
@@ -667,12 +1158,15 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
         }
       }
     } finally {
+      transcribingRef.current = false;
+      abortControllerRef.current = null;
       setIsTranscribing(false);
     }
   };
 
   const handleWordClick = (index: number, e: React.MouseEvent) => {
     if (!activeTranscript?.words[index]) return;
+    contextMenuApiRef.current?.hide();
 
     // If holding Alt/Option key, edit the word instead of seeking
     if (e.altKey) {
@@ -685,8 +1179,14 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
   };
 
   const handleWordSave = () => {
-    if (editingWordIndex !== null && editValue.trim()) {
-      updateTranscriptWord(editingWordIndex, editValue.trim());
+    if (editingWordIndex !== null) {
+      const trimmed = editValue.trim();
+      if (trimmed) {
+        updateTranscriptWord(editingWordIndex, trimmed);
+      } else if (activeTranscript?.words[editingWordIndex]?.text === "") {
+        // Remove empty placeholder word (from cancelled insert)
+        removeTranscriptWord(editingWordIndex);
+      }
     }
     setEditingWordIndex(null);
     setEditValue("");
@@ -696,10 +1196,265 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
     if (e.key === "Enter") {
       handleWordSave();
     } else if (e.key === "Escape") {
+      // If editing an empty placeholder (from insert), remove it
+      if (
+        editingWordIndex !== null &&
+        activeTranscript?.words[editingWordIndex]?.text === ""
+      ) {
+        removeTranscriptWord(editingWordIndex);
+      }
       setEditingWordIndex(null);
       setEditValue("");
     }
   };
+
+  // Handle speaker label change
+  const handleSpeakerChange = useCallback(
+    (segmentIndex: number, label: string, personId?: string, applyToAll?: boolean) => {
+      if (!activeTranscript?.segments || !currentProject) return;
+      const oldLabel = activeTranscript.segments[segmentIndex].speakerLabel;
+      const newSegments = activeTranscript.segments.map((seg, i) => {
+        if (i === segmentIndex || (applyToAll && seg.speakerLabel === oldLabel)) {
+          return { ...seg, speakerLabel: label, speakerId: personId };
+        }
+        return seg;
+      });
+      updateTranscriptSegments(newSegments);
+      // Persist to backend
+      saveTranscriptSegments(currentProject.id, activeTranscript.id, newSegments).catch((err) =>
+        console.error("[TranscriptEditor] Failed to save segments:", err)
+      );
+    },
+    [activeTranscript, currentProject, updateTranscriptSegments, saveTranscriptSegments]
+  );
+
+  // Handle linking a speaker to a recurring person
+  const handleLinkPerson = useCallback(
+    (segmentIndex: number, person: PodcastPerson) => {
+      handleSpeakerChange(segmentIndex, person.name, person.id, applyToAllSpeakers);
+      setEditingSpeakerIdx(null);
+    },
+    [handleSpeakerChange, applyToAllSpeakers]
+  );
+
+  // Handle saving speaker name edit
+  const handleSpeakerSave = useCallback(() => {
+    if (editingSpeakerIdx !== null && speakerNameInput.trim()) {
+      handleSpeakerChange(editingSpeakerIdx, speakerNameInput.trim(), undefined, applyToAllSpeakers);
+    }
+    setEditingSpeakerIdx(null);
+    setSpeakerNameInput("");
+  }, [editingSpeakerIdx, speakerNameInput, applyToAllSpeakers, handleSpeakerChange]);
+
+  // Unique speakers for lineup
+  const speakers = useMemo(() => {
+    if (!activeTranscript?.segments) return [];
+    const seen = new Map<string, { label: string; speakerId?: string }>();
+    for (const seg of activeTranscript.segments) {
+      if (!seen.has(seg.speakerLabel)) {
+        seen.set(seg.speakerLabel, {
+          label: seg.speakerLabel,
+          speakerId: seg.speakerId,
+        });
+      }
+    }
+    return Array.from(seen.values());
+  }, [activeTranscript?.segments]);
+
+  // Handle speaker rename from lineup (delegates to existing handleSpeakerChange)
+  const handleLineupRename = useCallback(
+    (oldLabel: string, newLabel: string, personId?: string) => {
+      if (!activeTranscript?.segments) return;
+      const segIdx = activeTranscript.segments.findIndex((s) => s.speakerLabel === oldLabel);
+      if (segIdx >= 0) {
+        handleSpeakerChange(segIdx, newLabel, personId, true);
+      }
+    },
+    [activeTranscript?.segments, handleSpeakerChange]
+  );
+
+  // Context menu: find nearest word via data attribute (O(1) instead of O(n))
+  // Shows the extracted TranscriptContextMenu component (no parent re-render)
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      if (!activeTranscript?.words.length) return;
+
+      // Fast path: check if right-clicked directly on a word span
+      let nearestIndex = -1;
+      const target = (e.target as HTMLElement).closest("[data-word-index]") as HTMLElement | null;
+
+      if (target) {
+        nearestIndex = parseInt(target.getAttribute("data-word-index")!, 10);
+      } else {
+        // Probe nearby points for clicks in gaps between words
+        for (const [dx, dy] of [[-12, 0], [12, 0], [0, -8], [0, 8], [-24, 0], [24, 0]]) {
+          const el = document.elementFromPoint(e.clientX + dx, e.clientY + dy);
+          const wordEl = el && (el as HTMLElement).closest("[data-word-index]") as HTMLElement | null;
+          if (wordEl) {
+            nearestIndex = parseInt(wordEl.getAttribute("data-word-index")!, 10);
+            break;
+          }
+        }
+      }
+
+      if (nearestIndex === -1 || nearestIndex >= activeTranscript.words.length) return;
+
+      // Determine adjacent word for "add between" based on click side
+      const el = wordRefs.current[nearestIndex];
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const clickedBefore = e.clientX < centerX;
+
+      // Find which segment this word belongs to
+      let segmentIndex = -1;
+      let segStart = 0;
+      let segEnd = activeTranscript.words.length;
+      if (activeTranscript.segments) {
+        segmentIndex = activeTranscript.segments.findIndex(
+          (seg) => nearestIndex >= seg.startWordIndex && nearestIndex < seg.endWordIndex
+        );
+        if (segmentIndex >= 0) {
+          segStart = activeTranscript.segments[segmentIndex].startWordIndex;
+          segEnd = activeTranscript.segments[segmentIndex].endWordIndex;
+        }
+      }
+
+      // Scope secondIndex to segment boundaries
+      let secondIndex = nearestIndex;
+      if (clickedBefore && nearestIndex > segStart) {
+        secondIndex = nearestIndex - 1;
+      } else if (!clickedBefore && nearestIndex < segEnd - 1) {
+        secondIndex = nearestIndex + 1;
+      }
+
+      // Pre-compute display data for the context menu
+      const isBetween = nearestIndex !== secondIndex;
+      const leftIdx = Math.min(nearestIndex, secondIndex);
+      const rightIdx = Math.max(nearestIndex, secondIndex);
+      const seg = segmentIndex >= 0 ? activeTranscript.segments?.[segmentIndex] : undefined;
+
+      contextMenuApiRef.current?.show({
+        x: e.clientX,
+        y: e.clientY,
+        nearestIndex,
+        secondNearestIndex: secondIndex,
+        segmentIndex,
+        clickedBefore,
+        nearestWord: activeTranscript.words[nearestIndex]?.text || "",
+        leftWord: activeTranscript.words[leftIdx]?.text || "",
+        rightWord: activeTranscript.words[rightIdx]?.text || "",
+        isBetween,
+        canSplit: !!(seg && nearestIndex > seg.startWordIndex),
+        canMerge: !!(seg && segmentIndex < (activeTranscript.segments?.length ?? 0) - 1),
+      });
+    },
+    [activeTranscript?.words, activeTranscript?.segments]
+  );
+
+  // Context menu action handlers (called by TranscriptContextMenu with data params)
+  const handleMenuEdit = useCallback(
+    (nearestIndex: number) => {
+      if (!activeTranscript) return;
+      setEditingWordIndex(nearestIndex);
+      setEditValue(activeTranscript.words[nearestIndex]?.text || "");
+    },
+    [activeTranscript]
+  );
+
+  const handleMenuRemove = useCallback(
+    (nearestIndex: number) => {
+      removeTranscriptWord(nearestIndex);
+    },
+    [removeTranscriptWord]
+  );
+
+  const handleMenuInsert = useCallback(
+    (nearestIndex: number, secondNearestIndex: number, clickedBefore: boolean) => {
+      let insertAfterIdx: number;
+      if (nearestIndex === secondNearestIndex) {
+        insertAfterIdx = clickedBefore ? nearestIndex - 1 : nearestIndex;
+      } else {
+        insertAfterIdx = Math.min(nearestIndex, secondNearestIndex);
+      }
+      insertTranscriptWord(insertAfterIdx, "");
+      setEditingWordIndex(insertAfterIdx + 1);
+      setEditValue("");
+    },
+    [insertTranscriptWord]
+  );
+
+  const handleMenuSplit = useCallback(
+    (nearestIndex: number, segmentIndex: number) => {
+      if (!activeTranscript?.segments || !currentProject) return;
+      const seg = activeTranscript.segments[segmentIndex];
+      if (nearestIndex <= seg.startWordIndex) return;
+
+      const existingNumbers = activeTranscript.segments.map((s) => {
+        const match = s.speakerLabel.match(/^Speaker (\d+)$/);
+        return match ? parseInt(match[1], 10) : 0;
+      });
+      const nextNumber = Math.max(0, ...existingNumbers) + 1;
+
+      const newSegments = [...activeTranscript.segments];
+      newSegments[segmentIndex] = {
+        ...seg,
+        endWordIndex: nearestIndex,
+        endTime: activeTranscript.words[nearestIndex - 1]?.end ?? seg.endTime,
+      };
+      newSegments.splice(segmentIndex + 1, 0, {
+        speakerLabel: `Speaker ${nextNumber}`,
+        startWordIndex: nearestIndex,
+        endWordIndex: seg.endWordIndex,
+        startTime: activeTranscript.words[nearestIndex]?.start ?? seg.startTime,
+        endTime: seg.endTime,
+      });
+
+      updateTranscriptSegments(newSegments);
+      saveTranscriptSegments(currentProject.id, activeTranscript.id, newSegments).catch((err) =>
+        console.error("[TranscriptEditor] Failed to save segments:", err)
+      );
+    },
+    [activeTranscript, currentProject, updateTranscriptSegments, saveTranscriptSegments]
+  );
+
+  const handleMenuMerge = useCallback(
+    (nearestIndex: number, segmentIndex: number) => {
+      if (!activeTranscript?.segments || !currentProject) return;
+      if (segmentIndex >= activeTranscript.segments.length - 1) return;
+
+      const currentSeg = activeTranscript.segments[segmentIndex];
+      const nextSeg = activeTranscript.segments[segmentIndex + 1];
+      const newSegments = [...activeTranscript.segments];
+
+      if (nearestIndex <= currentSeg.startWordIndex) {
+        newSegments[segmentIndex + 1] = {
+          ...nextSeg,
+          startWordIndex: currentSeg.startWordIndex,
+          startTime: currentSeg.startTime,
+        };
+        newSegments.splice(segmentIndex, 1);
+      } else {
+        newSegments[segmentIndex] = {
+          ...currentSeg,
+          endWordIndex: nearestIndex,
+          endTime: activeTranscript.words[nearestIndex - 1]?.end ?? currentSeg.endTime,
+        };
+        newSegments[segmentIndex + 1] = {
+          ...nextSeg,
+          startWordIndex: nearestIndex,
+          startTime: activeTranscript.words[nearestIndex]?.start ?? nextSeg.startTime,
+        };
+      }
+
+      updateTranscriptSegments(newSegments);
+      saveTranscriptSegments(currentProject.id, activeTranscript.id, newSegments).catch((err) =>
+        console.error("[TranscriptEditor] Failed to save segments:", err)
+      );
+    },
+    [activeTranscript, currentProject, updateTranscriptSegments, saveTranscriptSegments]
+  );
 
   // Stage icons and colors
   const stageConfig: Record<string, { icon: string; color: string }> = {
@@ -723,17 +1478,6 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
   return (
     <div className="min-h-full">
       <div className="mx-auto max-w-3xl">
-        {/* Header */}
-        <div className="mb-8 sm:mb-10">
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
-            Transcribe Audio
-          </h1>
-          <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
-            {hasTranscript
-              ? "Review and edit. Click any word to make changes."
-              : "Generate word-level transcript using OpenAI Whisper"}
-          </p>
-        </div>
 
         {/* Transcription Controls */}
         {!hasTranscript && (
@@ -831,7 +1575,9 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
                   Ready to transcribe
                 </h3>
                 <p className="mx-auto mb-5 max-w-xs text-sm text-[hsl(var(--text-subtle))]">
-                  Using OpenAI Whisper for accurate word-level timestamps
+                  {settings.assemblyaiApiKey || process.env.ASSEMBLYAI_API_KEY
+                    ? "Using AssemblyAI with speaker diarization"
+                    : "Using OpenAI Whisper for accurate word-level timestamps"}
                 </p>
                 <Button glow>Start Transcription</Button>
 
@@ -859,108 +1605,13 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
               {audioUrl && <audio ref={audioRef} src={audioUrl} preload="metadata" />}
 
               {/* Transcript Version Selector */}
-              {hasMultipleTranscripts && (
-                <div className="mb-4 border-b border-[hsl(var(--glass-border))] pb-4">
-                  <div className="relative">
-                    <button
-                      onClick={() => setShowTranscriptSelector(!showTranscriptSelector)}
-                      className={cn(
-                        "flex w-full items-center justify-between rounded-lg p-3",
-                        "bg-[hsl(var(--surface))]",
-                        "border border-[hsl(var(--glass-border))]",
-                        "hover:bg-[hsl(var(--raised))]",
-                        "transition-colors"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-[hsl(var(--text))]">
-                          Version {transcripts.findIndex((t) => t.id === activeTranscript.id) + 1}{" "}
-                          of {transcripts.length}
-                        </span>
-                        <span className="text-xs text-[hsl(var(--text-muted))]">
-                          · {formatRelativeTime(activeTranscript.createdAt)}
-                        </span>
-                      </div>
-                      <ChevronDownIcon
-                        className={cn(
-                          "h-4 w-4 text-[hsl(var(--text-muted))] transition-transform",
-                          showTranscriptSelector && "rotate-180"
-                        )}
-                      />
-                    </button>
-
-                    {/* Dropdown */}
-                    {showTranscriptSelector && (
-                      <div
-                        className={cn(
-                          "absolute top-full right-0 left-0 z-10 mt-1",
-                          "bg-[hsl(var(--raised))]",
-                          "border border-[hsl(var(--glass-border))]",
-                          "overflow-hidden rounded-lg shadow-lg"
-                        )}
-                      >
-                        {transcripts.map((t, idx) => (
-                          <div
-                            key={t.id}
-                            className={cn(
-                              "flex items-center justify-between p-3",
-                              "hover:bg-[hsl(var(--surface))]",
-                              "cursor-pointer",
-                              t.id === activeTranscript.id && "bg-[hsl(185_50%_15%/0.3)]"
-                            )}
-                          >
-                            <div
-                              className="flex-1"
-                              onClick={() => {
-                                setActiveTranscript(t.id);
-                                setShowTranscriptSelector(false);
-                              }}
-                            >
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm font-medium text-[hsl(var(--text))]">
-                                  Version {idx + 1}
-                                </span>
-                                {t.id === activeTranscript.id && (
-                                  <span
-                                    className={cn(
-                                      "rounded px-1.5 py-0.5 text-[10px] font-semibold",
-                                      "bg-[hsl(var(--cyan))]",
-                                      "text-[hsl(var(--bg))]"
-                                    )}
-                                  >
-                                    ACTIVE
-                                  </span>
-                                )}
-                              </div>
-                              <p className="mt-0.5 text-xs text-[hsl(var(--text-muted))]">
-                                {t.words.length.toLocaleString()} words ·{" "}
-                                {formatRelativeTime(t.createdAt)}
-                              </p>
-                            </div>
-                            {transcripts.length > 1 && (
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  if (confirm("Delete this transcript version?")) {
-                                    deleteTranscript(t.id);
-                                  }
-                                }}
-                                className={cn(
-                                  "rounded-lg p-2",
-                                  "hover:bg-[hsl(var(--error)/0.1)]",
-                                  "text-[hsl(var(--text-muted))]",
-                                  "hover:text-[hsl(var(--error))]"
-                                )}
-                              >
-                                <TrashIcon className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+              {hasMultipleTranscripts && activeTranscript && (
+                <TranscriptVersionSelector
+                  transcripts={transcripts}
+                  activeTranscriptId={activeTranscript.id}
+                  onSelect={setActiveTranscript}
+                  onDelete={deleteTranscript}
+                />
               )}
 
               {/* Header with playback controls */}
@@ -986,10 +1637,19 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
                   </button>
                   <div>
                     <p className="text-sm font-semibold text-[hsl(var(--text))]">
-                      {isPlaying ? "Playing" : "Transcript ready"}
+                      {isPlaying ? "Playing" : (
+                        <>
+                          Version {transcripts.findIndex((t) => t.id === activeTranscript.id) + 1} of {transcripts.length}
+                          {activeTranscript.service && (
+                            <span className="ml-1.5 text-xs font-normal text-[hsl(var(--text-muted))]">
+                              · {formatServiceName(activeTranscript.service)}
+                            </span>
+                          )}
+                        </>
+                      )}
                     </p>
                     <p className="text-xs text-[hsl(var(--text-muted))] tabular-nums">
-                      {formatTimestamp(currentTime)} /{" "}
+                      <span ref={currentTimeDisplayRef}>{formatTimestamp(0)}</span> /{" "}
                       {formatTimestamp(currentProject?.audioDuration || 0)}
                       <span className="mx-2">·</span>
                       {activeTranscript.words.length.toLocaleString()} words
@@ -1000,12 +1660,36 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
                   variant="ghost"
                   size="sm"
                   onClick={startTranscription}
+                  disabled={isTranscribing}
                   className="text-[hsl(var(--text-subtle))]"
                 >
-                  <ReloadIcon className="mr-1.5 h-3.5 w-3.5" />
-                  {hasMultipleTranscripts ? "New version" : "Re-transcribe"}
+                  {isTranscribing ? (
+                    <>
+                      <Spinner size="sm" variant="cyan" />
+                      <span className="ml-1.5">{progressState.progress}%</span>
+                    </>
+                  ) : (
+                    <>
+                      <ReloadIcon className="mr-1.5 h-3.5 w-3.5" />
+                      {hasMultipleTranscripts ? "New version" : "Re-transcribe"}
+                    </>
+                  )}
                 </Button>
               </div>
+
+              {/* Inline progress bar for retranscription */}
+              {isTranscribing && (
+                <div className="mb-4 space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-medium text-[hsl(var(--cyan))]">{progressState.message}</span>
+                    <span className="tabular-nums text-[hsl(var(--text-muted))]">{progressState.progress}%</span>
+                  </div>
+                  <Progress value={progressState.progress} variant="cyan" />
+                  {progressState.detail && (
+                    <p className="text-xs text-[hsl(var(--text-muted))]">{progressState.detail}</p>
+                  )}
+                </div>
+              )}
 
               {error && (
                 <div className="mb-4 rounded-lg border border-[hsl(var(--error)/0.2)] bg-[hsl(0_50%_15%/0.4)] p-3">
@@ -1013,73 +1697,392 @@ export const TranscriptEditor: React.FC<TranscriptEditorProps> = ({ onComplete }
                 </div>
               )}
 
-              {/* Words */}
+              {/* Speaker lineup */}
+              {speakers.length > 0 && (
+                <SpeakerLineup
+                  speakers={speakers}
+                  podcastPeople={podcastPeople}
+                  onSpeakerRename={handleLineupRename}
+                  onCreatePerson={createPerson}
+                />
+              )}
+
+              {/* Words - Segmented or Flat layout */}
               <div
+                ref={wordsContainerRef}
+                onContextMenu={handleContextMenu}
                 className={cn(
-                  "scrollbar-thin max-h-[400px] overflow-y-auto rounded-lg p-4",
+                  "scrollbar-thin max-h-[500px] overflow-y-auto rounded-lg",
                   "bg-[hsl(var(--surface))]",
                   "border border-[hsl(var(--glass-border))]"
                 )}
               >
-                <p className="text-sm leading-relaxed text-[hsl(var(--text))]">
-                  {activeTranscript.words.map((word, index) => (
-                    <React.Fragment key={index}>
-                      {editingWordIndex === index ? (
-                        <span className="mx-1 inline-flex items-center gap-1">
-                          <Input
-                            value={editValue}
-                            onChange={(e) => setEditValue(e.target.value)}
-                            onKeyDown={handleKeyDown}
-                            onBlur={handleWordSave}
-                            className="inline-block h-6 w-auto min-w-[60px] px-2 py-0 text-sm"
-                            autoFocus
-                          />
-                          <button
-                            onClick={handleWordSave}
-                            className="text-[hsl(var(--success))] hover:opacity-80"
-                          >
-                            <CheckIcon className="h-3.5 w-3.5" />
-                          </button>
-                        </span>
-                      ) : (
-                        <span
-                          ref={(el) => {
-                            wordRefs.current[index] = el;
-                          }}
-                          onClick={(e) => handleWordClick(index, e)}
-                          className={cn(
-                            "cursor-pointer rounded px-0.5 transition-all duration-150",
-                            activeWordIndex === index
-                              ? "inline-block scale-105 bg-[hsl(var(--cyan))] font-semibold text-[hsl(var(--bg))]"
-                              : "hover:bg-[hsl(185_50%_20%/0.4)] hover:text-[hsl(var(--cyan))]"
-                          )}
-                          title={`${formatTimestamp(word.start)} - ${formatTimestamp(word.end)}`}
-                        >
-                          {word.text}
-                        </span>
-                      )}{" "}
-                    </React.Fragment>
-                  ))}
-                </p>
+                {activeTranscript.segments && activeTranscript.segments.length > 0 ? (
+                  /* Segmented speaker view */
+                  <div className="divide-y divide-[hsl(var(--glass-border))]">
+                    {activeTranscript.segments.map((segment, segIdx) => {
+                      const person = segment.speakerId
+                        ? podcastPeople.find((p) => p.id === segment.speakerId)
+                        : undefined;
+                      const initials = segment.speakerLabel
+                        .split(" ")
+                        .map((w) => w[0])
+                        .join("")
+                        .slice(0, 2)
+                        .toUpperCase();
+
+                      return (
+                        <div key={segIdx} className="group/seg p-4">
+                          {/* Speaker header */}
+                          <div className="mb-2 flex items-center gap-3">
+                            {/* Avatar */}
+                            <div
+                              className={cn(
+                                "flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full",
+                                "bg-[hsl(var(--raised))]",
+                                "border border-[hsl(var(--glass-border))]"
+                              )}
+                            >
+                              {person?.photoUrl ? (
+                                <img
+                                  src={person.photoUrl}
+                                  alt={person.name}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <span className="text-[10px] font-semibold text-[hsl(var(--text-muted))]">
+                                  {initials}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Speaker name (clickable to edit) */}
+                            <div className="relative" ref={editingSpeakerIdx === segIdx ? speakerPopoverRef : undefined}>
+                              <button
+                                onClick={() => {
+                                  setEditingSpeakerIdx(
+                                    editingSpeakerIdx === segIdx ? null : segIdx
+                                  );
+                                  setSpeakerNameInput(segment.speakerLabel);
+                                }}
+                                className={cn(
+                                  "rounded-md px-2 py-0.5 text-sm font-semibold transition-colors",
+                                  "text-[hsl(var(--text))]",
+                                  "hover:bg-[hsl(var(--raised))]"
+                                )}
+                              >
+                                {segment.speakerLabel}
+                                <ChevronDownIcon className="ml-1 inline h-3 w-3 text-[hsl(var(--text-muted))]" />
+                              </button>
+
+                              {/* Speaker editing popover */}
+                              {editingSpeakerIdx === segIdx && (
+                                <div
+                                  className={cn(
+                                    "absolute top-full left-0 z-20 mt-1 w-64",
+                                    "rounded-lg border border-[hsl(var(--glass-border))]",
+                                    "bg-[hsl(var(--raised))] p-3 shadow-xl"
+                                  )}
+                                >
+                                  {/* Name input */}
+                                  <Input
+                                    value={speakerNameInput}
+                                    onChange={(e) => setSpeakerNameInput(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") handleSpeakerSave();
+                                      if (e.key === "Escape") setEditingSpeakerIdx(null);
+                                    }}
+                                    placeholder="Speaker name"
+                                    className="mb-2 h-8 text-sm"
+                                    autoFocus
+                                  />
+
+                                  {/* Apply to all checkbox */}
+                                  <label className="mb-3 flex items-center gap-2 text-xs text-[hsl(var(--text-muted))]">
+                                    <input
+                                      type="checkbox"
+                                      checked={applyToAllSpeakers}
+                                      onChange={(e) => setApplyToAllSpeakers(e.target.checked)}
+                                      className="rounded"
+                                    />
+                                    Apply to all &quot;{segment.speakerLabel}&quot;
+                                  </label>
+
+                                  {/* Recurring people list */}
+                                  {podcastPeople.length > 0 && (
+                                    <>
+                                      <div className="mb-2 border-t border-[hsl(var(--glass-border))] pt-2">
+                                        <p className="text-[10px] font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
+                                          Recurring People
+                                        </p>
+                                      </div>
+                                      <div className="max-h-32 space-y-1 overflow-y-auto">
+                                        {podcastPeople.map((p) => (
+                                          <button
+                                            key={p.id}
+                                            onClick={() => handleLinkPerson(segIdx, p)}
+                                            className={cn(
+                                              "flex w-full items-center gap-2 rounded-md p-1.5 text-left transition-colors",
+                                              "hover:bg-[hsl(var(--surface))]",
+                                              segment.speakerId === p.id &&
+                                                "bg-[hsl(185_50%_15%/0.3)]"
+                                            )}
+                                          >
+                                            <div
+                                              className={cn(
+                                                "flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full",
+                                                "bg-[hsl(var(--surface))]"
+                                              )}
+                                            >
+                                              {p.photoUrl ? (
+                                                <img
+                                                  src={p.photoUrl}
+                                                  alt={p.name}
+                                                  className="h-full w-full object-cover"
+                                                />
+                                              ) : (
+                                                <span className="text-[8px] font-semibold text-[hsl(var(--text-muted))]">
+                                                  {p.name[0]?.toUpperCase()}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <div className="min-w-0 flex-1">
+                                              <p className="truncate text-xs font-medium text-[hsl(var(--text))]">
+                                                {p.name}
+                                              </p>
+                                              <p className="text-[10px] capitalize text-[hsl(var(--text-muted))]">
+                                                {p.role}
+                                              </p>
+                                            </div>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )}
+
+                                  {/* Save button */}
+                                  <div className="mt-2 border-t border-[hsl(var(--glass-border))] pt-2">
+                                    <Button
+                                      size="sm"
+                                      className="w-full"
+                                      onClick={handleSpeakerSave}
+                                    >
+                                      Save
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Timestamp */}
+                            <span className="ml-auto text-xs tabular-nums text-[hsl(var(--text-subtle))]">
+                              {formatTimestamp(segment.startTime)}
+                            </span>
+
+                            {/* Delete segment */}
+                            <div className="relative">
+                              <button
+                                onClick={() => setConfirmDeleteSegIdx(confirmDeleteSegIdx === segIdx ? null : segIdx)}
+                                className={cn(
+                                  "rounded p-1 transition-colors",
+                                  "text-[hsl(var(--text-ghost))]",
+                                  "opacity-0 group-hover/seg:opacity-100",
+                                  "hover:bg-[hsl(var(--error)/0.1)] hover:text-[hsl(var(--error))]",
+                                  confirmDeleteSegIdx === segIdx && "opacity-100 text-[hsl(var(--error))]"
+                                )}
+                                title="Delete paragraph"
+                              >
+                                <TrashIcon className="h-3.5 w-3.5" />
+                              </button>
+                              {confirmDeleteSegIdx === segIdx && (
+                                <div
+                                  ref={confirmDeleteRef}
+                                  className={cn(
+                                    "absolute right-0 top-full z-20 mt-1 w-48",
+                                    "rounded-lg border border-[hsl(var(--glass-border))]",
+                                    "bg-[hsl(var(--raised))] p-3 shadow-xl"
+                                  )}
+                                >
+                                  <p className="mb-2 text-xs text-[hsl(var(--text-muted))]">
+                                    Delete this paragraph?
+                                  </p>
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => setConfirmDeleteSegIdx(null)}
+                                      className={cn(
+                                        "flex-1 rounded-md px-2 py-1 text-xs font-medium",
+                                        "border border-[hsl(var(--glass-border))]",
+                                        "text-[hsl(var(--text-muted))]",
+                                        "hover:bg-[hsl(var(--surface))]"
+                                      )}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      onClick={() => {
+                                        deleteSegmentWithWords(segIdx);
+                                        setConfirmDeleteSegIdx(null);
+                                      }}
+                                      className={cn(
+                                        "flex-1 rounded-md px-2 py-1 text-xs font-medium",
+                                        "bg-[hsl(var(--error))] text-white",
+                                        "hover:bg-[hsl(var(--error)/0.8)]"
+                                      )}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Segment words */}
+                          <p className="pl-11 text-sm leading-relaxed text-[hsl(var(--text))]">
+                            {activeTranscript.words
+                              .slice(segment.startWordIndex, segment.endWordIndex)
+                              .map((word, localIdx) => {
+                                const globalIdx = segment.startWordIndex + localIdx;
+                                const threshold = settings.confidenceThreshold || 0;
+                                if (threshold > 0 && word.confidence < threshold) {
+                                  wordRefs.current[globalIdx] = null;
+                                  return null;
+                                }
+                                return (
+                                  <React.Fragment key={globalIdx}>
+                                    {editingWordIndex === globalIdx ? (
+                                      <span className="mx-1 inline-flex items-center gap-1">
+                                        <Input
+                                          value={editValue}
+                                          onChange={(e) => setEditValue(e.target.value)}
+                                          onKeyDown={handleKeyDown}
+                                          onBlur={handleWordSave}
+                                          className="inline-block h-6 w-auto min-w-[60px] px-2 py-0 text-sm"
+                                          autoFocus
+                                        />
+                                        <button
+                                          onClick={handleWordSave}
+                                          className="text-[hsl(var(--success))] hover:opacity-80"
+                                        >
+                                          <CheckIcon className="h-3.5 w-3.5" />
+                                        </button>
+                                      </span>
+                                    ) : (
+                                      <span
+                                        ref={(el) => {
+                                          wordRefs.current[globalIdx] = el;
+                                        }}
+                                        data-word-index={globalIdx}
+                                        onClick={(e) => handleWordClick(globalIdx, e)}
+                                        className={cn(
+                                          "cursor-pointer rounded px-0.5",
+                                          "data-[active]:bg-[hsl(var(--cyan))] data-[active]:font-semibold data-[active]:text-[hsl(var(--bg))]",
+                                          "hover:bg-[hsl(185_50%_20%/0.4)] hover:text-[hsl(var(--cyan))]"
+                                        )}
+                                        title={`${formatTimestamp(word.start)} - ${formatTimestamp(word.end)}`}
+                                      >
+                                        {word.text}
+                                      </span>
+                                    )}{" "}
+                                  </React.Fragment>
+                                );
+                              })}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* Flat word list (backward compat for old transcripts) */
+                  <div className="p-4">
+                    <p className="text-sm leading-relaxed text-[hsl(var(--text))]">
+                      {activeTranscript.words.map((word, index) => {
+                        const threshold = settings.confidenceThreshold || 0;
+                        if (threshold > 0 && (word.confidence ?? 1) < threshold) {
+                          wordRefs.current[index] = null;
+                          return null;
+                        }
+                        return (
+                          <React.Fragment key={index}>
+                            {editingWordIndex === index ? (
+                              <span className="mx-1 inline-flex items-center gap-1">
+                                <Input
+                                  value={editValue}
+                                  onChange={(e) => setEditValue(e.target.value)}
+                                  onKeyDown={handleKeyDown}
+                                  onBlur={handleWordSave}
+                                  className="inline-block h-6 w-auto min-w-[60px] px-2 py-0 text-sm"
+                                  autoFocus
+                                />
+                                <button
+                                  onClick={handleWordSave}
+                                  className="text-[hsl(var(--success))] hover:opacity-80"
+                                >
+                                  <CheckIcon className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            ) : (
+                              <span
+                                ref={(el) => {
+                                  wordRefs.current[index] = el;
+                                }}
+                                data-word-index={index}
+                                onClick={(e) => handleWordClick(index, e)}
+                                className={cn(
+                                  "cursor-pointer rounded px-0.5",
+                                  "data-[active]:bg-[hsl(var(--cyan))] data-[active]:font-semibold data-[active]:text-[hsl(var(--bg))]",
+                                  "hover:bg-[hsl(185_50%_20%/0.4)] hover:text-[hsl(var(--cyan))]"
+                                )}
+                                title={`${formatTimestamp(word.start)} - ${formatTimestamp(word.end)}`}
+                              >
+                                {word.text}
+                              </span>
+                            )}{" "}
+                          </React.Fragment>
+                        );
+                      })}
+                    </p>
+                  </div>
+                )}
               </div>
 
-              <p className="mt-3 text-center text-xs text-[hsl(var(--text-subtle))]">
-                Click any word to play from that point. Hold{" "}
-                <kbd className="rounded bg-[hsl(var(--raised))] px-1 py-0.5 font-mono text-[10px] text-[hsl(var(--text-muted))]">
-                  Alt
-                </kbd>{" "}
-                + click to edit.
-              </p>
+              {/* Confidence threshold slider */}
+              {activeTranscript.words.some((w) => w.confidence !== undefined && w.confidence < 1) && (
+                <div className="mt-3 flex items-center gap-3">
+                  <span className="shrink-0 text-xs text-[hsl(var(--text-subtle))]">
+                    Confidence threshold
+                  </span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="0.8"
+                    step="0.05"
+                    value={settings.confidenceThreshold || 0}
+                    onChange={(e) => updateSettings({ confidenceThreshold: parseFloat(e.target.value) })}
+                    className="h-1 flex-1 accent-[hsl(var(--cyan))]"
+                  />
+                  <span className="min-w-[2.5rem] text-right font-mono text-xs tabular-nums text-[hsl(var(--text-muted))]">
+                    {(settings.confidenceThreshold || 0) === 0
+                      ? "Off"
+                      : (settings.confidenceThreshold || 0).toFixed(2)}
+                  </span>
+                </div>
+              )}
+
+              {/* Context menu (own component to avoid re-rendering word spans) */}
+              <TranscriptContextMenu
+                ref={contextMenuApiRef}
+                onEdit={handleMenuEdit}
+                onRemove={handleMenuRemove}
+                onInsert={handleMenuInsert}
+                onSplit={handleMenuSplit}
+                onMerge={handleMenuMerge}
+              />
+
             </CardContent>
           </Card>
         )}
 
-        {/* Continue Button */}
-        <div className="mt-8 flex justify-end sm:mt-10">
-          <Button onClick={onComplete} disabled={!hasTranscript} glow={hasTranscript}>
-            Continue to Clip Selection
-          </Button>
-        </div>
       </div>
     </div>
   );

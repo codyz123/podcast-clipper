@@ -251,6 +251,27 @@ export const uploadSessions = pgTable(
   ]
 );
 
+// ============ Podcast People (Recurring Hosts & Guests) ============
+
+export const podcastPeople = pgTable(
+  "podcast_people",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    podcastId: uuid("podcast_id")
+      .references(() => podcasts.id, { onDelete: "cascade" })
+      .notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    role: varchar("role", { length: 50 }).notNull().default("guest"), // 'host' | 'guest'
+    photoUrl: text("photo_url"),
+    bio: text("bio"),
+    website: varchar("website", { length: 500 }),
+    twitter: varchar("twitter", { length: 255 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("podcast_people_podcast_id_idx").on(table.podcastId)]
+);
+
 // ============ Transcripts ============
 
 export const transcripts = pgTable(
@@ -272,6 +293,17 @@ export const transcripts = pgTable(
     >(),
     language: varchar("language", { length: 10 }).default("en"),
     name: varchar("name", { length: 255 }),
+    segments: jsonb("segments").$type<
+      Array<{
+        speakerLabel: string;
+        speakerId?: string;
+        startWordIndex: number;
+        endWordIndex: number;
+        startTime: number;
+        endTime: number;
+      }>
+    >(),
+    service: varchar("service", { length: 50 }),
     createdById: uuid("created_by_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -314,6 +346,16 @@ export const clips = pgTable(
     subtitle: jsonb("subtitle"),
     tracks: jsonb("tracks"), // Track[] from types.ts
     captionStyle: jsonb("caption_style"), // CaptionStyle from types.ts
+    segments: jsonb("segments").$type<
+      Array<{
+        speakerLabel: string;
+        speakerId?: string;
+        startWordIndex: number;
+        endWordIndex: number;
+        startTime: number;
+        endTime: number;
+      }>
+    >(),
     format: varchar("format", { length: 10 }),
     generatedAssets: jsonb("generated_assets"),
     hookAnalysis: jsonb("hook_analysis"),
@@ -623,6 +665,14 @@ export const podcastsRelations = relations(podcasts, ({ one, many }) => ({
   projects: many(projects),
   invitations: many(podcastInvitations),
   oauthTokens: many(oauthTokens),
+  people: many(podcastPeople),
+}));
+
+export const podcastPeopleRelations = relations(podcastPeople, ({ one }) => ({
+  podcast: one(podcasts, {
+    fields: [podcastPeople.podcastId],
+    references: [podcasts.id],
+  }),
 }));
 
 export const podcastMembersRelations = relations(podcastMembers, ({ one }) => ({
@@ -830,3 +880,5 @@ export type OAuthToken = typeof oauthTokens.$inferSelect;
 export type NewOAuthToken = typeof oauthTokens.$inferInsert;
 export type UploadSession = typeof uploadSessions.$inferSelect;
 export type NewUploadSession = typeof uploadSessions.$inferInsert;
+export type PodcastPerson = typeof podcastPeople.$inferSelect;
+export type NewPodcastPerson = typeof podcastPeople.$inferInsert;

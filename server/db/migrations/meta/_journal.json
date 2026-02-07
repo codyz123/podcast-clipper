@@ -36,6 +36,20 @@
       "when": 1770235000000,
       "tag": "0004_clip_templates",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1770300000000,
+      "tag": "0005_speaker_identification",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1770478911260,
+      "tag": "0006_glossy_quentin_quire",
+      "breakpoints": true
     }
   ]
 }

@@ -116,6 +116,10 @@ interface AppShellProps {
   // Marketing sub-steps (for dropdown on marketing pages)
   stageStatusWithSubSteps?: StageStatusWithSubSteps;
   onMarketingSubStepStatusChange?: (subStepId: string, status: StageStatus) => void;
+  // Next step navigation
+  onNextStep?: () => void;
+  nextStepLabel?: string;
+  nextStepDisabled?: boolean;
 }
 
 export const AppShell: React.FC<AppShellProps> = ({
@@ -135,6 +139,9 @@ export const AppShell: React.FC<AppShellProps> = ({
   onSubStepStatusClick,
   stageStatusWithSubSteps,
   onMarketingSubStepStatusChange,
+  onNextStep,
+  nextStepLabel,
+  nextStepDisabled,
 }) => {
   const [megaDropdownOpen, setMegaDropdownOpen] = useState(false);
   const [hoveredStage, setHoveredStage] = useState<EpisodeStage | null>(null);
@@ -405,6 +412,27 @@ export const AppShell: React.FC<AppShellProps> = ({
                   </>
                 )}
               </nav>
+
+              {/* Next step button */}
+              {onNextStep && nextStepLabel && (
+                <>
+                  <div className="h-4 w-px bg-[hsl(var(--border-subtle))]" />
+                  <button
+                    onClick={onNextStep}
+                    disabled={nextStepDisabled}
+                    className={cn(
+                      "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium",
+                      "border transition-colors",
+                      nextStepDisabled
+                        ? "cursor-not-allowed border-[hsl(var(--border-subtle))] text-[hsl(var(--text-ghost))]"
+                        : "border-[hsl(var(--cyan)/0.3)] bg-[hsl(var(--cyan)/0.08)] text-[hsl(var(--cyan))] hover:border-[hsl(var(--cyan)/0.5)] hover:bg-[hsl(var(--cyan)/0.15)]"
+                    )}
+                  >
+                    {nextStepLabel}
+                    <ChevronRightIcon className="h-3 w-3" />
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>

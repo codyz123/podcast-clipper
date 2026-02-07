@@ -35,12 +35,15 @@ export const Settings: React.FC = () => {
   const [googleApiKey, setGoogleApiKey] = useState(settings.googleApiKey || "");
   const [pexelsApiKey, setPexelsApiKey] = useState(settings.pexelsApiKey || "");
   const [anthropicApiKey, setAnthropicApiKey] = useState(settings.anthropicApiKey || "");
+  const [assemblyaiApiKey, setAssemblyaiApiKey] = useState(settings.assemblyaiApiKey || "");
   const [showAnthropicKey, setShowAnthropicKey] = useState(false);
+  const [showAssemblyaiKey, setShowAssemblyaiKey] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isBackendSaved, setIsBackendSaved] = useState(false);
   const [isGoogleSaved, setIsGoogleSaved] = useState(false);
   const [isPexelsSaved, setIsPexelsSaved] = useState(false);
   const [isAnthropicSaved, setIsAnthropicSaved] = useState(false);
+  const [isAssemblyaiSaved, setIsAssemblyaiSaved] = useState(false);
 
   const hasBackendConfig = !!(settings.backendUrl && settings.accessCode);
 
@@ -72,6 +75,12 @@ export const Settings: React.FC = () => {
     updateSettings({ anthropicApiKey });
     setIsAnthropicSaved(true);
     setTimeout(() => setIsAnthropicSaved(false), 2000);
+  };
+
+  const handleSaveAssemblyaiApiKey = () => {
+    updateSettings({ assemblyaiApiKey });
+    setIsAssemblyaiSaved(true);
+    setTimeout(() => setIsAssemblyaiSaved(false), 2000);
   };
 
   const toggleDefaultFormat = (format: VideoFormat) => {
@@ -357,6 +366,124 @@ export const Settings: React.FC = () => {
                     console.anthropic.com
                   </a>
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* AssemblyAI API (Transcription) */}
+          <Card variant="default">
+            <CardContent className="p-5">
+              <div className="mb-5 flex items-center gap-4">
+                <div
+                  className={cn(
+                    "flex h-10 w-10 items-center justify-center rounded-lg",
+                    "bg-[hsl(210_50%_15%/0.5)]"
+                  )}
+                >
+                  <span className="font-mono text-xs font-bold text-[hsl(210_80%_60%)]">AA</span>
+                </div>
+                <div>
+                  <p className="font-[family-name:var(--font-display)] text-sm font-semibold text-[hsl(var(--text))]">
+                    AssemblyAI (Transcription)
+                  </p>
+                  <p className="text-xs text-[hsl(var(--text-muted))]">
+                    Used for transcription with speaker diarization
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
+                  AssemblyAI API Key
+                </label>
+                <div className="flex gap-3">
+                  <div className="relative flex-1">
+                    <Input
+                      type={showAssemblyaiKey ? "text" : "password"}
+                      value={assemblyaiApiKey}
+                      onChange={(e) => setAssemblyaiApiKey(e.target.value)}
+                      placeholder="Enter your AssemblyAI API key"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowAssemblyaiKey(!showAssemblyaiKey)}
+                      className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
+                    >
+                      {showAssemblyaiKey ? (
+                        <EyeClosedIcon className="h-4 w-4" />
+                      ) : (
+                        <EyeOpenIcon className="h-4 w-4" />
+                      )}
+                    </button>
+                  </div>
+                  <Button
+                    onClick={handleSaveAssemblyaiApiKey}
+                    disabled={!assemblyaiApiKey}
+                    variant={isAssemblyaiSaved ? "secondary" : "primary"}
+                  >
+                    {isAssemblyaiSaved ? (
+                      <>
+                        <CheckIcon className="h-4 w-4" />
+                        Saved
+                      </>
+                    ) : (
+                      "Save Key"
+                    )}
+                  </Button>
+                </div>
+                <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
+                  <InfoCircledIcon className="h-3.5 w-3.5" />
+                  Get your API key from{" "}
+                  <a
+                    href="https://www.assemblyai.com/app/account"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[hsl(var(--cyan))] hover:underline"
+                  >
+                    assemblyai.com
+                  </a>
+                </p>
+              </div>
+
+              {/* Confidence threshold slider */}
+              <div className="mt-5 border-t border-[hsl(var(--glass-border))] pt-5 space-y-3">
+                <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
+                  Music / Noise Filter
+                </label>
+                <p className="text-xs text-[hsl(var(--text-muted))]">
+                  Filter out low-confidence words from transcriptions (e.g. music lyrics, background noise).
+                  Higher values filter more aggressively. Set to 0 to disable.
+                </p>
+                <div className="flex items-center gap-4">
+                  <input
+                    type="range"
+                    min="0"
+                    max="0.8"
+                    step="0.05"
+                    value={settings.confidenceThreshold || 0}
+                    onChange={(e) => updateSettings({ confidenceThreshold: parseFloat(e.target.value) })}
+                    className="flex-1 accent-[hsl(var(--cyan))]"
+                  />
+                  <span className={cn(
+                    "min-w-[3.5rem] rounded-md px-2 py-1 text-center text-sm font-mono tabular-nums",
+                    "bg-[hsl(var(--bg-base))] border border-[hsl(var(--border-subtle))]",
+                    "text-[hsl(var(--text))]"
+                  )}>
+                    {(settings.confidenceThreshold || 0).toFixed(2)}
+                  </span>
+                </div>
+                <div className="flex justify-between text-[10px] text-[hsl(var(--text-ghost))]">
+                  <span>Off</span>
+                  <span>Light</span>
+                  <span>Aggressive</span>
+                </div>
+                {(settings.confidenceThreshold || 0) > 0 && (
+                  <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-muted))]">
+                    <InfoCircledIcon className="h-3.5 w-3.5 shrink-0" />
+                    Applies in real time to transcripts with confidence data. Older transcripts may need re-transcription.
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>

@@ -1,7 +1,31 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { Project, Transcript, Clip, RenderJob, VideoFormat, ExportRecord } from "../lib/types";
+import {
+  Project,
+  Transcript,
+  Clip,
+  RenderJob,
+  VideoFormat,
+  ExportRecord,
+  SpeakerSegment,
+} from "../lib/types";
 import { generateId } from "../lib/utils";
+
+// Ensure a transcript always has segments — defaults to a single "Person 1" segment
+function ensureSegments(t: Transcript): Transcript {
+  if (t.segments && t.segments.length > 0) return t;
+  if (t.words.length === 0) return t;
+  return {
+    ...t,
+    segments: [{
+      speakerLabel: "Person 1",
+      startWordIndex: 0,
+      endWordIndex: t.words.length,
+      startTime: t.words[0]?.start ?? 0,
+      endTime: t.words[t.words.length - 1]?.end ?? 0,
+    }],
+  };
+}
 
 // ============ One-time Migration: Rename from podcast-clipper to podcastomatic ============
 // This migrates localStorage keys from old names to new names
@@ -450,6 +474,10 @@ interface ProjectState {
   getActiveTranscript: () => Transcript | undefined;
   getTranscriptsForFingerprint: (fingerprint: string) => Transcript[];
   updateTranscriptWord: (wordIndex: number, newText: string) => void;
+  updateTranscriptSegments: (segments: SpeakerSegment[]) => void;
+  removeTranscriptWord: (wordIndex: number) => void;
+  insertTranscriptWord: (afterIndex: number, text: string) => void;
+  deleteSegmentWithWords: (segmentIndex: number) => void;
 
   // Clip actions
   addClip: (clip: Omit<Clip, "id" | "createdAt">) => Clip;
@@ -611,9 +639,10 @@ export const useProjectStore = create<ProjectState>()(
         },
 
         // Add a new transcript without replacing the active one
-        addTranscript: (transcript) => {
+        addTranscript: (rawTranscript) => {
           const state = get();
           if (!state.currentProject) return;
+          const transcript = ensureSegments(rawTranscript);
 
           const transcripts = [...(state.currentProject.transcripts || []), transcript];
 
@@ -752,6 +781,275 @@ export const useProjectStore = create<ProjectState>()(
             );
 
             // Persist to IndexedDB (async, fire-and-forget)
+            saveTranscriptsToDB(projectId, transcripts);
+
+            return {
+              currentProject: {
+                ...state.currentProject,
+                transcript: updatedTranscript,
+                transcripts,
+                updatedAt: new Date().toISOString(),
+              },
+              projects: state.projects.map((p) =>
+                p.id === state.currentProject!.id
+                  ? {
+                      ...p,
+                      transcript: updatedTranscript,
+                      transcripts,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : p
+              ),
+            };
+          });
+        },
+
+        updateTranscriptSegments: (segments) => {
+          const currentState = get();
+          if (!currentState.currentProject) return;
+          const projectId = currentState.currentProject.id;
+
+          set((state) => {
+            if (!state.currentProject) return state;
+
+            const activeTranscript = state.currentProject.activeTranscriptId
+              ? state.currentProject.transcripts?.find(
+                  (t) => t.id === state.currentProject!.activeTranscriptId
+                )
+              : state.currentProject.transcript;
+
+            if (!activeTranscript) return state;
+
+            const updatedTranscript = { ...activeTranscript, segments };
+
+            const transcripts = (state.currentProject.transcripts || []).map((t) =>
+              t.id === updatedTranscript.id ? updatedTranscript : t
+            );
+
+            saveTranscriptsToDB(projectId, transcripts);
+
+            return {
+              currentProject: {
+                ...state.currentProject,
+                transcript: updatedTranscript,
+                transcripts,
+                updatedAt: new Date().toISOString(),
+              },
+              projects: state.projects.map((p) =>
+                p.id === state.currentProject!.id
+                  ? {
+                      ...p,
+                      transcript: updatedTranscript,
+                      transcripts,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : p
+              ),
+            };
+          });
+        },
+
+        removeTranscriptWord: (wordIndex) => {
+          const currentState = get();
+          if (!currentState.currentProject) return;
+          const projectId = currentState.currentProject.id;
+
+          set((state) => {
+            if (!state.currentProject) return state;
+
+            const activeTranscript = state.currentProject.activeTranscriptId
+              ? state.currentProject.transcripts?.find(
+                  (t) => t.id === state.currentProject!.activeTranscriptId
+                )
+              : state.currentProject.transcript;
+
+            if (!activeTranscript || wordIndex < 0 || wordIndex >= activeTranscript.words.length)
+              return state;
+
+            const newWords = [...activeTranscript.words];
+            newWords.splice(wordIndex, 1);
+
+            // Adjust segment indices
+            const newSegments = activeTranscript.segments
+              ?.map((seg) => {
+                let { startWordIndex, endWordIndex } = seg;
+                if (wordIndex < startWordIndex) {
+                  startWordIndex--;
+                  endWordIndex--;
+                } else if (wordIndex < endWordIndex) {
+                  endWordIndex--;
+                }
+                return { ...seg, startWordIndex, endWordIndex };
+              })
+              .filter((seg) => seg.startWordIndex < seg.endWordIndex);
+
+            const updatedTranscript = {
+              ...activeTranscript,
+              words: newWords,
+              text: newWords.map((w) => w.text).join(" "),
+              segments: newSegments,
+            };
+
+            const transcripts = (state.currentProject.transcripts || []).map((t) =>
+              t.id === updatedTranscript.id ? updatedTranscript : t
+            );
+
+            saveTranscriptsToDB(projectId, transcripts);
+
+            return {
+              currentProject: {
+                ...state.currentProject,
+                transcript: updatedTranscript,
+                transcripts,
+                updatedAt: new Date().toISOString(),
+              },
+              projects: state.projects.map((p) =>
+                p.id === state.currentProject!.id
+                  ? {
+                      ...p,
+                      transcript: updatedTranscript,
+                      transcripts,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : p
+              ),
+            };
+          });
+        },
+
+        insertTranscriptWord: (afterIndex, text) => {
+          const currentState = get();
+          if (!currentState.currentProject) return;
+          const projectId = currentState.currentProject.id;
+
+          set((state) => {
+            if (!state.currentProject) return state;
+
+            const activeTranscript = state.currentProject.activeTranscriptId
+              ? state.currentProject.transcripts?.find(
+                  (t) => t.id === state.currentProject!.activeTranscriptId
+                )
+              : state.currentProject.transcript;
+
+            if (!activeTranscript) return state;
+
+            const words = activeTranscript.words;
+            const prevWord = afterIndex >= 0 ? words[afterIndex] : undefined;
+            const nextWord = words[afterIndex + 1];
+
+            // Interpolate timestamps between adjacent words
+            const start = prevWord
+              ? nextWord
+                ? (prevWord.end + nextWord.start) / 2
+                : prevWord.end + 0.05
+              : nextWord
+                ? nextWord.start - 0.1
+                : 0;
+            const end = nextWord
+              ? prevWord
+                ? start + Math.min(0.2, (nextWord.start - start) * 0.8)
+                : nextWord.start
+              : start + 0.2;
+
+            const insertIdx = afterIndex + 1;
+            const newWords = [...words];
+            newWords.splice(insertIdx, 0, { text, start, end, confidence: 1 });
+
+            // Adjust segment indices
+            const newSegments = activeTranscript.segments?.map((seg) => {
+              let { startWordIndex, endWordIndex } = seg;
+              if (insertIdx <= startWordIndex) {
+                startWordIndex++;
+                endWordIndex++;
+              } else if (insertIdx <= endWordIndex) {
+                endWordIndex++;
+              }
+              return { ...seg, startWordIndex, endWordIndex };
+            });
+
+            const updatedTranscript = {
+              ...activeTranscript,
+              words: newWords,
+              text: newWords.map((w) => w.text).join(" "),
+              segments: newSegments,
+            };
+
+            const transcripts = (state.currentProject.transcripts || []).map((t) =>
+              t.id === updatedTranscript.id ? updatedTranscript : t
+            );
+
+            saveTranscriptsToDB(projectId, transcripts);
+
+            return {
+              currentProject: {
+                ...state.currentProject,
+                transcript: updatedTranscript,
+                transcripts,
+                updatedAt: new Date().toISOString(),
+              },
+              projects: state.projects.map((p) =>
+                p.id === state.currentProject!.id
+                  ? {
+                      ...p,
+                      transcript: updatedTranscript,
+                      transcripts,
+                      updatedAt: new Date().toISOString(),
+                    }
+                  : p
+              ),
+            };
+          });
+        },
+
+        deleteSegmentWithWords: (segmentIndex) => {
+          const currentState = get();
+          if (!currentState.currentProject) return;
+          const projectId = currentState.currentProject.id;
+
+          set((state) => {
+            if (!state.currentProject) return state;
+
+            const activeTranscript = state.currentProject.activeTranscriptId
+              ? state.currentProject.transcripts?.find(
+                  (t) => t.id === state.currentProject!.activeTranscriptId
+                )
+              : state.currentProject.transcript;
+
+            if (!activeTranscript?.segments || segmentIndex < 0 || segmentIndex >= activeTranscript.segments.length)
+              return state;
+
+            const seg = activeTranscript.segments[segmentIndex];
+            const removeCount = seg.endWordIndex - seg.startWordIndex;
+
+            // Remove the segment's words
+            const newWords = [...activeTranscript.words];
+            newWords.splice(seg.startWordIndex, removeCount);
+
+            // Remove the segment and adjust indices on remaining segments
+            const newSegments = activeTranscript.segments
+              .filter((_, i) => i !== segmentIndex)
+              .map((s) => {
+                if (s.startWordIndex >= seg.endWordIndex) {
+                  return {
+                    ...s,
+                    startWordIndex: s.startWordIndex - removeCount,
+                    endWordIndex: s.endWordIndex - removeCount,
+                  };
+                }
+                return s;
+              });
+
+            const updatedTranscript = {
+              ...activeTranscript,
+              words: newWords,
+              text: newWords.map((w) => w.text).join(" "),
+              segments: newSegments.length > 0 ? newSegments : undefined,
+            };
+
+            const transcripts = (state.currentProject.transcripts || []).map((t) =>
+              t.id === updatedTranscript.id ? updatedTranscript : t
+            );
+
             saveTranscriptsToDB(projectId, transcripts);
 
             return {
@@ -949,13 +1247,23 @@ export const useProjectStore = create<ProjectState>()(
           const updatedProjects: Project[] = [];
 
           for (const project of projects) {
-            const transcripts = await getTranscriptsFromDB(project.id);
+            const transcripts = (await getTranscriptsFromDB(project.id)).map(ensureSegments);
+            // Preserve the user's active transcript selection if it's still valid
+            const preferredId = project.activeTranscriptId;
+            const activeTranscriptId =
+              (preferredId && transcripts.some((t) => t.id === preferredId))
+                ? preferredId
+                : transcripts.length > 0
+                  ? transcripts[transcripts.length - 1].id
+                  : undefined;
+
             updatedProjects.push({
               ...project,
               transcripts,
-              activeTranscriptId:
-                transcripts.length > 0 ? transcripts[transcripts.length - 1].id : undefined,
-              transcript: transcripts.length > 0 ? transcripts[transcripts.length - 1] : undefined,
+              activeTranscriptId,
+              transcript:
+                transcripts.find((t) => t.id === activeTranscriptId) ||
+                (transcripts.length > 0 ? transcripts[transcripts.length - 1] : undefined),
             });
           }
 

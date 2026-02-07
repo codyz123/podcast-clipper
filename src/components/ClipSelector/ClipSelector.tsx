@@ -4,7 +4,6 @@ import {
   PlusIcon,
   ScissorsIcon,
   Cross2Icon,
-  ChevronRightIcon,
   Pencil2Icon,
 } from "@radix-ui/react-icons";
 import { Button, Card, CardContent, Input } from "../ui";
@@ -13,17 +12,48 @@ import { useProjectStore, getAudioBlob } from "../../stores/projectStore";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useAuthStore } from "../../stores/authStore";
 import { useEpisodes } from "../../hooks/useEpisodes";
-import { ClippabilityScore, Word } from "../../lib/types";
+import { ClippabilityScore, Word, SpeakerSegment } from "../../lib/types";
 import { retryWithBackoff, cn } from "../../lib/utils";
 import { authFetch } from "../../lib/api";
 import { ClipEditor } from "./ClipEditor";
 import { ClipStackItem } from "./ClipStackItem";
 
-interface ClipSelectorProps {
-  onComplete: () => void;
+/**
+ * Compute segments for a clip from transcript segments.
+ * Filters overlapping segments and remaps word indices to be clip-relative.
+ */
+function computeClipSegments(
+  transcriptSegments: SpeakerSegment[] | undefined,
+  transcriptWords: Word[],
+  clipStartTime: number,
+  clipEndTime: number
+): SpeakerSegment[] | undefined {
+  if (!transcriptSegments?.length) return undefined;
+
+  // Find which transcript word indices are included in the clip (time-based filter)
+  let firstGlobalIdx = -1;
+  let lastGlobalIdx = -1;
+  for (let i = 0; i < transcriptWords.length; i++) {
+    const w = transcriptWords[i];
+    if (w.start >= clipStartTime && w.end <= clipEndTime) {
+      if (firstGlobalIdx === -1) firstGlobalIdx = i;
+      lastGlobalIdx = i;
+    }
+  }
+  if (firstGlobalIdx === -1) return undefined;
+
+  const clipEndWordIdx = lastGlobalIdx + 1; // exclusive
+
+  return transcriptSegments
+    .filter((seg) => seg.endWordIndex > firstGlobalIdx && seg.startWordIndex < clipEndWordIdx)
+    .map((seg) => ({
+      ...seg,
+      startWordIndex: Math.max(0, seg.startWordIndex - firstGlobalIdx),
+      endWordIndex: Math.min(clipEndWordIdx - firstGlobalIdx, seg.endWordIndex - firstGlobalIdx),
+    }));
 }
 
-export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
+export const ClipSelector: React.FC = () => {
   const { currentProject, addClip, removeClip, updateClip } = useProjectStore();
   const { settings } = useSettingsStore();
   const accessToken = useAuthStore((state) => state.accessToken);
@@ -288,9 +318,10 @@ export const ClipSelector: React.FC<ClipSelectorProps> = ({ onComplete }) => {
         endTime: newEnd,
         words: newWords,
         transcript: newWords.map((w) => w.text).join(" "),
+        segments: computeClipSegments(transcript?.segments, transcript?.words || [], newStart, newEnd),
       });
     },
-    [updateClip]
+    [updateClip, transcript]
   );
 
   const handleTranscriptEdit = useCallback(
@@ -511,6 +542,7 @@ Return ONLY valid JSON in this exact format (no other text):
             endTime,
             transcript: segment.text || segmentWords.map((w) => w.text).join(" "),
             words: segmentWords,
+            segments: computeClipSegments(transcript.segments, transcript.words, startTime, endTime),
             clippabilityScore,
             isManual: false,
           });
@@ -550,6 +582,7 @@ Return ONLY valid JSON in this exact format (no other text):
       endTime: end,
       transcript: segmentWords.map((w) => w.text).join(" "),
       words: segmentWords,
+      segments: computeClipSegments(transcript.segments, transcript.words, start, end),
       isManual: true,
     });
 
@@ -585,15 +618,6 @@ Return ONLY valid JSON in this exact format (no other text):
     return (
       <div className="min-h-full">
         <div className="mx-auto max-w-4xl">
-          {/* Header */}
-          <div className="mb-8">
-            <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
-              Select Clips
-            </h1>
-            <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
-              Use AI to find viral moments or manually select segments
-            </p>
-          </div>
 
           {/* AI Analysis Card */}
           <Card variant="default" className="animate-fadeIn mb-5">
@@ -910,9 +934,6 @@ Return ONLY valid JSON in this exact format (no other text):
               <div className="mx-auto w-full max-w-2xl">
                 <div className="mb-6">
                   <h2 className="text-xl font-semibold text-[hsl(var(--text))]">Find More Clips</h2>
-                  <p className="mt-1 text-sm text-[hsl(var(--text-muted))]">
-                    Use AI to discover additional viral-worthy moments
-                  </p>
                 </div>
 
                 <Card variant="default" className="mb-5">
@@ -1032,20 +1053,6 @@ Return ONLY valid JSON in this exact format (no other text):
         </div>
       </div>
 
-      {/* Bottom bar */}
-      <div className="flex items-center justify-between border-t border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-base))] px-6 py-4">
-        <div className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]">
-          <span className="font-medium text-[hsl(var(--text))]">{acceptedClips.size}</span>
-          <span>of</span>
-          <span className="font-medium text-[hsl(var(--text))]">{clips.length}</span>
-          <span>clips accepted</span>
-        </div>
-
-        <Button onClick={onComplete} disabled={clips.length === 0} glow={clips.length > 0}>
-          Continue to Editor
-          <ChevronRightIcon className="h-4 w-4" />
-        </Button>
-      </div>
     </div>
   );
 };

@@ -571,15 +571,6 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
   return (
     <div className="min-h-full">
       <div className="mx-auto max-w-2xl">
-        {/* Header */}
-        <div className="mb-8 sm:mb-10">
-          <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
-            Import Audio
-          </h1>
-          <p className="mt-2 text-sm text-[hsl(var(--text-muted))]">
-            Upload your podcast episode to get started
-          </p>
-        </div>
 
         {/* Hidden file input for file picker */}
         <input
