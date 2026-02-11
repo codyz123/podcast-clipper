@@ -2,12 +2,14 @@ import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
+  GetObjectCommand,
   ListObjectsV2Command,
   CreateMultipartUploadCommand,
   UploadPartCommand,
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
+import type { Readable } from "node:stream";
 
 // Lazy initialization to avoid errors when env vars aren't set
 let r2Client: S3Client | null = null;
@@ -99,6 +101,33 @@ export async function uploadToR2(
   return {
     url: getR2PublicUrl(key),
     size: body.length,
+  };
+}
+
+/**
+ * Get a file from R2 by key (for proxying)
+ */
+export async function getFromR2(
+  key: string
+): Promise<{ body: Readable; contentType: string; contentLength: number }> {
+  const client = getR2Client();
+  const bucket = getBucketName();
+
+  const response = await client.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
+  );
+
+  if (!response.Body) {
+    throw new Error("Empty response body from R2");
+  }
+
+  return {
+    body: response.Body as Readable,
+    contentType: response.ContentType || "application/octet-stream",
+    contentLength: response.ContentLength || 0,
   };
 }
 

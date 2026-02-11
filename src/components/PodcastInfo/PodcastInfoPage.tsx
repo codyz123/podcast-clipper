@@ -15,7 +15,7 @@ import { extractBrandColors, parseBrandColorsFromStorage } from "../../lib/color
 import { usePodcast } from "../../hooks/usePodcast";
 import { usePodcastPeople } from "../../hooks/usePodcastPeople";
 import { useAuthStore } from "../../stores/authStore";
-import { getApiBase } from "../../lib/api";
+import { getApiBase, getMediaUrl } from "../../lib/api";
 import { ConfirmationDialog } from "../ui/ConfirmationDialog";
 import type { PodcastPerson } from "../../lib/types";
 
@@ -288,7 +288,7 @@ export const PodcastInfoPage: React.FC = () => {
                 >
                   {metadata.coverImage ? (
                     <img
-                      src={metadata.coverImage}
+                      src={getMediaUrl(metadata.coverImage)}
                       alt="Podcast cover"
                       className="h-full w-full object-cover"
                     />
@@ -769,7 +769,11 @@ const PersonCard: React.FC<{
         title="Upload photo"
       >
         {person.photoUrl ? (
-          <img src={person.photoUrl} alt={person.name} className="h-full w-full object-cover" />
+          <img
+            src={getMediaUrl(person.photoUrl)}
+            alt={person.name}
+            className="h-full w-full object-cover"
+          />
         ) : (
           <span className="flex h-full w-full items-center justify-center text-xs font-medium text-[hsl(var(--text-muted))]">
             {initials}

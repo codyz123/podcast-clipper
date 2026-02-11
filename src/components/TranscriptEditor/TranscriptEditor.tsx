@@ -27,7 +27,7 @@ import { SpeakerLineup } from "./SpeakerLineup";
 import { Transcript, Word, SpeakerSegment, PodcastPerson } from "../../lib/types";
 import { generateId, cn } from "../../lib/utils";
 import { formatTimestamp, formatRelativeTime } from "../../lib/formats";
-import { authFetch } from "../../lib/api";
+import { authFetch, getMediaUrl } from "../../lib/api";
 
 interface ProgressState {
   stage: string;
@@ -1777,7 +1777,7 @@ export const TranscriptEditor: React.FC = () => {
                             >
                               {person?.photoUrl ? (
                                 <img
-                                  src={person.photoUrl}
+                                  src={getMediaUrl(person.photoUrl)}
                                   alt={person.name}
                                   className="h-full w-full object-cover"
                                 />
@@ -1871,7 +1871,7 @@ export const TranscriptEditor: React.FC = () => {
                                             >
                                               {p.photoUrl ? (
                                                 <img
-                                                  src={p.photoUrl}
+                                                  src={getMediaUrl(p.photoUrl)}
                                                   alt={p.name}
                                                   className="h-full w-full object-cover"
                                                 />
