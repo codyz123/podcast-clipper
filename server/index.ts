@@ -50,6 +50,31 @@ app.get("/api/health", (_req, res) => {
 // Serve locally stored media (dev fallback when R2 is not configured)
 app.use("/api/local-media", express.static(path.join(process.cwd(), ".context", "local-media")));
 
+// Media proxy - serves R2-stored files through the server to avoid CORS issues
+app.get("/api/media/*", async (req, res) => {
+  try {
+    const key = req.params[0];
+    if (!key) {
+      res.status(400).json({ error: "Missing media key" });
+      return;
+    }
+
+    const { getFromR2 } = await import("./lib/r2-storage.js");
+    const { body, contentType, contentLength } = await getFromR2(key);
+
+    res.setHeader("Content-Type", contentType);
+    if (contentLength) {
+      res.setHeader("Content-Length", contentLength);
+    }
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+
+    body.pipe(res);
+  } catch (error) {
+    console.error("Media proxy error:", error);
+    res.status(404).json({ error: "Media not found" });
+  }
+});
+
 // Auth routes - handles registration, login, logout
 // Rate limiting is applied per-route in the auth router
 app.use("/api/auth", authRouter);
