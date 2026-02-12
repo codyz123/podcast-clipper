@@ -1600,7 +1600,7 @@ export const TranscriptEditor: React.FC = () => {
                   Ready to transcribe
                 </h3>
                 <p className="mx-auto mb-5 max-w-xs text-sm text-[hsl(var(--text-subtle))]">
-                  {settings.assemblyaiApiKey || process.env.ASSEMBLYAI_API_KEY
+                  {settings.assemblyaiApiKey
                     ? "Using AssemblyAI with speaker diarization"
                     : "Using OpenAI Whisper for accurate word-level timestamps"}
                 </p>

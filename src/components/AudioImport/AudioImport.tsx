@@ -20,8 +20,6 @@ import { cn, generateFileFingerprint } from "../../lib/utils";
 import WaveSurfer from "wavesurfer.js";
 
 // Google Drive Picker configuration
-const GOOGLE_CLIENT_ID = ""; // User will set this in settings
-const GOOGLE_API_KEY = ""; // User will set this in settings
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.readonly";
 
 interface AudioImportProps {
@@ -199,8 +197,8 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
 
   // Google Drive picker
   const openGoogleDrivePicker = useCallback(async () => {
-    const clientId = (settings as any).googleClientId || GOOGLE_CLIENT_ID;
-    const apiKey = (settings as any).googleApiKey || GOOGLE_API_KEY;
+    const clientId = settings.googleClientId;
+    const apiKey = settings.googleApiKey;
 
     if (!clientId || !apiKey) {
       setError("Google Drive integration requires API credentials. Add them in Settings.");

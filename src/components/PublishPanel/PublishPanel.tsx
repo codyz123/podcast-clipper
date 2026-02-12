@@ -1,5 +1,11 @@
 import React, { useEffect, useMemo, useCallback, useRef, useState } from "react";
-import { RocketIcon, CrossCircledIcon, CheckCircledIcon, ReloadIcon } from "@radix-ui/react-icons";
+import {
+  RocketIcon,
+  CrossCircledIcon,
+  CheckCircledIcon,
+  ReloadIcon,
+  ExclamationTriangleIcon,
+} from "@radix-ui/react-icons";
 import { Button, Card, CardContent } from "../ui";
 import { Progress, Spinner } from "../ui/Progress";
 import { useProjectStore } from "../../stores/projectStore";
@@ -49,6 +55,7 @@ export const PublishPanel: React.FC = () => {
   } = usePublishStore();
 
   const projectClips = currentProject?.clips || [];
+  const [oauthError, setOauthError] = useState<string | null>(null);
 
   // Fetch snippets when project changes
   useEffect(() => {
@@ -67,8 +74,8 @@ export const PublishPanel: React.FC = () => {
             connectAccount(status.platform, status.accountName);
           }
         }
-      } catch (err) {
-        console.error("Failed to sync OAuth status:", err);
+      } catch {
+        // Silently ignore — status sync is best-effort on mount
       }
     };
     syncStatus();
@@ -85,15 +92,17 @@ export const PublishPanel: React.FC = () => {
   );
 
   const handleConnect = async (platform: SocialPlatform) => {
+    setOauthError(null);
     try {
       const result = await startOAuthFlow(platform as OAuthPlatform);
       if (result.success && result.accountName) {
         connectAccount(platform, result.accountName);
       } else if (result.error) {
-        console.error("OAuth failed:", result.error);
+        setOauthError(`Failed to connect ${platform}: ${result.error}`);
       }
     } catch (err) {
-      console.error("OAuth error:", err);
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setOauthError(`Failed to connect ${platform}: ${message}`);
     }
   };
 
@@ -541,6 +550,26 @@ export const PublishPanel: React.FC = () => {
                   </Button>
                 )}
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* OAuth Error */}
+        {oauthError && (
+          <Card
+            variant="default"
+            className="animate-fadeIn mb-6 border-[hsl(var(--error)/0.3)] bg-[hsl(var(--error)/0.05)]"
+          >
+            <CardContent className="flex items-center gap-3 p-4">
+              <ExclamationTriangleIcon className="h-5 w-5 shrink-0 text-[hsl(var(--error))]" />
+              <p className="flex-1 text-sm text-[hsl(var(--error))]">{oauthError}</p>
+              <button
+                onClick={() => setOauthError(null)}
+                className="shrink-0 rounded p-1 text-[hsl(var(--text-muted))] transition-colors hover:text-[hsl(var(--text))]"
+                aria-label="Dismiss error"
+              >
+                <CrossCircledIcon className="h-4 w-4" />
+              </button>
             </CardContent>
           </Card>
         )}

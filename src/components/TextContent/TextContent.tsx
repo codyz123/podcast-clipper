@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   PlusIcon,
   TrashIcon,
@@ -11,7 +11,7 @@ import { Button, Card, CardContent, Input } from "../ui";
 import { Spinner } from "../ui/Progress";
 import { useProjectStore } from "../../stores/projectStore";
 import { useTextSnippets } from "../../hooks/useTextSnippets";
-import { cn } from "../../lib/utils";
+import { cn, debounce } from "../../lib/utils";
 
 export const TextContent: React.FC = () => {
   const { currentProject } = useProjectStore();
@@ -37,7 +37,41 @@ export const TextContent: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Separate debounced functions for content and name to prevent one canceling the other
+  const debouncedSaveContent = useMemo(
+    () =>
+      debounce(async (snippetId: string, projectId: string, newContent: string) => {
+        setIsSaving(true);
+        try {
+          await updateSnippet(projectId, snippetId, { content: newContent });
+        } finally {
+          setIsSaving(false);
+          setIsEditing(false);
+        }
+      }, 1500),
+    [updateSnippet]
+  );
+
+  const debouncedSaveName = useMemo(
+    () =>
+      debounce(async (snippetId: string, projectId: string, newName: string) => {
+        setIsSaving(true);
+        try {
+          await updateSnippet(projectId, snippetId, { name: newName });
+        } finally {
+          setIsSaving(false);
+        }
+      }, 1500),
+    [updateSnippet]
+  );
+
+  // Flush pending saves on unmount or snippet switch
+  useEffect(() => {
+    return () => {
+      debouncedSaveContent.flush();
+      debouncedSaveName.flush();
+    };
+  }, [activeSnippetId, debouncedSaveContent, debouncedSaveName]);
 
   // Check for transcript
   const hasTranscript =
@@ -66,45 +100,28 @@ export const TextContent: React.FC = () => {
     }
   }, [activeSnippetId, snippets]);
 
-  // Debounced auto-save for edits
+  // Auto-save for edits
   const handleContentChange = useCallback(
     (newContent: string) => {
       setContent(newContent);
       setIsEditing(true);
 
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-
       if (activeSnippetId && currentProject?.id) {
-        saveTimeoutRef.current = setTimeout(async () => {
-          setIsSaving(true);
-          await updateSnippet(currentProject.id, activeSnippetId, { content: newContent });
-          setIsSaving(false);
-          setIsEditing(false);
-        }, 1500);
+        debouncedSaveContent(activeSnippetId, currentProject.id, newContent);
       }
     },
-    [activeSnippetId, currentProject?.id, updateSnippet]
+    [activeSnippetId, currentProject?.id, debouncedSaveContent]
   );
 
   const handleNameChange = useCallback(
     (newName: string) => {
       setName(newName);
 
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-
       if (activeSnippetId && currentProject?.id) {
-        saveTimeoutRef.current = setTimeout(async () => {
-          setIsSaving(true);
-          await updateSnippet(currentProject.id, activeSnippetId, { name: newName });
-          setIsSaving(false);
-        }, 1500);
+        debouncedSaveName(activeSnippetId, currentProject.id, newName);
       }
     },
-    [activeSnippetId, currentProject?.id, updateSnippet]
+    [activeSnippetId, currentProject?.id, debouncedSaveName]
   );
 
   const handleGenerate = async () => {

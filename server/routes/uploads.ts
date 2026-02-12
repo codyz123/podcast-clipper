@@ -106,6 +106,12 @@ router.post(
     try {
       const sessionId = req.params.sessionId as string;
       const partNumber = parseInt(req.params.partNumber as string, 10);
+
+      if (isNaN(partNumber) || partNumber < 0) {
+        res.status(400).json({ error: "Invalid part number" });
+        return;
+      }
+
       const chunk = req.body as Buffer; // From express.raw()
 
       if (!Buffer.isBuffer(chunk) || chunk.length === 0) {

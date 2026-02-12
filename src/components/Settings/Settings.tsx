@@ -1,8 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   EyeOpenIcon,
   EyeClosedIcon,
-  CheckIcon,
   TrashIcon,
   CopyIcon,
   GearIcon,
@@ -10,11 +9,12 @@ import {
   VideoIcon,
   TimerIcon,
   LayersIcon,
+  CheckIcon,
 } from "@radix-ui/react-icons";
-import { Button, Card, CardContent, Input } from "../ui";
+import { Card, CardContent, Input } from "../ui";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { VideoFormat, VIDEO_FORMATS } from "../../lib/types";
-import { cn } from "../../lib/utils";
+import { cn, debounce } from "../../lib/utils";
 
 export const Settings: React.FC = () => {
   const {
@@ -38,50 +38,58 @@ export const Settings: React.FC = () => {
   const [assemblyaiApiKey, setAssemblyaiApiKey] = useState(settings.assemblyaiApiKey || "");
   const [showAnthropicKey, setShowAnthropicKey] = useState(false);
   const [showAssemblyaiKey, setShowAssemblyaiKey] = useState(false);
-  const [isSaved, setIsSaved] = useState(false);
-  const [isBackendSaved, setIsBackendSaved] = useState(false);
-  const [isGoogleSaved, setIsGoogleSaved] = useState(false);
-  const [isPexelsSaved, setIsPexelsSaved] = useState(false);
-  const [isAnthropicSaved, setIsAnthropicSaved] = useState(false);
-  const [isAssemblyaiSaved, setIsAssemblyaiSaved] = useState(false);
 
   const hasBackendConfig = !!(settings.backendUrl && settings.accessCode);
 
-  const handleSaveApiKey = () => {
-    setApiKey(apiKeyInput);
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 2000);
-  };
+  // Debounced store writes for each text input section
+  const debouncedSaveApiKey = useMemo(
+    () => debounce((key: string) => setApiKey(key), 800),
+    [setApiKey]
+  );
+  const debouncedSaveBackend = useMemo(
+    () => debounce((url: string, code: string) => setBackendConfig(url, code), 800),
+    [setBackendConfig]
+  );
+  const debouncedSaveGoogle = useMemo(
+    () =>
+      debounce(
+        (clientId: string, apiKey: string) =>
+          updateSettings({ googleClientId: clientId, googleApiKey: apiKey }),
+        800
+      ),
+    [updateSettings]
+  );
+  const debouncedSavePexels = useMemo(
+    () => debounce((key: string) => updateSettings({ pexelsApiKey: key }), 800),
+    [updateSettings]
+  );
+  const debouncedSaveAnthropic = useMemo(
+    () => debounce((key: string) => updateSettings({ anthropicApiKey: key }), 800),
+    [updateSettings]
+  );
+  const debouncedSaveAssemblyai = useMemo(
+    () => debounce((key: string) => updateSettings({ assemblyaiApiKey: key }), 800),
+    [updateSettings]
+  );
 
-  const handleSaveBackendConfig = () => {
-    setBackendConfig(backendUrlInput, accessCodeInput);
-    setIsBackendSaved(true);
-    setTimeout(() => setIsBackendSaved(false), 2000);
-  };
-
-  const handleSaveGoogleCredentials = () => {
-    updateSettings({ googleClientId, googleApiKey });
-    setIsGoogleSaved(true);
-    setTimeout(() => setIsGoogleSaved(false), 2000);
-  };
-
-  const handleSavePexelsApiKey = () => {
-    updateSettings({ pexelsApiKey });
-    setIsPexelsSaved(true);
-    setTimeout(() => setIsPexelsSaved(false), 2000);
-  };
-
-  const handleSaveAnthropicApiKey = () => {
-    updateSettings({ anthropicApiKey });
-    setIsAnthropicSaved(true);
-    setTimeout(() => setIsAnthropicSaved(false), 2000);
-  };
-
-  const handleSaveAssemblyaiApiKey = () => {
-    updateSettings({ assemblyaiApiKey });
-    setIsAssemblyaiSaved(true);
-    setTimeout(() => setIsAssemblyaiSaved(false), 2000);
-  };
+  // Flush all pending saves on unmount
+  useEffect(() => {
+    return () => {
+      debouncedSaveApiKey.flush();
+      debouncedSaveBackend.flush();
+      debouncedSaveGoogle.flush();
+      debouncedSavePexels.flush();
+      debouncedSaveAnthropic.flush();
+      debouncedSaveAssemblyai.flush();
+    };
+  }, [
+    debouncedSaveApiKey,
+    debouncedSaveBackend,
+    debouncedSaveGoogle,
+    debouncedSavePexels,
+    debouncedSaveAnthropic,
+    debouncedSaveAssemblyai,
+  ]);
 
   const toggleDefaultFormat = (format: VideoFormat) => {
     const current = settings.defaultFormats || [];
@@ -169,7 +177,10 @@ export const Settings: React.FC = () => {
                   </label>
                   <Input
                     value={backendUrlInput}
-                    onChange={(e) => setBackendUrlInput(e.target.value)}
+                    onChange={(e) => {
+                      setBackendUrlInput(e.target.value);
+                      debouncedSaveBackend(e.target.value, accessCodeInput);
+                    }}
                     placeholder="http://localhost:3001"
                   />
                 </div>
@@ -180,31 +191,17 @@ export const Settings: React.FC = () => {
                   <Input
                     type="password"
                     value={accessCodeInput}
-                    onChange={(e) => setAccessCodeInput(e.target.value)}
+                    onChange={(e) => {
+                      setAccessCodeInput(e.target.value);
+                      debouncedSaveBackend(backendUrlInput, e.target.value);
+                    }}
                     placeholder="Enter access code"
                   />
                 </div>
-                <div className="flex items-center justify-between pt-2">
-                  <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
-                    <InfoCircledIcon className="h-3.5 w-3.5" />
-                    Get access code from the app administrator
-                  </p>
-                  <Button
-                    onClick={handleSaveBackendConfig}
-                    disabled={!backendUrlInput || !accessCodeInput}
-                    variant={isBackendSaved ? "secondary" : "primary"}
-                    size="sm"
-                  >
-                    {isBackendSaved ? (
-                      <>
-                        <CheckIcon className="h-4 w-4" />
-                        Saved
-                      </>
-                    ) : (
-                      "Connect"
-                    )}
-                  </Button>
-                </div>
+                <p className="flex items-center gap-2 pt-2 text-xs text-[hsl(var(--text-subtle))]">
+                  <InfoCircledIcon className="h-3.5 w-3.5" />
+                  Get access code from the app administrator
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -240,41 +237,28 @@ export const Settings: React.FC = () => {
                 <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                   OpenAI API Key
                 </label>
-                <div className="flex gap-3">
-                  <div className="relative flex-1">
-                    <Input
-                      type={showApiKey ? "text" : "password"}
-                      value={apiKeyInput}
-                      onChange={(e) => setApiKeyInput(e.target.value)}
-                      placeholder="sk-..."
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                      className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
-                    >
-                      {showApiKey ? (
-                        <EyeClosedIcon className="h-4 w-4" />
-                      ) : (
-                        <EyeOpenIcon className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                  <Button
-                    onClick={handleSaveApiKey}
-                    disabled={!apiKeyInput}
-                    variant={isSaved ? "secondary" : "primary"}
+                <div className="relative">
+                  <Input
+                    type={showApiKey ? "text" : "password"}
+                    value={apiKeyInput}
+                    onChange={(e) => {
+                      setApiKeyInput(e.target.value);
+                      debouncedSaveApiKey(e.target.value);
+                    }}
+                    placeholder="sk-..."
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
                   >
-                    {isSaved ? (
-                      <>
-                        <CheckIcon className="h-4 w-4" />
-                        Saved
-                      </>
+                    {showApiKey ? (
+                      <EyeClosedIcon className="h-4 w-4" />
                     ) : (
-                      "Save Key"
+                      <EyeOpenIcon className="h-4 w-4" />
                     )}
-                  </Button>
+                  </button>
                 </div>
                 <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
                   <InfoCircledIcon className="h-3.5 w-3.5" />
@@ -318,41 +302,28 @@ export const Settings: React.FC = () => {
                 <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                   Anthropic API Key
                 </label>
-                <div className="flex gap-3">
-                  <div className="relative flex-1">
-                    <Input
-                      type={showAnthropicKey ? "text" : "password"}
-                      value={anthropicApiKey}
-                      onChange={(e) => setAnthropicApiKey(e.target.value)}
-                      placeholder="sk-ant-..."
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowAnthropicKey(!showAnthropicKey)}
-                      className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
-                    >
-                      {showAnthropicKey ? (
-                        <EyeClosedIcon className="h-4 w-4" />
-                      ) : (
-                        <EyeOpenIcon className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                  <Button
-                    onClick={handleSaveAnthropicApiKey}
-                    disabled={!anthropicApiKey}
-                    variant={isAnthropicSaved ? "secondary" : "primary"}
+                <div className="relative">
+                  <Input
+                    type={showAnthropicKey ? "text" : "password"}
+                    value={anthropicApiKey}
+                    onChange={(e) => {
+                      setAnthropicApiKey(e.target.value);
+                      debouncedSaveAnthropic(e.target.value);
+                    }}
+                    placeholder="sk-ant-..."
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAnthropicKey(!showAnthropicKey)}
+                    className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
                   >
-                    {isAnthropicSaved ? (
-                      <>
-                        <CheckIcon className="h-4 w-4" />
-                        Saved
-                      </>
+                    {showAnthropicKey ? (
+                      <EyeClosedIcon className="h-4 w-4" />
                     ) : (
-                      "Save Key"
+                      <EyeOpenIcon className="h-4 w-4" />
                     )}
-                  </Button>
+                  </button>
                 </div>
                 <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
                   <InfoCircledIcon className="h-3.5 w-3.5" />
@@ -396,41 +367,28 @@ export const Settings: React.FC = () => {
                 <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                   AssemblyAI API Key
                 </label>
-                <div className="flex gap-3">
-                  <div className="relative flex-1">
-                    <Input
-                      type={showAssemblyaiKey ? "text" : "password"}
-                      value={assemblyaiApiKey}
-                      onChange={(e) => setAssemblyaiApiKey(e.target.value)}
-                      placeholder="Enter your AssemblyAI API key"
-                      className="pr-10"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowAssemblyaiKey(!showAssemblyaiKey)}
-                      className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
-                    >
-                      {showAssemblyaiKey ? (
-                        <EyeClosedIcon className="h-4 w-4" />
-                      ) : (
-                        <EyeOpenIcon className="h-4 w-4" />
-                      )}
-                    </button>
-                  </div>
-                  <Button
-                    onClick={handleSaveAssemblyaiApiKey}
-                    disabled={!assemblyaiApiKey}
-                    variant={isAssemblyaiSaved ? "secondary" : "primary"}
+                <div className="relative">
+                  <Input
+                    type={showAssemblyaiKey ? "text" : "password"}
+                    value={assemblyaiApiKey}
+                    onChange={(e) => {
+                      setAssemblyaiApiKey(e.target.value);
+                      debouncedSaveAssemblyai(e.target.value);
+                    }}
+                    placeholder="Enter your AssemblyAI API key"
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAssemblyaiKey(!showAssemblyaiKey)}
+                    className="absolute top-1/2 right-3 -translate-y-1/2 text-[hsl(var(--text-ghost))] transition-colors hover:text-[hsl(var(--text))]"
                   >
-                    {isAssemblyaiSaved ? (
-                      <>
-                        <CheckIcon className="h-4 w-4" />
-                        Saved
-                      </>
+                    {showAssemblyaiKey ? (
+                      <EyeClosedIcon className="h-4 w-4" />
                     ) : (
-                      "Save Key"
+                      <EyeOpenIcon className="h-4 w-4" />
                     )}
-                  </Button>
+                  </button>
                 </div>
                 <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
                   <InfoCircledIcon className="h-3.5 w-3.5" />
@@ -528,7 +486,10 @@ export const Settings: React.FC = () => {
                   </label>
                   <Input
                     value={googleClientId}
-                    onChange={(e) => setGoogleClientId(e.target.value)}
+                    onChange={(e) => {
+                      setGoogleClientId(e.target.value);
+                      debouncedSaveGoogle(e.target.value, googleApiKey);
+                    }}
                     placeholder="your-client-id.apps.googleusercontent.com"
                   />
                 </div>
@@ -538,39 +499,25 @@ export const Settings: React.FC = () => {
                   </label>
                   <Input
                     value={googleApiKey}
-                    onChange={(e) => setGoogleApiKey(e.target.value)}
+                    onChange={(e) => {
+                      setGoogleApiKey(e.target.value);
+                      debouncedSaveGoogle(googleClientId, e.target.value);
+                    }}
                     placeholder="AIza..."
                   />
                 </div>
-                <div className="flex items-center justify-between pt-2">
-                  <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
-                    <InfoCircledIcon className="h-3.5 w-3.5" />
-                    Get credentials from{" "}
-                    <a
-                      href="https://console.cloud.google.com/apis/credentials"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-[hsl(var(--cyan))] hover:underline"
-                    >
-                      Google Cloud Console
-                    </a>
-                  </p>
-                  <Button
-                    onClick={handleSaveGoogleCredentials}
-                    disabled={!googleClientId || !googleApiKey}
-                    variant={isGoogleSaved ? "secondary" : "primary"}
-                    size="sm"
+                <p className="flex items-center gap-2 pt-2 text-xs text-[hsl(var(--text-subtle))]">
+                  <InfoCircledIcon className="h-3.5 w-3.5" />
+                  Get credentials from{" "}
+                  <a
+                    href="https://console.cloud.google.com/apis/credentials"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[hsl(var(--cyan))] hover:underline"
                   >
-                    {isGoogleSaved ? (
-                      <>
-                        <CheckIcon className="h-4 w-4" />
-                        Saved
-                      </>
-                    ) : (
-                      "Save"
-                    )}
-                  </Button>
-                </div>
+                    Google Cloud Console
+                  </a>
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -601,30 +548,15 @@ export const Settings: React.FC = () => {
                 <label className="block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
                   Pexels API Key
                 </label>
-                <div className="flex gap-3">
-                  <div className="relative flex-1">
-                    <Input
-                      type="password"
-                      value={pexelsApiKey}
-                      onChange={(e) => setPexelsApiKey(e.target.value)}
-                      placeholder="Enter your Pexels API key"
-                    />
-                  </div>
-                  <Button
-                    onClick={handleSavePexelsApiKey}
-                    disabled={!pexelsApiKey}
-                    variant={isPexelsSaved ? "secondary" : "primary"}
-                  >
-                    {isPexelsSaved ? (
-                      <>
-                        <CheckIcon className="h-4 w-4" />
-                        Saved
-                      </>
-                    ) : (
-                      "Save Key"
-                    )}
-                  </Button>
-                </div>
+                <Input
+                  type="password"
+                  value={pexelsApiKey}
+                  onChange={(e) => {
+                    setPexelsApiKey(e.target.value);
+                    debouncedSavePexels(e.target.value);
+                  }}
+                  placeholder="Enter your Pexels API key"
+                />
                 <p className="flex items-center gap-2 text-xs text-[hsl(var(--text-subtle))]">
                   <InfoCircledIcon className="h-3.5 w-3.5" />
                   Get a free API key from{" "}
@@ -750,25 +682,6 @@ export const Settings: React.FC = () => {
                   />
                   <p className="mt-2 text-xs text-[hsl(var(--text-muted))]">
                     Recommended: 15-45 seconds for social media
-                  </p>
-                </div>
-                <div>
-                  <label className="mb-2 block text-xs font-semibold tracking-wider text-[hsl(var(--text-subtle))] uppercase">
-                    Auto-save Interval (sec)
-                  </label>
-                  <Input
-                    type="number"
-                    min={10}
-                    max={300}
-                    value={settings.autoSaveInterval}
-                    onChange={(e) =>
-                      updateSettings({
-                        autoSaveInterval: parseInt(e.target.value) || 30,
-                      })
-                    }
-                  />
-                  <p className="mt-2 text-xs text-[hsl(var(--text-muted))]">
-                    How often to save your work automatically
                   </p>
                 </div>
               </div>

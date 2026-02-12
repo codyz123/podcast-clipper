@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { CalendarIcon, PersonIcon, FileTextIcon, SpeakerLoudIcon } from "@radix-ui/react-icons";
-import { cn } from "../../lib/utils";
+import { cn, debounce } from "../../lib/utils";
 import { useProjectStore } from "../../stores/projectStore";
 import { useEpisodes } from "../../hooks/useEpisodes";
 import { StageProgressBar } from "../ui/StageProgressBar";
@@ -42,8 +42,7 @@ export const EpisodeInfoPage: React.FC = () => {
   });
 
   const [isDirty, setIsDirty] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
 
   // Sync from store when project changes
   useEffect(() => {
@@ -70,36 +69,46 @@ export const EpisodeInfoPage: React.FC = () => {
     setIsDirty(true);
   };
 
-  const handleSave = async () => {
-    if (!currentProject) return;
+  // Debounced save function
+  const debouncedSave = useMemo(
+    () =>
+      debounce(async (data: EpisodeMetadata, projectId: string) => {
+        setSaveStatus("saving");
+        try {
+          const updates = {
+            name: data.title,
+            description: data.description,
+            episodeNumber: data.episodeNumber,
+            seasonNumber: data.seasonNumber,
+            publishDate: data.publishDate,
+            showNotes: data.showNotes,
+            explicit: data.explicit,
+            guests: data.guests,
+          };
 
-    setIsSaving(true);
-    setSaveError(null);
-    try {
-      const updates = {
-        name: metadata.title,
-        description: metadata.description,
-        episodeNumber: metadata.episodeNumber,
-        seasonNumber: metadata.seasonNumber,
-        publishDate: metadata.publishDate,
-        showNotes: metadata.showNotes,
-        explicit: metadata.explicit,
-        guests: metadata.guests,
-      };
+          await updateEpisode(projectId, updates);
+          updateProject(updates);
+          setIsDirty(false);
+          setSaveStatus("saved");
+        } catch (err) {
+          console.error("[EpisodeInfoPage] Auto-save error:", err);
+          setSaveStatus("error");
+        }
+      }, 1500),
+    [updateEpisode, updateProject]
+  );
 
-      // Persist to database — throws on failure
-      await updateEpisode(currentProject.id, updates);
-
-      // Update local store on success
-      updateProject(updates);
-      setIsDirty(false);
-    } catch (err) {
-      console.error("[EpisodeInfoPage] Save error:", err);
-      setSaveError(err instanceof Error ? err.message : "Failed to save changes");
-    } finally {
-      setIsSaving(false);
+  // Trigger save on changes (no cleanup — debounce resets its own timer)
+  useEffect(() => {
+    if (isDirty && currentProject?.id) {
+      debouncedSave(metadata, currentProject.id);
     }
-  };
+  }, [metadata, isDirty, debouncedSave, currentProject?.id]);
+
+  // Flush on unmount only (debouncedSave is stable from useMemo)
+  useEffect(() => {
+    return () => debouncedSave.flush();
+  }, [debouncedSave]);
 
   const handleAddGuest = () => {
     const newGuest: Guest = {
@@ -157,26 +166,23 @@ export const EpisodeInfoPage: React.FC = () => {
               Edit your episode metadata and details
             </p>
           </div>
-          <button
-            onClick={handleSave}
-            disabled={!isDirty || isSaving}
+          <div
             className={cn(
-              "rounded-lg px-4 py-2 text-sm font-medium transition-all",
-              isDirty
-                ? "bg-[hsl(var(--cyan))] text-[hsl(var(--bg-base))] hover:bg-[hsl(var(--cyan)/0.9)]"
-                : "cursor-not-allowed bg-[hsl(var(--surface))] text-[hsl(var(--text-ghost))]"
+              "rounded-lg px-4 py-2 text-sm font-medium",
+              saveStatus === "saving"
+                ? "bg-[hsl(var(--surface))] text-[hsl(var(--text-muted))]"
+                : saveStatus === "error"
+                  ? "bg-[hsl(var(--error)/0.1)] text-[hsl(var(--error))]"
+                  : "bg-[hsl(var(--surface))] text-[hsl(var(--text-ghost))]"
             )}
           >
-            {isSaving ? "Saving..." : isDirty ? "Save Changes" : "Saved"}
-          </button>
-        </div>
-
-        {/* Error Message */}
-        {saveError && (
-          <div className="mb-6 rounded-lg border border-[hsl(var(--error)/0.3)] bg-[hsl(var(--error)/0.1)] p-4">
-            <p className="text-sm text-[hsl(var(--error))]">{saveError}</p>
+            {saveStatus === "saving"
+              ? "Saving..."
+              : saveStatus === "error"
+                ? "Error saving"
+                : "Auto-saved"}
           </div>
-        )}
+        </div>
 
         {/* Pipeline Progress - Full Width */}
         <div className="mb-8">

@@ -305,7 +305,7 @@ export interface AppSettings {
   defaultTemplate: string;
   defaultFormats: VideoFormat[];
   defaultClipDuration: number; // seconds
-  autoSaveInterval: number; // seconds
+
   confidenceThreshold: number; // 0-1, words below this confidence are filtered (music/noise)
 }
 

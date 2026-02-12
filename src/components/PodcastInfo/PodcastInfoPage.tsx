@@ -145,13 +145,17 @@ export const PodcastInfoPage: React.FC = () => {
     [updatePodcast, isOwner, updatePodcastMetadata]
   );
 
-  // Trigger save on changes
+  // Trigger save on changes (no cleanup — debounce resets its own timer)
   useEffect(() => {
     if (isDirty) {
       debouncedSave(metadata);
     }
-    return () => debouncedSave.cancel();
   }, [metadata, isDirty, debouncedSave]);
+
+  // Flush on unmount only (debouncedSave is stable from useMemo)
+  useEffect(() => {
+    return () => debouncedSave.flush();
+  }, [debouncedSave]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

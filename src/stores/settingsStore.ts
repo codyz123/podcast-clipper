@@ -125,7 +125,7 @@ export const useSettingsStore = create<SettingsState>()(
         defaultTemplate: "minimal-dark",
         defaultFormats: ["9:16"] as VideoFormat[],
         defaultClipDuration: 30,
-        autoSaveInterval: 30,
+
         confidenceThreshold: 0,
       },
       templates: DEFAULT_TEMPLATES,
