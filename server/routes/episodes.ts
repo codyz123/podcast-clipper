@@ -103,7 +103,11 @@ router.get(
 router.post("/:podcastId/episodes", verifyPodcastAccess, async (req: Request, res: Response) => {
   try {
     const podcastId = getParam(req.params.podcastId);
-    const userId = req.user!.userId;
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    const userId = req.user.userId;
     const { name, description } = req.body;
 
     if (!name) {
@@ -138,8 +142,8 @@ router.put(
       const episodeId = getParam(req.params.episodeId);
       const updates = req.body;
 
-      console.log("[PUT episode] podcastId:", podcastId, "episodeId:", episodeId);
-      console.log("[PUT episode] updates received:", JSON.stringify(updates));
+      console.warn("[PUT episode] podcastId:", podcastId, "episodeId:", episodeId);
+      console.warn("[PUT episode] updates received:", JSON.stringify(updates));
 
       // Filter to allowed fields
       const allowedFields = [
@@ -175,7 +179,7 @@ router.put(
       }
       filteredUpdates.updatedAt = new Date();
 
-      console.log("[PUT episode] filteredUpdates:", JSON.stringify(filteredUpdates));
+      console.warn("[PUT episode] filteredUpdates:", JSON.stringify(filteredUpdates));
 
       const [episode] = await db
         .update(projects)
@@ -188,7 +192,7 @@ router.put(
         return;
       }
 
-      console.log("[PUT episode] Success, updated episode:", episode.id);
+      console.warn("[PUT episode] Success, updated episode:", episode.id);
       res.json({ episode });
     } catch (error) {
       console.error("[PUT episode] Error:", error);
@@ -447,7 +451,11 @@ router.post(
     try {
       const podcastId = getParam(req.params.podcastId);
       const episodeId = getParam(req.params.episodeId);
-      const userId = req.user!.userId;
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      const userId = req.user.userId;
       const { text, words, segments, language, name, audioFingerprint, service } = req.body;
 
       // Verify episode exists
@@ -580,7 +588,11 @@ router.post(
     try {
       const podcastId = getParam(req.params.podcastId);
       const episodeId = getParam(req.params.episodeId);
-      const userId = req.user!.userId;
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      const userId = req.user.userId;
       const clipData = req.body;
 
       // Verify episode exists
@@ -632,7 +644,11 @@ router.put(
     try {
       const podcastId = getParam(req.params.podcastId);
       const episodeId = getParam(req.params.episodeId);
-      const userId = req.user!.userId;
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      const userId = req.user.userId;
       const { clips: clipList } = req.body;
 
       // Verify episode exists

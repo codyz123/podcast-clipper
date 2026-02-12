@@ -509,8 +509,8 @@ function App() {
     route.kind === "episode-route" && resolvedEpisode ? resolvedEpisode.episode.id : null;
 
   const { data: episodeDetail, isLoading: episodeDetailLoading } = useQuery({
-    queryKey: episodeKeys.detail(currentPodcastId!, resolvedEpisodeId!),
-    queryFn: () => fetchEpisodeDetail(currentPodcastId!, resolvedEpisodeId!),
+    queryKey: episodeKeys.detail(currentPodcastId ?? "", resolvedEpisodeId ?? ""),
+    queryFn: () => fetchEpisodeDetail(currentPodcastId ?? "", resolvedEpisodeId ?? ""),
     enabled: !!currentPodcastId && !!resolvedEpisodeId && isAuthenticated && !authLoading,
   });
 

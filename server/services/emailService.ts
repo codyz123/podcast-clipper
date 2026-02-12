@@ -101,7 +101,7 @@ export async function sendInvitationEmail({
   }
 
   const fromEmail = getFromEmail();
-  console.log(`[Email] Sending invitation to ${to} from ${fromEmail}`);
+  console.warn(`[Email] Sending invitation to ${to} from ${fromEmail}`);
 
   try {
     const { data, error } = await client.emails.send({
@@ -175,7 +175,7 @@ This invitation was sent by Podcastomatic. If you didn't expect this email, you 
       return { success: false, error: errorMessage, errorCode, invitationUrl: signUpUrl };
     }
 
-    console.log(`[Email] Invitation sent to ${to} (id: ${data?.id || "unknown"})`);
+    console.warn(`[Email] Invitation sent to ${to} (id: ${data?.id || "unknown"})`);
     return { success: true, invitationUrl: signUpUrl };
   } catch (err) {
     console.error("[Email] Error sending invitation:", err);

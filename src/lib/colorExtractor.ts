@@ -137,16 +137,16 @@ export async function extractBrandColors(imageDataUrl: string): Promise<BrandCol
       // Convert to arrays and sort by frequency
       let colors = Array.from(viableColorMap.values()).sort((a, b) => b.count - a.count);
 
-      console.log("[Brand Colors] Found", colors.length, "viable colors");
+      console.warn("[Brand Colors] Found", colors.length, "viable colors");
 
       // Fallback to less-ideal colors if no viable ones found
       if (colors.length === 0) {
         colors = Array.from(fallbackColorMap.values()).sort((a, b) => b.count - a.count);
-        console.log("[Brand Colors] Using fallback colors:", colors.length);
+        console.warn("[Brand Colors] Using fallback colors:", colors.length);
       }
 
       if (colors.length === 0) {
-        console.log("[Brand Colors] No colors found in image");
+        console.warn("[Brand Colors] No colors found in image");
         resolve(null);
         return;
       }
@@ -380,7 +380,7 @@ export function applyBrandColors(colors: BrandColors | null): void {
   const root = document.documentElement;
 
   if (colors) {
-    console.log("[Brand Colors] Applying:", colors);
+    console.warn("[Brand Colors] Applying:", colors);
     // Set brand color slots
     root.style.setProperty("--brand-primary", colors.primaryHsl);
     root.style.setProperty("--brand-secondary", colors.secondaryHsl);
@@ -403,7 +403,7 @@ export function applyBrandColors(colors: BrandColors | null): void {
     // Update favicon with brand color
     updateFavicon(colors.primaryHsl);
 
-    console.log(
+    console.warn(
       "[Brand Colors] Applied variables to root:",
       colors.primaryHsl,
       colors.secondaryHsl,
@@ -428,6 +428,6 @@ export function applyBrandColors(colors: BrandColors | null): void {
     // Reset favicon to default
     updateFavicon(null);
 
-    console.log("[Brand Colors] Cleared all overrides");
+    console.warn("[Brand Colors] Cleared all overrides");
   }
 }

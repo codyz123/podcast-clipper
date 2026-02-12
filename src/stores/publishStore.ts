@@ -468,7 +468,7 @@ export const usePublishStore = create<PostPublishState>()(
         if (version < 2) {
           // Old clip-centric state structure is incompatible
           // User content (clips, snippets) is in database - this is just export queue
-          console.log("[PublishStore] Migrating to v2 - resetting export queue");
+          console.warn("[PublishStore] Migrating to v2 - resetting export queue");
           return { posts: [] };
         }
         if (version < 3) {

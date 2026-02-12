@@ -172,11 +172,13 @@ export async function listR2Objects(
     })
   );
 
-  return (response.Contents || []).map((obj) => ({
-    key: obj.Key!,
-    size: obj.Size || 0,
-    url: getR2PublicUrl(obj.Key!),
-  }));
+  return (response.Contents || [])
+    .filter((obj) => obj.Key)
+    .map((obj) => ({
+      key: obj.Key as string,
+      size: obj.Size || 0,
+      url: getR2PublicUrl(obj.Key as string),
+    }));
 }
 
 // ============ Multipart Upload Support ============

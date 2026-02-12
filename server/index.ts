@@ -149,7 +149,7 @@ async function start() {
     await initializeDatabase();
     await initializeMediaTables();
     app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+      console.warn(`Server running on port ${PORT}`);
     });
   } catch (error) {
     console.error("Failed to initialize database:", error);

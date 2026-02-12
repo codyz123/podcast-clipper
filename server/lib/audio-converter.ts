@@ -103,7 +103,7 @@ export async function splitAudioIntoChunks(
   const numChunks = Math.ceil(duration / chunkDuration);
   const chunkPaths: string[] = [];
 
-  console.log(`Splitting ${(duration / 60).toFixed(1)} minute audio into ${numChunks} chunks...`);
+  console.warn(`Splitting ${(duration / 60).toFixed(1)} minute audio into ${numChunks} chunks...`);
 
   for (let i = 0; i < numChunks; i++) {
     const startTime = i * chunkDuration;
@@ -120,7 +120,7 @@ export async function splitAudioIntoChunks(
     );
 
     chunkPaths.push(outputPath);
-    console.log(`  Chunk ${i + 1}/${numChunks} created`);
+    console.warn(`  Chunk ${i + 1}/${numChunks} created`);
   }
 
   return chunkPaths;

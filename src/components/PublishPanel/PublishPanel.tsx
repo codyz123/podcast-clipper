@@ -48,7 +48,7 @@ export const PublishPanel: React.FC = () => {
     markPostFailed,
   } = usePublishStore();
 
-  const projectClips = currentProject?.clips || [];
+  const projectClips = useMemo(() => currentProject?.clips || [], [currentProject?.clips]);
 
   // Fetch snippets when project changes
   useEffect(() => {
@@ -84,25 +84,29 @@ export const PublishPanel: React.FC = () => {
     [connections]
   );
 
-  const handleConnect = async (platform: SocialPlatform) => {
-    try {
-      const result = await startOAuthFlow(platform as OAuthPlatform);
-      if (result.success && result.accountName) {
-        connectAccount(platform, result.accountName);
-      } else if (result.error) {
-        console.error("OAuth failed:", result.error);
+  const handleConnect = useCallback(
+    async (platform: SocialPlatform) => {
+      try {
+        const result = await startOAuthFlow(platform as OAuthPlatform);
+        if (result.success && result.accountName) {
+          connectAccount(platform, result.accountName);
+        } else if (result.error) {
+          console.error("OAuth failed:", result.error);
+        }
+      } catch (err) {
+        console.error("OAuth error:", err);
       }
-    } catch (err) {
-      console.error("OAuth error:", err);
-    }
-  };
+    },
+    [connectAccount]
+  );
 
   // Get connection handler for a specific destination
   const getConnectHandler = useCallback(
     (destination: PublishDestinationType) => {
       const config = PLATFORM_CONFIGS[destination];
-      if (!config.connectionPlatform || !config.supportsDirectUpload) return undefined;
-      return () => handleConnect(config.connectionPlatform!);
+      const { connectionPlatform } = config;
+      if (!connectionPlatform || !config.supportsDirectUpload) return undefined;
+      return () => handleConnect(connectionPlatform);
     },
     [handleConnect]
   );

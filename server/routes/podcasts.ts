@@ -34,6 +34,10 @@ podcastsRouter.use(jwtAuthMiddleware);
 // GET /api/podcasts - List user's podcasts
 podcastsRouter.get("/", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const userPodcasts = await db
       .select({
         id: podcasts.id,
@@ -45,7 +49,7 @@ podcastsRouter.get("/", async (req: Request, res: Response) => {
       })
       .from(podcastMembers)
       .innerJoin(podcasts, eq(podcasts.id, podcastMembers.podcastId))
-      .where(eq(podcastMembers.userId, req.user!.userId));
+      .where(eq(podcastMembers.userId, req.user.userId));
 
     res.json({ podcasts: userPodcasts });
   } catch (error) {
@@ -57,6 +61,10 @@ podcastsRouter.get("/", async (req: Request, res: Response) => {
 // POST /api/podcasts - Create new podcast
 podcastsRouter.post("/", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const { name, description } = req.body;
 
     if (!name || name.length < 1 || name.length > 255) {
@@ -70,14 +78,14 @@ podcastsRouter.post("/", async (req: Request, res: Response) => {
       .values({
         name: name.trim(),
         description: description?.trim(),
-        createdById: req.user!.userId,
+        createdById: req.user.userId,
       })
       .returning();
 
     // Add creator as owner
     await db.insert(podcastMembers).values({
       podcastId: podcast.id,
-      userId: req.user!.userId,
+      userId: req.user.userId,
       role: "owner",
     });
 
@@ -91,13 +99,17 @@ podcastsRouter.post("/", async (req: Request, res: Response) => {
 // GET /api/podcasts/:id - Get podcast with members
 podcastsRouter.get("/:id", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const id = getParam(req.params.id);
 
     // Check membership
     const [membership] = await db
       .select()
       .from(podcastMembers)
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     if (!membership) {
       res.status(403).json({ error: "Not a member of this podcast" });
@@ -153,6 +165,10 @@ podcastsRouter.get("/:id", async (req: Request, res: Response) => {
 // PUT /api/podcasts/:id - Update podcast
 podcastsRouter.put("/:id", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const id = getParam(req.params.id);
     const { name, description, coverImageUrl, podcastMetadata, brandColors } = req.body;
 
@@ -160,7 +176,7 @@ podcastsRouter.put("/:id", async (req: Request, res: Response) => {
     const [membership] = await db
       .select()
       .from(podcastMembers)
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     if (!membership) {
       res.status(403).json({ error: "Not a member of this podcast" });
@@ -199,13 +215,17 @@ podcastsRouter.post(
   coverUpload.single("cover"),
   async (req: Request, res: Response) => {
     try {
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
       const id = getParam(req.params.id);
 
       // Verify ownership
       const [membership] = await db
         .select()
         .from(podcastMembers)
-        .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+        .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
       if (!membership || membership.role !== "owner") {
         res.status(403).json({ error: "Only owner can update cover image" });
@@ -243,13 +263,17 @@ podcastsRouter.post(
 // DELETE /api/podcasts/:id - Delete podcast
 podcastsRouter.delete("/:id", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const id = getParam(req.params.id);
 
     // Check ownership
     const [membership] = await db
       .select()
       .from(podcastMembers)
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     if (!membership || membership.role !== "owner") {
       res.status(403).json({ error: "Only owner can delete podcast" });
@@ -269,6 +293,10 @@ podcastsRouter.delete("/:id", async (req: Request, res: Response) => {
 // POST /api/podcasts/:id/invite - Invite user by email (any member can invite)
 podcastsRouter.post("/:id/invite", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const id = getParam(req.params.id);
     const { email } = req.body;
 
@@ -285,7 +313,7 @@ podcastsRouter.post("/:id/invite", async (req: Request, res: Response) => {
       })
       .from(podcastMembers)
       .innerJoin(podcasts, eq(podcasts.id, podcastMembers.podcastId))
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     if (!membershipWithPodcast) {
       res.status(403).json({ error: "Not a member of this podcast" });
@@ -296,7 +324,7 @@ podcastsRouter.post("/:id/invite", async (req: Request, res: Response) => {
     const [inviter] = await db
       .select({ name: users.name })
       .from(users)
-      .where(eq(users.id, req.user!.userId));
+      .where(eq(users.id, req.user.userId));
 
     const inviterName = inviter?.name || "A team member";
     const podcastName = membershipWithPodcast.podcastName;
@@ -324,7 +352,7 @@ podcastsRouter.post("/:id/invite", async (req: Request, res: Response) => {
         podcastId: id,
         userId: existingUser.id,
         role: "member",
-        invitedById: req.user!.userId,
+        invitedById: req.user.userId,
       });
 
       res.json({
@@ -355,7 +383,7 @@ podcastsRouter.post("/:id/invite", async (req: Request, res: Response) => {
       await db.insert(podcastInvitations).values({
         podcastId: id,
         email: normalizedEmail,
-        invitedById: req.user!.userId,
+        invitedById: req.user.userId,
         token,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
       });
@@ -389,13 +417,17 @@ podcastsRouter.post("/:id/invite", async (req: Request, res: Response) => {
 // GET /api/podcasts/:id/email-config - Get email configuration status (for diagnostics)
 podcastsRouter.get("/:id/email-config", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const id = getParam(req.params.id);
 
     // Check membership
     const [membership] = await db
       .select()
       .from(podcastMembers)
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     if (!membership) {
       res.status(403).json({ error: "Not a member of this podcast" });
@@ -421,9 +453,13 @@ podcastsRouter.post(
   "/:id/invitations/:invitationId/resend",
   async (req: Request, res: Response) => {
     try {
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
       const id = getParam(req.params.id);
       const invitationId = getParam(req.params.invitationId);
-      console.log("[Resend Invitation] podcastId:", id, "invitationId:", invitationId);
+      console.warn("[Resend Invitation] podcastId:", id, "invitationId:", invitationId);
 
       // Check membership and get podcast info
       const [membershipWithPodcast] = await db
@@ -433,7 +469,7 @@ podcastsRouter.post(
         })
         .from(podcastMembers)
         .innerJoin(podcasts, eq(podcasts.id, podcastMembers.podcastId))
-        .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+        .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
       if (!membershipWithPodcast) {
         res.status(403).json({ error: "Not a member of this podcast" });
@@ -461,13 +497,13 @@ podcastsRouter.post(
       const [inviter] = await db
         .select({ name: users.name })
         .from(users)
-        .where(eq(users.id, req.user!.userId));
+        .where(eq(users.id, req.user.userId));
 
       const inviterName = inviter?.name || "A team member";
       const podcastName = membershipWithPodcast.podcastName;
 
       // Send the invitation email
-      console.log(`[Resend Invitation] Sending email to ${invitation.email}`);
+      console.warn(`[Resend Invitation] Sending email to ${invitation.email}`);
       const emailResult = await sendInvitationEmail({
         to: invitation.email,
         inviterName,
@@ -495,15 +531,19 @@ podcastsRouter.post(
 // DELETE /api/podcasts/:id/invitations/:invitationId - Cancel invitation
 podcastsRouter.delete("/:id/invitations/:invitationId", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const id = getParam(req.params.id);
     const invitationId = getParam(req.params.invitationId);
-    console.log("[Cancel Invitation] podcastId:", id, "invitationId:", invitationId);
+    console.warn("[Cancel Invitation] podcastId:", id, "invitationId:", invitationId);
 
     // Check membership
     const [membership] = await db
       .select()
       .from(podcastMembers)
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     if (!membership) {
       res.status(403).json({ error: "Not a member of this podcast" });
@@ -515,7 +555,7 @@ podcastsRouter.delete("/:id/invitations/:invitationId", async (req: Request, res
       .where(and(eq(podcastInvitations.id, invitationId), eq(podcastInvitations.podcastId, id)))
       .returning();
 
-    console.log("[Cancel Invitation] Deleted rows:", result.length);
+    console.warn("[Cancel Invitation] Deleted rows:", result.length);
     res.json({ success: true });
   } catch (error) {
     console.error("Cancel invitation error:", error);
@@ -526,6 +566,10 @@ podcastsRouter.delete("/:id/invitations/:invitationId", async (req: Request, res
 // DELETE /api/podcasts/:id/members/:userId - Remove member
 podcastsRouter.delete("/:id/members/:userId", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const id = getParam(req.params.id);
     const userId = getParam(req.params.userId);
 
@@ -533,7 +577,7 @@ podcastsRouter.delete("/:id/members/:userId", async (req: Request, res: Response
     const [requesterMembership] = await db
       .select()
       .from(podcastMembers)
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     if (!requesterMembership) {
       res.status(403).json({ error: "Not a member of this podcast" });
@@ -556,7 +600,7 @@ podcastsRouter.delete("/:id/members/:userId", async (req: Request, res: Response
     // 2. Members can only remove themselves (leave)
     // 3. Owner cannot leave (must transfer or delete podcast)
 
-    const isSelf = userId === req.user!.userId;
+    const isSelf = userId === req.user.userId;
     const isOwner = requesterMembership.role === "owner";
     const targetIsOwner = targetMembership.role === "owner";
 
@@ -587,6 +631,10 @@ podcastsRouter.delete("/:id/members/:userId", async (req: Request, res: Response
 // POST /api/podcasts/:id/transfer-ownership - Transfer ownership to another member
 podcastsRouter.post("/:id/transfer-ownership", async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const id = getParam(req.params.id);
     const { newOwnerId } = req.body;
 
@@ -599,7 +647,7 @@ podcastsRouter.post("/:id/transfer-ownership", async (req: Request, res: Respons
     const [requesterMembership] = await db
       .select()
       .from(podcastMembers)
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     if (!requesterMembership || requesterMembership.role !== "owner") {
       res.status(403).json({ error: "Only owner can transfer ownership" });
@@ -621,7 +669,7 @@ podcastsRouter.post("/:id/transfer-ownership", async (req: Request, res: Respons
     await db
       .update(podcastMembers)
       .set({ role: "member" })
-      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user!.userId)));
+      .where(and(eq(podcastMembers.podcastId, id), eq(podcastMembers.userId, req.user.userId)));
 
     await db
       .update(podcastMembers)

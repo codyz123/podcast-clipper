@@ -58,7 +58,7 @@ export function generateState(): string {
 export function getAuthorizationUrl(state: string): string {
   const config = getConfig();
 
-  console.log(
+  console.warn(
     "[YouTube OAuth] Generating auth URL with redirect_uri:",
     JSON.stringify(config.redirectUri)
   );

@@ -68,7 +68,7 @@ export async function searchTenorStickers(
     const data = await response.json();
 
     return {
-      stickers: (data.results || []).map((item: any) => ({
+      stickers: ((data.results || []) as TenorSticker[]).map((item: TenorSticker) => ({
         id: item.id,
         title: item.title || item.content_description,
         content_description: item.content_description,
@@ -107,7 +107,7 @@ export async function getFeaturedTenorStickers(
     const data = await response.json();
 
     return {
-      stickers: (data.results || []).map((item: any) => ({
+      stickers: ((data.results || []) as TenorSticker[]).map((item: TenorSticker) => ({
         id: item.id,
         title: item.title || item.content_description,
         content_description: item.content_description,

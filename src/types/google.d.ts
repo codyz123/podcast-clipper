@@ -1,6 +1,32 @@
 // Google API type declarations
 
 declare global {
+  interface GooglePickerCallbackData {
+    action: string;
+    docs?: Array<{
+      id: string;
+      name: string;
+      mimeType: string;
+      url: string;
+    }>;
+  }
+
+  interface GooglePickerBuilder {
+    addView: (view: GooglePickerDocsView) => GooglePickerBuilder;
+    setOAuthToken: (token: string) => GooglePickerBuilder;
+    setDeveloperKey: (key: string) => GooglePickerBuilder;
+    setCallback: (callback: (data: GooglePickerCallbackData) => void) => GooglePickerBuilder;
+    setTitle: (title: string) => GooglePickerBuilder;
+    build: () => {
+      setVisible: (visible: boolean) => void;
+    };
+  }
+
+  interface GooglePickerDocsView {
+    setIncludeFolders: (include: boolean) => GooglePickerDocsView;
+    setMimeTypes: (types: string) => GooglePickerDocsView;
+  }
+
   interface Window {
     gapi: {
       load: (api: string, callback: () => void) => void;
@@ -30,20 +56,8 @@ declare global {
         };
       };
       picker: {
-        PickerBuilder: new () => {
-          addView: (view: any) => any;
-          setOAuthToken: (token: string) => any;
-          setDeveloperKey: (key: string) => any;
-          setCallback: (callback: (data: any) => void) => any;
-          setTitle: (title: string) => any;
-          build: () => {
-            setVisible: (visible: boolean) => void;
-          };
-        };
-        DocsView: new () => {
-          setIncludeFolders: (include: boolean) => any;
-          setMimeTypes: (types: string) => any;
-        };
+        PickerBuilder: new () => GooglePickerBuilder;
+        DocsView: new () => GooglePickerDocsView;
       };
     };
   }

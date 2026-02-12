@@ -229,7 +229,7 @@ const main = async () => {
             };
           });
           if (styleProbe) {
-            console.log(`[StyleProbe] ${testCase.id}`, styleProbe);
+            console.warn(`[StyleProbe] ${testCase.id}`, styleProbe);
           }
         }
         const previewBox = await previewLocator.boundingBox();
@@ -271,7 +271,7 @@ const main = async () => {
             `[Mismatch] ${testCase.id} @ ${frameTime.toFixed(2)}s diff=${pct}% (see ${diffPath})`
           );
         } else {
-          console.log(`[OK] ${testCase.id} @ ${frameTime.toFixed(2)}s diff=${pct}%`);
+          console.warn(`[OK] ${testCase.id} @ ${frameTime.toFixed(2)}s diff=${pct}%`);
         }
       }
     }
@@ -280,7 +280,7 @@ const main = async () => {
       throw new Error(`Video parity tests failed: ${failures} mismatches`);
     }
 
-    console.log("Video parity tests passed");
+    console.warn("Video parity tests passed");
   } finally {
     if (browser) {
       await browser.close();

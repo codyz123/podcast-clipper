@@ -43,7 +43,7 @@ describe("Auth Middleware (Hybrid)", () => {
       const jwt = await import("jsonwebtoken");
       const token = jwt.default.sign(
         { userId: "user-123", email: "test@example.com", type: "access" },
-        process.env.JWT_SECRET!,
+        process.env.JWT_SECRET as string,
         { expiresIn: "15m" }
       );
       mockReq.headers = { authorization: `Bearer ${token}` };
@@ -75,7 +75,7 @@ describe("Auth Middleware (Hybrid)", () => {
       const jwt = await import("jsonwebtoken");
       const expiredToken = jwt.default.sign(
         { userId: "user-123", email: "test@example.com", type: "access" },
-        process.env.JWT_SECRET!,
+        process.env.JWT_SECRET as string,
         { expiresIn: "-1s" }
       );
       mockReq.headers = { authorization: `Bearer ${expiredToken}` };
@@ -159,7 +159,7 @@ describe("Auth Middleware (Hybrid)", () => {
       const jwt = await import("jsonwebtoken");
       const token = jwt.default.sign(
         { userId: "jwt-user", email: "jwt@example.com", type: "access" },
-        process.env.JWT_SECRET!,
+        process.env.JWT_SECRET as string,
         { expiresIn: "15m" }
       );
       mockReq.headers = {

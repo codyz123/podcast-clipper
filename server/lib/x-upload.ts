@@ -37,7 +37,7 @@ async function xRequest(options: {
       Authorization: authHeader,
       ...(options.headers || {}),
     },
-    body: (options.body ?? null) as any,
+    body: (options.body ?? null) as BodyInit | null,
   });
 }
 

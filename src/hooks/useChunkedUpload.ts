@@ -114,12 +114,19 @@ export function useChunkedUpload(podcastId: string | null, episodeId: string | n
         let startPart = 1;
         let uploadedBytes = 0;
 
-        if (resumable && resumable.filename === file.name && resumable.totalBytes === file.size) {
+        if (
+          resumable &&
+          resumable.filename === file.name &&
+          resumable.totalBytes === file.size &&
+          resumable.sessionId &&
+          resumable.chunkSize &&
+          resumable.totalParts
+        ) {
           // Resume existing upload
           session = {
-            sessionId: resumable.sessionId!,
-            chunkSize: resumable.chunkSize!,
-            totalParts: resumable.totalParts!,
+            sessionId: resumable.sessionId,
+            chunkSize: resumable.chunkSize,
+            totalParts: resumable.totalParts,
           };
           startPart = (resumable.completedParts || 0) + 1;
           uploadedBytes = resumable.uploadedBytes || 0;

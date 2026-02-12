@@ -181,7 +181,11 @@ authRouter.post("/refresh", async (req: Request, res: Response) => {
 authRouter.post("/logout", jwtAuthMiddleware, async (req: Request, res: Response) => {
   try {
     // Invalidate all sessions for this user
-    await invalidateAllUserSessions(req.user!.userId);
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    await invalidateAllUserSessions(req.user.userId);
     res.json({ success: true });
   } catch (error) {
     console.error("Logout error:", error);
@@ -192,6 +196,10 @@ authRouter.post("/logout", jwtAuthMiddleware, async (req: Request, res: Response
 // GET /api/auth/me
 authRouter.get("/me", jwtAuthMiddleware, async (req: Request, res: Response) => {
   try {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
     const [user] = await db
       .select({
         id: users.id,
@@ -201,7 +209,7 @@ authRouter.get("/me", jwtAuthMiddleware, async (req: Request, res: Response) => 
         createdAt: users.createdAt,
       })
       .from(users)
-      .where(eq(users.id, req.user!.userId));
+      .where(eq(users.id, req.user.userId));
 
     if (!user) {
       res.status(404).json({ error: "User not found" });

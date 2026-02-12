@@ -63,7 +63,7 @@ export async function searchGiphyStickers(
     const data = await response.json();
 
     return {
-      stickers: data.data.map((item: any) => ({
+      stickers: (data.data as GiphySticker[]).map((item: GiphySticker) => ({
         id: item.id,
         title: item.title,
         url: item.url,
@@ -102,7 +102,7 @@ export async function getTrendingGiphyStickers(
     const data = await response.json();
 
     return {
-      stickers: data.data.map((item: any) => ({
+      stickers: (data.data as GiphySticker[]).map((item: GiphySticker) => ({
         id: item.id,
         title: item.title,
         url: item.url,

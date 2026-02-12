@@ -154,6 +154,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
         }
       };
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateProject/audioDuration used in WaveSurfer callback only; adding would re-create WaveSurfer on every project update
   }, [hasAudio, currentProject?.audioPath]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -183,6 +184,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
     }
 
     await processAudioFile(audioFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- processAudioFile is stable (uses refs and state setters only); adding it would re-create handler every render
   }, []);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,6 +193,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
     if (file) {
       await processAudioFile(file);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- processAudioFile is stable; adding it would re-create handler every render
   }, []);
 
   const openFilePicker = () => {
@@ -199,8 +202,8 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
 
   // Google Drive picker
   const openGoogleDrivePicker = useCallback(async () => {
-    const clientId = (settings as any).googleClientId || GOOGLE_CLIENT_ID;
-    const apiKey = (settings as any).googleApiKey || GOOGLE_API_KEY;
+    const clientId = settings.googleClientId || GOOGLE_CLIENT_ID;
+    const apiKey = settings.googleApiKey || GOOGLE_API_KEY;
 
     if (!clientId || !apiKey) {
       setError("Google Drive integration requires API credentials. Add them in Settings.");
@@ -217,7 +220,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
       const tokenClient = window.google?.accounts?.oauth2?.initTokenClient({
         client_id: clientId,
         scope: GOOGLE_SCOPES,
-        callback: async (response: any) => {
+        callback: async (response: { access_token?: string }) => {
           if (response.access_token) {
             createPicker(response.access_token, apiKey);
           }
@@ -245,6 +248,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
       console.error("Google Drive auth error:", err);
       setError("Failed to connect to Google Drive. Check your API credentials.");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- createPicker is stable (uses window.google APIs and state setters only)
   }, [googlePickerLoaded, settings]);
 
   const createPicker = (accessToken: string, apiKey: string) => {
@@ -267,7 +271,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
     picker.setVisible(true);
   };
 
-  const handleGoogleDriveSelection = async (data: any) => {
+  const handleGoogleDriveSelection = async (data: GooglePickerCallbackData) => {
     if (data.action === "picked" && data.docs?.[0]) {
       const file = data.docs[0];
       setIsLoading(true);
@@ -394,11 +398,11 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
       // Try HTML5 Audio first, then Web Audio API, then music-metadata as final fallback
       let audioDuration = await getDurationFromHtml5Audio();
       if (audioDuration === 0) {
-        console.log("HTML5 Audio failed, trying Web Audio API for duration...");
+        console.warn("HTML5 Audio failed, trying Web Audio API for duration...");
         audioDuration = await getDurationFromWebAudio();
       }
       if (audioDuration === 0) {
-        console.log("Web Audio API failed, trying music-metadata for duration...");
+        console.warn("Web Audio API failed, trying music-metadata for duration...");
         audioDuration = await getDurationFromMetadata();
       }
 
@@ -437,7 +441,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
 
         if (file.size > CHUNKED_UPLOAD_THRESHOLD) {
           // Use chunked upload for large files
-          console.log(
+          console.warn(
             `[AudioImport] Using chunked upload for large file (${formatBytes(file.size)})`
           );
           chunkedUpload(file)
@@ -447,7 +451,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
                   audioPath: result.url,
                   audioDuration: audioDuration,
                 });
-                console.log("[AudioImport] Chunked upload complete:", result.url);
+                console.warn("[AudioImport] Chunked upload complete:", result.url);
               }
             })
             .catch((err) => {
@@ -467,7 +471,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
                   audioPath: updatedEpisode.audioBlobUrl,
                   audioDuration: updatedEpisode.audioDuration || audioDuration,
                 });
-                console.log("[AudioImport] Uploaded to backend:", updatedEpisode.audioBlobUrl);
+                console.warn("[AudioImport] Uploaded to backend:", updatedEpisode.audioBlobUrl);
               }
             })
             .catch((err) => {
@@ -525,9 +529,10 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
           });
 
           await wavesurferRef.current.load(blobUrl);
-        } catch (wsError: any) {
+        } catch (wsError: unknown) {
           // Ignore abort errors from React strict mode cleanup
-          if (wsError?.name === "AbortError" || wsError?.message?.includes("abort")) {
+          const err = wsError instanceof Error ? wsError : null;
+          if (err?.name === "AbortError" || err?.message?.includes("abort")) {
             return;
           }
           console.warn("WaveSurfer failed to load audio:", wsError);

@@ -618,7 +618,9 @@ export const PodcastSettingsPage: React.FC = () => {
                             <span className="flex-1">{resendResult.message}</span>
                             {!resendResult.success && resendResult.invitationUrl && (
                               <button
-                                onClick={() => handleCopyInviteLink(resendResult.invitationUrl!)}
+                                onClick={() =>
+                                  handleCopyInviteLink(resendResult.invitationUrl ?? "")
+                                }
                                 className={cn(
                                   "inline-flex items-center gap-1 rounded px-2 py-1",
                                   "bg-[hsl(var(--surface))]",

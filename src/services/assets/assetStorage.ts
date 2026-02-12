@@ -104,7 +104,7 @@ export async function getAssetBlob(blobKey: string): Promise<Blob | null> {
   // Check memory cache first
   const cache = getBlobCache();
   if (cache.has(blobKey)) {
-    return cache.get(blobKey)!;
+    return cache.get(blobKey) ?? null;
   }
 
   try {
@@ -135,7 +135,7 @@ export async function getAssetMetadata(assetId: string): Promise<GeneratedAsset 
   // Check memory cache first
   const cache = getMetadataCache();
   if (cache.has(assetId)) {
-    return cache.get(assetId)!;
+    return cache.get(assetId) ?? null;
   }
 
   try {

@@ -33,7 +33,11 @@ router.post(
       const podcastId = req.params.podcastId as string;
       const episodeId = req.params.episodeId as string;
       const { filename, contentType, totalBytes } = req.body;
-      const userId = req.user!.userId;
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      const userId = req.user.userId;
 
       // Validate access
       if (!(await verifyAccess(userId, podcastId))) {
@@ -299,7 +303,11 @@ router.get(
   jwtAuthMiddleware,
   async (req: Request, res: Response) => {
     const episodeId = req.params.episodeId as string;
-    const userId = req.user!.userId;
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    const userId = req.user.userId;
 
     const [session] = await db
       .select()

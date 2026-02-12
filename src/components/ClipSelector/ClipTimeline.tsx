@@ -60,6 +60,9 @@ export const ClipTimeline: React.FC<ClipTimelineProps> = ({
   // Easing function for smooth animation
   const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 
+  // Track whether an animation is active (extracted for stable dependency)
+  const isAnimating = animatedWindow !== null;
+
   // Animation loop
   useEffect(() => {
     if (!animationRef.current) return;
@@ -93,7 +96,7 @@ export const ClipTimeline: React.FC<ClipTimelineProps> = ({
     return () => {
       if (frameId) cancelAnimationFrame(frameId);
     };
-  }, [animatedWindow !== null && animationRef.current !== null]);
+  }, [isAnimating]);
 
   // Calculate display positions (with drag preview)
   const displayStart = useMemo(() => {

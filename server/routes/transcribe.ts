@@ -83,7 +83,11 @@ async function transcribeWithAssemblyAI(
   language: string;
   duration: number;
 }> {
-  const client = new AssemblyAI({ apiKey: apiKey || process.env.ASSEMBLYAI_API_KEY! });
+  const resolvedApiKey = apiKey || process.env.ASSEMBLYAI_API_KEY;
+  if (!resolvedApiKey) {
+    throw new Error("ASSEMBLYAI_API_KEY is not configured");
+  }
+  const client = new AssemblyAI({ apiKey: resolvedApiKey });
 
   // Step 1: Upload file to AssemblyAI
   progress({
@@ -228,13 +232,15 @@ async function transcribeSingleFileWhisper(
 
   return {
     text: transcription.text || "",
-    words: ((transcription as any).words || []).map((w: any) => ({
-      word: w.word,
-      start: w.start,
-      end: w.end,
-    })),
-    language: (transcription as any).language || "en",
-    duration: (transcription as any).duration || 0,
+    words: ((transcription as unknown as { words?: WordTimestamp[] }).words || []).map(
+      (w: WordTimestamp) => ({
+        word: w.word,
+        start: w.start,
+        end: w.end,
+      })
+    ),
+    language: (transcription as unknown as { language?: string }).language || "en",
+    duration: (transcription as unknown as { duration?: number }).duration || 0,
   };
 }
 
@@ -475,7 +481,7 @@ router.post("/transcribe", upload.single("file"), async (req: Request, res: Resp
   }
 
   const progress = (event: ProgressEvent) => {
-    console.log(
+    console.warn(
       `[${event.stage}] ${event.progress}% - ${event.message}${event.detail ? ` (${event.detail})` : ""}`
     );
     if (useStreaming) {

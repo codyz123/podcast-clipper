@@ -106,7 +106,7 @@ export async function initializeMediaTables(): Promise<void> {
     )
   `;
 
-  console.log("[Database] Media tables initialized");
+  console.warn("[Database] Media tables initialized");
 }
 
 // Build a proxied media URL (serves through our server to avoid CORS issues)

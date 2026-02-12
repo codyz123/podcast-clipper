@@ -32,7 +32,7 @@ export const EpisodeInfoPage: React.FC = () => {
 
   // Debug: log on mount
   useEffect(() => {
-    console.log("[EpisodeInfoPage] Mounted with project:", currentProject?.id);
+    console.warn("[EpisodeInfoPage] Mounted with project:", currentProject?.id);
   }, [currentProject?.id]);
 
   const [metadata, setMetadata] = useState<EpisodeMetadata>({
@@ -65,6 +65,7 @@ export const EpisodeInfoPage: React.FC = () => {
       });
       setIsDirty(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only sync on project identity change; adding full currentProject would overwrite user edits
   }, [currentProject?.id]);
 
   const handleChange = (
@@ -78,7 +79,7 @@ export const EpisodeInfoPage: React.FC = () => {
   const handleSave = async () => {
     if (!currentProject) return;
 
-    console.log("[EpisodeInfoPage] Saving changes for project:", currentProject.id);
+    console.warn("[EpisodeInfoPage] Saving changes for project:", currentProject.id);
     setIsSaving(true);
     setSaveError(null);
     try {
@@ -92,18 +93,18 @@ export const EpisodeInfoPage: React.FC = () => {
         explicit: metadata.explicit,
         guests: metadata.guests,
       };
-      console.log("[EpisodeInfoPage] Updates:", updates);
+      console.warn("[EpisodeInfoPage] Updates:", updates);
 
       // Persist to database
       const savedEpisode = await updateEpisode(currentProject.id, updates);
-      console.log("[EpisodeInfoPage] Save result:", savedEpisode);
+      console.warn("[EpisodeInfoPage] Save result:", savedEpisode);
 
       if (savedEpisode) {
         // Update local store on success
         updateProject(updates);
         setIsDirty(false);
         setSaveError(null);
-        console.log("[EpisodeInfoPage] Save successful");
+        console.warn("[EpisodeInfoPage] Save successful");
       } else {
         // updateEpisode returned null - check for error from hook or show generic message
         console.error(
