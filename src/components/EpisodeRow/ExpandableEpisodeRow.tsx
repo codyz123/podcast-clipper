@@ -22,6 +22,7 @@ interface ExpandableEpisodeRowProps {
   onDelete: (episode: Episode) => void;
   onStageStatusChange: (stageId: StageId, status: StageStatus) => void;
   onSubStepStatusChange: (subStepId: SubStepId, status: StageStatus) => void;
+  onPrefetch?: (episodeId: string) => void;
   animationDelay?: number;
 }
 
@@ -33,6 +34,7 @@ export const ExpandableEpisodeRow: React.FC<ExpandableEpisodeRowProps> = ({
   onDelete,
   onStageStatusChange,
   onSubStepStatusChange,
+  onPrefetch,
   animationDelay = 0,
 }) => {
   const hasAudio = !!episode.audioBlobUrl;
@@ -48,6 +50,10 @@ export const ExpandableEpisodeRow: React.FC<ExpandableEpisodeRowProps> = ({
 
   const handleRowClick = () => {
     onLoad(episode.id);
+  };
+
+  const handleMouseEnter = () => {
+    onPrefetch?.(episode.id);
   };
 
   const handleExpandClick = (e: React.MouseEvent) => {
@@ -71,6 +77,7 @@ export const ExpandableEpisodeRow: React.FC<ExpandableEpisodeRowProps> = ({
       {/* Main Row */}
       <div
         onClick={handleRowClick}
+        onMouseEnter={handleMouseEnter}
         className={cn(
           "flex cursor-pointer items-center gap-4 rounded-lg px-4 py-3 transition-all duration-150",
           "bg-[hsl(var(--surface)/0.5)]",

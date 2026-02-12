@@ -110,7 +110,7 @@ describe("Auth Service", () => {
       expect(typeof token).toBe("string");
 
       // Verify the token
-      const decoded = jwt.verify(token, process.env.JWT_SECRET!) as {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as {
         userId: string;
         email: string;
         type: string;
@@ -140,7 +140,7 @@ describe("Auth Service", () => {
       expect(typeof token).toBe("string");
 
       // Verify the token
-      const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET!) as {
+      const decoded = jwt.verify(token, process.env.JWT_REFRESH_SECRET as string) as {
         userId: string;
         type: string;
         jti: string;
@@ -184,7 +184,7 @@ describe("Auth Service", () => {
     it("should return null for expired tokens", () => {
       const token = jwt.sign(
         { userId: "user-123", email: "test@example.com", type: "access" },
-        process.env.JWT_SECRET!,
+        process.env.JWT_SECRET as string,
         { expiresIn: "-1s" }
       );
 

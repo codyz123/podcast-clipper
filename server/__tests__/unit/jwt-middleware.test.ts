@@ -93,7 +93,7 @@ describe("JWT Middleware", () => {
       const jwt = await import("jsonwebtoken");
       const expiredToken = jwt.default.sign(
         { userId: "user-123", email: "test@example.com", type: "access" },
-        process.env.JWT_SECRET!,
+        process.env.JWT_SECRET as string,
         { expiresIn: "-1s" }
       );
       mockReq.headers = { authorization: `Bearer ${expiredToken}` };
@@ -111,7 +111,7 @@ describe("JWT Middleware", () => {
       const jwt = await import("jsonwebtoken");
       const refreshToken = jwt.default.sign(
         { userId: "user-123", type: "refresh", jti: "unique-id" },
-        process.env.JWT_SECRET!, // Note: using JWT_SECRET instead of REFRESH_SECRET on purpose
+        process.env.JWT_SECRET as string, // Note: using JWT_SECRET instead of REFRESH_SECRET on purpose
         { expiresIn: "7d" }
       );
       mockReq.headers = { authorization: `Bearer ${refreshToken}` };

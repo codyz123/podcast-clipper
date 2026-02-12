@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { PersonIcon } from "@radix-ui/react-icons";
 import { Button, Input } from "../ui";
 import { cn } from "../../lib/utils";
+import { getMediaUrl } from "../../lib/api";
 import type { PodcastPerson } from "../../lib/types";
 
 interface SpeakerInfo {
@@ -130,7 +131,7 @@ export const SpeakerLineup: React.FC<SpeakerLineupProps> = ({
               >
                 {person?.photoUrl ? (
                   <img
-                    src={person.photoUrl}
+                    src={getMediaUrl(person.photoUrl)}
                     alt={person.name}
                     className="h-full w-full object-cover"
                   />
@@ -210,7 +211,7 @@ export const SpeakerLineup: React.FC<SpeakerLineupProps> = ({
                               >
                                 {p.photoUrl ? (
                                   <img
-                                    src={p.photoUrl}
+                                    src={getMediaUrl(p.photoUrl)}
                                     alt={p.name}
                                     className="h-full w-full object-cover"
                                   />

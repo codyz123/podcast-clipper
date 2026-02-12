@@ -70,7 +70,11 @@ router.post(
   async (req: Request, res: Response) => {
     try {
       const episodeId = getParam(req.params.episodeId);
-      const userId = req.user!.userId;
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      const userId = req.user.userId;
       const { content, prompt, focusClipId, isManual, name } = req.body;
 
       // Validate content

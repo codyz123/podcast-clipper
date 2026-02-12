@@ -166,6 +166,7 @@ export const ImportButton: React.FC<ImportButtonProps> = ({
         }
       };
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- updateProject/updateEpisode/audioDuration used in WaveSurfer callback only; adding would re-create WaveSurfer on every update
   }, [variant, hasAudio, currentProject?.audioPath]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -195,6 +196,7 @@ export const ImportButton: React.FC<ImportButtonProps> = ({
     }
 
     await processAudioFile(audioFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- processAudioFile is stable (uses refs and state setters only); adding it would re-create handler every render
   }, []);
 
   const handleFileSelect = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -203,6 +205,7 @@ export const ImportButton: React.FC<ImportButtonProps> = ({
     if (file) {
       await processAudioFile(file);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- processAudioFile is stable; adding it would re-create handler every render
   }, []);
 
   const openFilePicker = () => {
@@ -228,7 +231,7 @@ export const ImportButton: React.FC<ImportButtonProps> = ({
       const tokenClient = window.google?.accounts?.oauth2?.initTokenClient({
         client_id: clientId,
         scope: GOOGLE_SCOPES,
-        callback: async (response: any) => {
+        callback: async (response: { access_token?: string }) => {
           if (response.access_token) {
             createPicker(response.access_token, apiKey);
           }
@@ -255,6 +258,7 @@ export const ImportButton: React.FC<ImportButtonProps> = ({
       console.error("Google Drive auth error:", err);
       setError("Failed to connect to Google Drive. Check your API credentials.");
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- createPicker is stable (uses window.google APIs and state setters only)
   }, [googlePickerLoaded, settings]);
 
   const createPicker = (accessToken: string, apiKey: string) => {
@@ -277,7 +281,7 @@ export const ImportButton: React.FC<ImportButtonProps> = ({
     picker.setVisible(true);
   };
 
-  const handleGoogleDriveSelection = async (data: any) => {
+  const handleGoogleDriveSelection = async (data: GooglePickerCallbackData) => {
     if (data.action === "picked" && data.docs?.[0]) {
       const file = data.docs[0];
       setIsLoading(true);
@@ -514,8 +518,9 @@ export const ImportButton: React.FC<ImportButtonProps> = ({
           wavesurferRef.current.on("pause", () => setIsPlaying(false));
 
           await wavesurferRef.current.load(blobUrl);
-        } catch (wsError: any) {
-          if (wsError?.name !== "AbortError" && !wsError?.message?.includes("abort")) {
+        } catch (wsError: unknown) {
+          const err = wsError instanceof Error ? wsError : null;
+          if (err?.name !== "AbortError" && !err?.message?.includes("abort")) {
             console.warn("WaveSurfer failed to load audio:", wsError);
           }
         }

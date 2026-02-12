@@ -59,6 +59,7 @@ export const EpisodeInfoPage: React.FC = () => {
       });
       setIsDirty(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only sync on project identity change; adding full currentProject would overwrite user edits
   }, [currentProject?.id]);
 
   const handleChange = (

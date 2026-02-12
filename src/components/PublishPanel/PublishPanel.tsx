@@ -54,7 +54,7 @@ export const PublishPanel: React.FC = () => {
     markPostFailed,
   } = usePublishStore();
 
-  const projectClips = currentProject?.clips || [];
+  const projectClips = useMemo(() => currentProject?.clips || [], [currentProject?.clips]);
   const [oauthError, setOauthError] = useState<string | null>(null);
 
   // Fetch snippets when project changes
@@ -91,27 +91,31 @@ export const PublishPanel: React.FC = () => {
     [connections]
   );
 
-  const handleConnect = async (platform: SocialPlatform) => {
-    setOauthError(null);
-    try {
-      const result = await startOAuthFlow(platform as OAuthPlatform);
-      if (result.success && result.accountName) {
-        connectAccount(platform, result.accountName);
-      } else if (result.error) {
-        setOauthError(`Failed to connect ${platform}: ${result.error}`);
+  const handleConnect = useCallback(
+    async (platform: SocialPlatform) => {
+      setOauthError(null);
+      try {
+        const result = await startOAuthFlow(platform as OAuthPlatform);
+        if (result.success && result.accountName) {
+          connectAccount(platform, result.accountName);
+        } else if (result.error) {
+          setOauthError(`Failed to connect ${platform}: ${result.error}`);
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Unknown error";
+        setOauthError(`Failed to connect ${platform}: ${message}`);
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setOauthError(`Failed to connect ${platform}: ${message}`);
-    }
-  };
+    },
+    [connectAccount]
+  );
 
   // Get connection handler for a specific destination
   const getConnectHandler = useCallback(
     (destination: PublishDestinationType) => {
       const config = PLATFORM_CONFIGS[destination];
-      if (!config.connectionPlatform || !config.supportsDirectUpload) return undefined;
-      return () => handleConnect(config.connectionPlatform!);
+      const { connectionPlatform } = config;
+      if (!connectionPlatform || !config.supportsDirectUpload) return undefined;
+      return () => handleConnect(connectionPlatform);
     },
     [handleConnect]
   );

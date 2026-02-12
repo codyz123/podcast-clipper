@@ -2,12 +2,14 @@ import {
   S3Client,
   PutObjectCommand,
   DeleteObjectCommand,
+  GetObjectCommand,
   ListObjectsV2Command,
   CreateMultipartUploadCommand,
   UploadPartCommand,
   CompleteMultipartUploadCommand,
   AbortMultipartUploadCommand,
 } from "@aws-sdk/client-s3";
+import type { Readable } from "node:stream";
 
 // Lazy initialization to avoid errors when env vars aren't set
 let r2Client: S3Client | null = null;
@@ -103,6 +105,33 @@ export async function uploadToR2(
 }
 
 /**
+ * Get a file from R2 by key (for proxying)
+ */
+export async function getFromR2(
+  key: string
+): Promise<{ body: Readable; contentType: string; contentLength: number }> {
+  const client = getR2Client();
+  const bucket = getBucketName();
+
+  const response = await client.send(
+    new GetObjectCommand({
+      Bucket: bucket,
+      Key: key,
+    })
+  );
+
+  if (!response.Body) {
+    throw new Error("Empty response body from R2");
+  }
+
+  return {
+    body: response.Body as Readable,
+    contentType: response.ContentType || "application/octet-stream",
+    contentLength: response.ContentLength || 0,
+  };
+}
+
+/**
  * Delete a file from R2
  */
 export async function deleteFromR2(key: string): Promise<void> {
@@ -143,11 +172,13 @@ export async function listR2Objects(
     })
   );
 
-  return (response.Contents || []).map((obj) => ({
-    key: obj.Key!,
-    size: obj.Size || 0,
-    url: getR2PublicUrl(obj.Key!),
-  }));
+  return (response.Contents || [])
+    .filter((obj) => obj.Key)
+    .map((obj) => ({
+      key: obj.Key as string,
+      size: obj.Size || 0,
+      url: getR2PublicUrl(obj.Key as string),
+    }));
 }
 
 // ============ Multipart Upload Support ============

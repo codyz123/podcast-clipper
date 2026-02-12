@@ -1,5 +1,6 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 import { Layout, ViewType } from "./components/Layout";
 import { AppShell } from "./components/AppShell/AppShell";
 import { WorkspaceLayout } from "./components/WorkspaceNav/WorkspaceLayout";
@@ -7,25 +8,18 @@ import { WorkspaceSection } from "./components/WorkspaceNav/WorkspaceNav";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProjectsView } from "./components/ProjectsView";
 import { ImportButton } from "./components/ImportButton";
-import { TranscriptEditor } from "./components/TranscriptEditor/TranscriptEditor";
-import { ClipSelector } from "./components/ClipSelector/ClipSelector";
-import { VideoEditor } from "./components/VideoEditor";
-import { PublishPanel } from "./components/PublishPanel";
-import { TextContent } from "./components/TextContent";
 import { PlaceholderPage } from "./components/PlaceholderPage";
-import { PodcastInfoPage } from "./components/PodcastInfo/PodcastInfoPage";
-import { PodcastSettingsPage } from "./components/Settings/PodcastSettingsPage";
-import { Settings } from "./components/Settings/Settings";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { VideoTestPage } from "./pages/VideoTestPage";
 import { AuthScreen, LoadingScreen, CreatePodcastScreen } from "./components/Auth";
+import { ContentSkeleton } from "./components/ui/ContentSkeleton";
 import { useProjectStore } from "./stores/projectStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
 import { useAuthStore } from "./stores/authStore";
 import { usePodcast } from "./hooks/usePodcast";
 import { useEpisodes } from "./hooks/useEpisodes";
-import { Project, Transcript, Clip } from "./lib/types";
-import type { EpisodeWithDetails } from "./hooks/useEpisodes";
+import { episodeToProject } from "./lib/episodeToProject";
+import { episodeKeys, fetchEpisodeDetail } from "./lib/queries";
 import { applyBrandColors, parseBrandColorsFromStorage } from "./lib/colorExtractor";
 import type { EpisodeStage } from "./components/EpisodePipeline/EpisodePipeline";
 import {
@@ -34,6 +28,36 @@ import {
   type SubStepId,
   cycleStatus,
 } from "./lib/statusConfig";
+
+// Lazy-loaded view components — only fetched when their route is first visited
+const TranscriptEditor = lazy(() =>
+  import("./components/TranscriptEditor/TranscriptEditor").then((m) => ({
+    default: m.TranscriptEditor,
+  }))
+);
+const ClipSelector = lazy(() =>
+  import("./components/ClipSelector/ClipSelector").then((m) => ({ default: m.ClipSelector }))
+);
+const VideoEditor = lazy(() =>
+  import("./components/VideoEditor").then((m) => ({ default: m.VideoEditor }))
+);
+const PublishPanel = lazy(() =>
+  import("./components/PublishPanel").then((m) => ({ default: m.PublishPanel }))
+);
+const TextContent = lazy(() =>
+  import("./components/TextContent").then((m) => ({ default: m.TextContent }))
+);
+const PodcastInfoPage = lazy(() =>
+  import("./components/PodcastInfo/PodcastInfoPage").then((m) => ({ default: m.PodcastInfoPage }))
+);
+const PodcastSettingsPage = lazy(() =>
+  import("./components/Settings/PodcastSettingsPage").then((m) => ({
+    default: m.PodcastSettingsPage,
+  }))
+);
+const Settings = lazy(() =>
+  import("./components/Settings/Settings").then((m) => ({ default: m.Settings }))
+);
 
 const planningSubStageIds = new Set(["guests", "topics", "notes"]);
 const productionSubStageIds = new Set(["record"]);
@@ -228,7 +252,6 @@ function App() {
   const { podcast } = usePodcast();
   const {
     episodes,
-    fetchEpisode,
     updateStageStatus,
     updateSubStepStatus,
     isLoading: episodesLoading,
@@ -334,91 +357,6 @@ function App() {
       resolvedEpisode.slug
     );
   }, [route, resolvedEpisode, episodeRouteState, buildEpisodePath]);
-
-  // Helper to convert database episode to Project format
-  const episodeToProject = useCallback(
-    (episode: EpisodeWithDetails, preferredTranscriptId?: string): Project => {
-      const transcripts: Transcript[] = episode.transcripts.map((t) => {
-        // Ensure segments always exist — default to a single "Person 1" segment
-        const segments =
-          t.segments && t.segments.length > 0
-            ? t.segments
-            : t.words.length > 0
-              ? [
-                  {
-                    speakerLabel: "Person 1",
-                    startWordIndex: 0,
-                    endWordIndex: t.words.length,
-                    startTime: t.words[0]?.start ?? 0,
-                    endTime: t.words[t.words.length - 1]?.end ?? 0,
-                  },
-                ]
-              : undefined;
-
-        return {
-          id: t.id,
-          projectId: episode.id,
-          audioFingerprint: t.audioFingerprint,
-          text: t.text,
-          words: t.words,
-          segments,
-          language: t.language || "en",
-          createdAt: t.createdAt,
-          name: t.name,
-          service: t.service,
-        };
-      });
-
-      const clips: Clip[] = episode.clips.map((c) => ({
-        id: c.id,
-        projectId: episode.id,
-        name: c.name,
-        startTime: c.startTime,
-        endTime: c.endTime,
-        transcript: c.transcript || "",
-        words: c.words,
-        segments: c.segments,
-        clippabilityScore: c.clippabilityScore,
-        isManual: c.isManual || false,
-        createdAt: c.createdAt,
-        tracks: c.tracks as Clip["tracks"],
-        captionStyle: c.captionStyle as Clip["captionStyle"],
-        format: c.format as Clip["format"],
-        templateId: c.templateId as Clip["templateId"],
-        background: c.background as Clip["background"],
-        subtitle: c.subtitle as Clip["subtitle"],
-      }));
-
-      return {
-        id: episode.id,
-        name: episode.name,
-        audioPath: episode.audioBlobUrl || "",
-        audioFileName: episode.audioFileName,
-        audioDuration: episode.audioDuration || 0,
-        createdAt: episode.createdAt,
-        updatedAt: episode.updatedAt,
-        description: episode.description,
-        episodeNumber: episode.episodeNumber,
-        seasonNumber: episode.seasonNumber,
-        publishDate: episode.publishDate,
-        showNotes: episode.showNotes,
-        explicit: episode.explicit,
-        guests: episode.guests,
-        stageStatus: episode.stageStatus,
-        transcript:
-          (preferredTranscriptId && transcripts.find((t) => t.id === preferredTranscriptId)) ||
-          transcripts[0],
-        transcripts,
-        activeTranscriptId:
-          preferredTranscriptId && transcripts.some((t) => t.id === preferredTranscriptId)
-            ? preferredTranscriptId
-            : transcripts[0]?.id,
-        clips,
-        exportHistory: [],
-      };
-    },
-    []
-  );
 
   const goToEpisodeStage = useCallback(
     (episodeId: string, stage: EpisodeStage, subStage?: string, slugOverride?: string) => {
@@ -566,37 +504,28 @@ function App() {
     navigate,
   ]);
 
-  // Load episode when URL changes
+  // Load episode data via React Query — automatically cached, deduplicated, and stale-while-revalidate
+  const resolvedEpisodeId =
+    route.kind === "episode-route" && resolvedEpisode ? resolvedEpisode.episode.id : null;
+
+  const { data: episodeDetail, isLoading: episodeDetailLoading } = useQuery({
+    queryKey: episodeKeys.detail(currentPodcastId ?? "", resolvedEpisodeId ?? ""),
+    queryFn: () => fetchEpisodeDetail(currentPodcastId ?? "", resolvedEpisodeId ?? ""),
+    enabled: !!currentPodcastId && !!resolvedEpisodeId && isAuthenticated && !authLoading,
+  });
+
+  // Sync fetched episode data to projectStore
   useEffect(() => {
-    if (authLoading || !isAuthenticated) return;
-    if (route.kind !== "episode-route") return;
-    if (!resolvedEpisode) return;
-    if (currentProject?.id === resolvedEpisode.episode.id) return;
+    if (!episodeDetail) return;
+    if (currentProject?.id === episodeDetail.id) return;
 
-    const loadEpisode = async () => {
-      const episode = await fetchEpisode(resolvedEpisode.episode.id);
-      if (episode) {
-        // Preserve the user's active transcript selection across reloads.
-        // Read from the persisted `projects` array (not `currentProject` which is null on refresh).
-        const storeState = useProjectStore.getState();
-        const currentActiveId =
-          storeState.currentProject?.activeTranscriptId ??
-          storeState.projects.find((p) => p.id === resolvedEpisode.episode.id)?.activeTranscriptId;
-        setCurrentProject(episodeToProject(episode, currentActiveId));
-      }
-    };
-
-    loadEpisode();
-  }, [
-    authLoading,
-    isAuthenticated,
-    route,
-    resolvedEpisode,
-    currentProject?.id,
-    fetchEpisode,
-    setCurrentProject,
-    episodeToProject,
-  ]);
+    // Preserve the user's active transcript selection across reloads
+    const storeState = useProjectStore.getState();
+    const currentActiveId =
+      storeState.currentProject?.activeTranscriptId ??
+      storeState.projects.find((p) => p.id === episodeDetail.id)?.activeTranscriptId;
+    setCurrentProject(episodeToProject(episodeDetail, currentActiveId));
+  }, [episodeDetail, currentProject?.id, setCurrentProject]);
 
   // Load stage status when project changes
   useEffect(() => {
@@ -777,7 +706,17 @@ function App() {
     }
   };
 
-  const renderView = () => {
+  const renderViewContent = () => {
+    // Show skeleton while episode data is loading for non-list views
+    if (
+      currentView !== "projects" &&
+      route.kind === "episode-route" &&
+      episodeDetailLoading &&
+      !currentProject
+    ) {
+      return <ContentSkeleton />;
+    }
+
     switch (currentView) {
       case "projects":
         return <ProjectsView onProjectLoad={handleProjectLoad} />;
@@ -816,6 +755,10 @@ function App() {
     }
   };
 
+  const renderView = () => (
+    <Suspense fallback={<ContentSkeleton />}>{renderViewContent()}</Suspense>
+  );
+
   const renderSectionContent = () => {
     switch (currentSection) {
       case "dashboard":
@@ -840,9 +783,17 @@ function App() {
           />
         );
       case "podcast-info":
-        return <PodcastInfoPage />;
+        return (
+          <Suspense fallback={<ContentSkeleton />}>
+            <PodcastInfoPage />
+          </Suspense>
+        );
       case "settings":
-        return <PodcastSettingsPage />;
+        return (
+          <Suspense fallback={<ContentSkeleton />}>
+            <PodcastSettingsPage />
+          </Suspense>
+        );
       case "episodes":
       default:
         return (
@@ -934,11 +885,16 @@ function App() {
     return <VideoTestPage />;
   }
 
+  if (authLoading) {
+    return <LoadingScreen />;
+  }
+
+  // If episodes list hasn't loaded yet and we're on an episode route, show loading
+  // (only for the initial list load — once cached this is instant)
   if (
-    authLoading ||
-    (route.kind === "episode-route" &&
-      !resolvedEpisode &&
-      (episodesLoading || episodes.length === 0))
+    route.kind === "episode-route" &&
+    !resolvedEpisode &&
+    (episodesLoading || episodes.length === 0)
   ) {
     return <LoadingScreen />;
   }
@@ -968,7 +924,9 @@ function App() {
           <WorkspaceLayout activeSection={lastSection} onNavigate={handleSectionNavigate}>
             <div className="h-full overflow-auto">
               <div className="px-6 py-8 sm:px-8 lg:px-12 lg:py-10">
-                <Settings />
+                <Suspense fallback={<ContentSkeleton />}>
+                  <Settings />
+                </Suspense>
               </div>
             </div>
           </WorkspaceLayout>

@@ -41,7 +41,7 @@ export async function initializeDatabase(): Promise<void> {
     )
   `;
 
-  console.log("[Database] OAuth tokens table initialized");
+  console.warn("[Database] OAuth tokens table initialized");
 }
 
 // Encryption using ACCESS_CODE as the key

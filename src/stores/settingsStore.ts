@@ -213,8 +213,10 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: "podcastomatic-settings",
       version: SETTINGS_VERSION,
-      migrate: (persistedState: any, version: number) => {
-        let state = persistedState;
+      migrate: (persistedState: unknown, version: number) => {
+        let state = persistedState as Record<string, unknown> & {
+          settings?: Partial<AppSettings>;
+        };
 
         // Migration v2 -> v3: update backend config
         if (version < 3) {

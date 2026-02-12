@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   MagicWandIcon,
   PlusIcon,
@@ -81,7 +81,7 @@ export const ClipSelector: React.FC = () => {
   const [viewMode, setViewMode] = useState<"editor" | "finder">("editor");
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  const clips = currentProject?.clips || [];
+  const clips = useMemo(() => currentProject?.clips || [], [currentProject?.clips]);
   const transcript = currentProject?.transcript;
   const activeClip = clips[activeClipIndex] || null;
 
@@ -140,7 +140,7 @@ export const ClipSelector: React.FC = () => {
     syncTimeoutRef.current = setTimeout(async () => {
       try {
         await saveClips(currentProject.id, clips);
-        console.log("[ClipSelector] Synced", clips.length, "clips to backend");
+        console.warn("[ClipSelector] Synced", clips.length, "clips to backend");
       } catch (err) {
         console.error("[ClipSelector] Failed to sync clips:", err);
       }
@@ -228,6 +228,7 @@ export const ClipSelector: React.FC = () => {
         setCurrentTime(activeClip.startTime);
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Only run on clip identity change; adding full activeClip would reset playhead on every edit
   }, [activeClip?.id]);
 
   const playClip = useCallback(
@@ -378,7 +379,21 @@ export const ClipSelector: React.FC = () => {
     setProgress(10);
 
     try {
-      let analysis: { segments: any[] };
+      let analysis: {
+        segments: Array<{
+          start_time: number;
+          end_time: number;
+          text?: string;
+          explanation?: string;
+          scores: {
+            hook: number;
+            clarity: number;
+            emotion: number;
+            quotable: number;
+            completeness: number;
+          };
+        }>;
+      };
 
       if (useBackend) {
         // Use backend endpoint
@@ -497,6 +512,10 @@ Return ONLY valid JSON in this exact format (no other text):
 
       setProgress(90);
 
+      if (!currentProject) {
+        setError("No project loaded");
+        return;
+      }
       const segments = analysis.segments || [];
       const startingClipNumber = clips.length + 1;
       segments.forEach(
@@ -541,7 +560,7 @@ Return ONLY valid JSON in this exact format (no other text):
           };
 
           addClip({
-            projectId: currentProject!.id,
+            projectId: currentProject.id,
             name: `Clip ${startingClipNumber + index}`,
             startTime,
             endTime,
@@ -582,11 +601,16 @@ Return ONLY valid JSON in this exact format (no other text):
       return;
     }
 
+    if (!currentProject) {
+      setError("No project loaded");
+      return;
+    }
+
     const segmentWords = transcript.words.filter((w) => w.start >= start && w.end <= end);
 
     const clipNumber = clips.length + 1;
     addClip({
-      projectId: currentProject!.id,
+      projectId: currentProject.id,
       name: `Clip ${clipNumber}`,
       startTime: start,
       endTime: end,

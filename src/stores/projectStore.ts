@@ -52,7 +52,7 @@ function ensureSegments(t: Transcript): Transcript {
   for (const [oldKey, newKey] of keyMappings) {
     const oldData = localStorage.getItem(oldKey);
     if (oldData && !localStorage.getItem(newKey)) {
-      console.log(`[Migration] Copying ${oldKey} -> ${newKey}`);
+      console.warn(`[Migration] Copying ${oldKey} -> ${newKey}`);
       localStorage.setItem(newKey, oldData);
     }
   }
@@ -74,7 +74,7 @@ function ensureSegments(t: Transcript): Transcript {
         return;
       }
 
-      console.log(`[Migration] Copying IndexedDB ${oldDb} -> ${newDb}`);
+      console.warn(`[Migration] Copying IndexedDB ${oldDb} -> ${newDb}`);
 
       // Open/create new database with same version
       const newRequest = indexedDB.open(newDb, oldDatabase.version);
@@ -139,7 +139,7 @@ function ensureSegments(t: Transcript): Transcript {
 
     // Check if storage is bloated (> 1MB likely means transcripts are stored inline)
     if (stored.length > 1_000_000) {
-      console.log("[Migration] Detected bloated localStorage, clearing for fresh start...");
+      console.warn("[Migration] Detected bloated localStorage, clearing for fresh start...");
       localStorage.removeItem(STORAGE_KEY);
     }
 
@@ -275,7 +275,7 @@ export const getAudioBlob = async (projectId: string): Promise<Blob | undefined>
     legacyDb.close();
 
     if (blob) {
-      console.log("[Migration] Found audio in legacy DB, caching...");
+      console.warn("[Migration] Found audio in legacy DB, caching...");
       getAudioMemoryCache().set(projectId, blob);
       // Also save to new database for future use
       setAudioBlob(projectId, blob);
@@ -374,7 +374,7 @@ export const getTranscriptsFromDB = async (projectId: string): Promise<Transcrip
     legacyDb.close();
 
     if (transcripts.length > 0) {
-      console.log("[Migration] Found transcripts in legacy DB, caching...");
+      console.warn("[Migration] Found transcripts in legacy DB, caching...");
       getTranscriptMemoryCache().set(projectId, transcripts);
       // Also save to new database for future use
       saveTranscriptsToDB(projectId, transcripts);
@@ -556,25 +556,28 @@ export const useProjectStore = create<ProjectState>()(
                 const activeTranscript =
                   transcripts.find((t) => t.id === activeId) || transcripts[transcripts.length - 1];
 
-                set((state) => ({
-                  currentProject: {
-                    ...state.currentProject!,
-                    transcripts,
-                    activeTranscriptId: activeId,
-                    transcript: activeTranscript,
-                  },
-                  // Also update in projects array
-                  projects: state.projects.map((p) =>
-                    p.id === projectId
-                      ? {
-                          ...p,
-                          transcripts,
-                          activeTranscriptId: activeId,
-                          transcript: activeTranscript,
-                        }
-                      : p
-                  ),
-                }));
+                set((state) => {
+                  if (!state.currentProject) return state;
+                  return {
+                    currentProject: {
+                      ...state.currentProject,
+                      transcripts,
+                      activeTranscriptId: activeId,
+                      transcript: activeTranscript,
+                    },
+                    // Also update in projects array
+                    projects: state.projects.map((p) =>
+                      p.id === projectId
+                        ? {
+                            ...p,
+                            transcripts,
+                            activeTranscriptId: activeId,
+                            transcript: activeTranscript,
+                          }
+                        : p
+                    ),
+                  };
+                });
               }
             });
           }
@@ -708,9 +711,10 @@ export const useProjectStore = create<ProjectState>()(
           if (!state.currentProject) return undefined;
 
           // First try to find by activeTranscriptId
-          if (state.currentProject.activeTranscriptId) {
+          const { activeTranscriptId } = state.currentProject;
+          if (activeTranscriptId) {
             const active = state.currentProject.transcripts?.find(
-              (t) => t.id === state.currentProject!.activeTranscriptId
+              (t) => t.id === activeTranscriptId
             );
             if (active) return active;
           }
@@ -739,9 +743,10 @@ export const useProjectStore = create<ProjectState>()(
               }
             }
             // Also check legacy transcript
-            if (project.transcript?.audioFingerprint === fingerprint) {
-              if (!allTranscripts.find((t) => t.id === project.transcript!.id)) {
-                allTranscripts.push(project.transcript);
+            const legacyTranscript = project.transcript;
+            if (legacyTranscript?.audioFingerprint === fingerprint) {
+              if (!allTranscripts.find((t) => t.id === legacyTranscript.id)) {
+                allTranscripts.push(legacyTranscript);
               }
             }
           }
@@ -756,12 +761,11 @@ export const useProjectStore = create<ProjectState>()(
 
           set((state) => {
             if (!state.currentProject) return state;
+            const { id: currentProjectId, activeTranscriptId: activeId } = state.currentProject;
 
             // Get the active transcript
-            const activeTranscript = state.currentProject.activeTranscriptId
-              ? state.currentProject.transcripts?.find(
-                  (t) => t.id === state.currentProject!.activeTranscriptId
-                )
+            const activeTranscript = activeId
+              ? state.currentProject.transcripts?.find((t) => t.id === activeId)
               : state.currentProject.transcript;
 
             if (!activeTranscript) return state;
@@ -793,7 +797,7 @@ export const useProjectStore = create<ProjectState>()(
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
-                p.id === state.currentProject!.id
+                p.id === currentProjectId
                   ? {
                       ...p,
                       transcript: updatedTranscript,
@@ -813,11 +817,10 @@ export const useProjectStore = create<ProjectState>()(
 
           set((state) => {
             if (!state.currentProject) return state;
+            const { id: currentProjectId, activeTranscriptId: activeId } = state.currentProject;
 
-            const activeTranscript = state.currentProject.activeTranscriptId
-              ? state.currentProject.transcripts?.find(
-                  (t) => t.id === state.currentProject!.activeTranscriptId
-                )
+            const activeTranscript = activeId
+              ? state.currentProject.transcripts?.find((t) => t.id === activeId)
               : state.currentProject.transcript;
 
             if (!activeTranscript) return state;
@@ -838,7 +841,7 @@ export const useProjectStore = create<ProjectState>()(
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
-                p.id === state.currentProject!.id
+                p.id === currentProjectId
                   ? {
                       ...p,
                       transcript: updatedTranscript,
@@ -858,11 +861,10 @@ export const useProjectStore = create<ProjectState>()(
 
           set((state) => {
             if (!state.currentProject) return state;
+            const { id: currentProjectId, activeTranscriptId: activeId } = state.currentProject;
 
-            const activeTranscript = state.currentProject.activeTranscriptId
-              ? state.currentProject.transcripts?.find(
-                  (t) => t.id === state.currentProject!.activeTranscriptId
-                )
+            const activeTranscript = activeId
+              ? state.currentProject.transcripts?.find((t) => t.id === activeId)
               : state.currentProject.transcript;
 
             if (!activeTranscript || wordIndex < 0 || wordIndex >= activeTranscript.words.length)
@@ -906,7 +908,7 @@ export const useProjectStore = create<ProjectState>()(
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
-                p.id === state.currentProject!.id
+                p.id === currentProjectId
                   ? {
                       ...p,
                       transcript: updatedTranscript,
@@ -926,11 +928,10 @@ export const useProjectStore = create<ProjectState>()(
 
           set((state) => {
             if (!state.currentProject) return state;
+            const { id: currentProjectId, activeTranscriptId: activeId } = state.currentProject;
 
-            const activeTranscript = state.currentProject.activeTranscriptId
-              ? state.currentProject.transcripts?.find(
-                  (t) => t.id === state.currentProject!.activeTranscriptId
-                )
+            const activeTranscript = activeId
+              ? state.currentProject.transcripts?.find((t) => t.id === activeId)
               : state.currentProject.transcript;
 
             if (!activeTranscript) return state;
@@ -990,7 +991,7 @@ export const useProjectStore = create<ProjectState>()(
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
-                p.id === state.currentProject!.id
+                p.id === currentProjectId
                   ? {
                       ...p,
                       transcript: updatedTranscript,
@@ -1010,11 +1011,10 @@ export const useProjectStore = create<ProjectState>()(
 
           set((state) => {
             if (!state.currentProject) return state;
+            const { id: currentProjectId, activeTranscriptId: activeId } = state.currentProject;
 
-            const activeTranscript = state.currentProject.activeTranscriptId
-              ? state.currentProject.transcripts?.find(
-                  (t) => t.id === state.currentProject!.activeTranscriptId
-                )
+            const activeTranscript = activeId
+              ? state.currentProject.transcripts?.find((t) => t.id === activeId)
               : state.currentProject.transcript;
 
             if (
@@ -1066,7 +1066,7 @@ export const useProjectStore = create<ProjectState>()(
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
-                p.id === state.currentProject!.id
+                p.id === currentProjectId
                   ? {
                       ...p,
                       transcript: updatedTranscript,
@@ -1233,7 +1233,12 @@ export const useProjectStore = create<ProjectState>()(
         };
 
         // Ensure projects have required fields
-        const migrateProject = (p: any): Project => ({
+        const migrateProject = (
+          p: Omit<Project, "transcripts" | "activeTranscriptId"> & {
+            transcripts?: Transcript[];
+            activeTranscriptId?: string;
+          }
+        ): Project => ({
           ...p,
           transcripts: [], // Will be loaded from IndexedDB
           activeTranscriptId: undefined,

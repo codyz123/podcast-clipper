@@ -1,68 +1,16 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { PlusIcon, ReloadIcon, SpeakerLoudIcon } from "@radix-ui/react-icons";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button, Card, CardContent, Input } from "./ui";
-import { useEpisodes, Episode, EpisodeWithDetails } from "../hooks/useEpisodes";
+import { useEpisodes, Episode } from "../hooks/useEpisodes";
 import { useProjectStore } from "../stores/projectStore";
-import { Project, Transcript, Clip, StageStatus, StageId, SubStepId } from "../lib/types";
+import { StageStatus, StageId, SubStepId } from "../lib/types";
 import { useAuthStore } from "../stores/authStore";
 import { cn } from "../lib/utils";
 import { ConfirmationDialog } from "./ui/ConfirmationDialog";
 import { ExpandableEpisodeRow } from "./EpisodeRow";
-
-// Convert database episode to Project format for projectStore
-function episodeToProject(episode: EpisodeWithDetails): Project {
-  // Convert transcripts
-  const transcripts: Transcript[] = episode.transcripts.map((t) => ({
-    id: t.id,
-    projectId: episode.id,
-    audioFingerprint: t.audioFingerprint,
-    text: t.text,
-    words: t.words,
-    language: t.language || "en",
-    createdAt: t.createdAt,
-    name: t.name,
-  }));
-
-  // Convert clips
-  const clips: Clip[] = episode.clips.map((c) => ({
-    id: c.id,
-    projectId: episode.id,
-    name: c.name,
-    startTime: c.startTime,
-    endTime: c.endTime,
-    transcript: c.transcript || "",
-    words: c.words,
-    clippabilityScore: c.clippabilityScore,
-    isManual: c.isManual || false,
-    createdAt: c.createdAt,
-    tracks: c.tracks as Project["clips"][0]["tracks"],
-    captionStyle: c.captionStyle as Project["clips"][0]["captionStyle"],
-    format: c.format as Project["clips"][0]["format"],
-  }));
-
-  return {
-    id: episode.id,
-    name: episode.name,
-    audioPath: episode.audioBlobUrl || "",
-    audioFileName: episode.audioFileName,
-    audioDuration: episode.audioDuration || 0,
-    createdAt: episode.createdAt,
-    updatedAt: episode.updatedAt,
-    description: episode.description,
-    episodeNumber: episode.episodeNumber,
-    seasonNumber: episode.seasonNumber,
-    publishDate: episode.publishDate,
-    showNotes: episode.showNotes,
-    explicit: episode.explicit,
-    guests: episode.guests,
-    stageStatus: episode.stageStatus,
-    transcript: transcripts[0], // Legacy: first transcript
-    transcripts,
-    activeTranscriptId: transcripts[0]?.id,
-    clips,
-    exportHistory: [],
-  };
-}
+import { episodeToProject } from "../lib/episodeToProject";
+import { episodeKeys, fetchEpisodeDetail } from "../lib/queries";
 
 interface ProjectsViewProps {
   onProjectLoad: (episodeId: string) => void;
@@ -80,6 +28,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
   } = useEpisodes();
   const { setCurrentProject } = useProjectStore();
   const { podcasts, currentPodcastId } = useAuthStore();
+  const queryClient = useQueryClient();
 
   const [showNewProject, setShowNewProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
@@ -112,14 +61,23 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
     }
   };
 
-  const handleLoadProject = async (episodeId: string) => {
-    const episode = await fetchEpisode(episodeId);
-    if (episode) {
-      const project = episodeToProject(episode);
-      setCurrentProject(project);
-      onProjectLoad(episodeId);
-    }
+  const handleLoadProject = (episodeId: string) => {
+    // Navigate immediately — data loading happens in App.tsx via React Query
+    onProjectLoad(episodeId);
   };
+
+  // Prefetch episode data on hover so it's cached by the time the user clicks
+  const handlePrefetch = useCallback(
+    (episodeId: string) => {
+      if (!currentPodcastId) return;
+      queryClient.prefetchQuery({
+        queryKey: episodeKeys.detail(currentPodcastId, episodeId),
+        queryFn: () => fetchEpisodeDetail(currentPodcastId, episodeId),
+        staleTime: 1000 * 60 * 5,
+      });
+    },
+    [currentPodcastId, queryClient]
+  );
 
   const handleDeleteProject = async () => {
     if (!deleteTarget) return;
@@ -288,6 +246,7 @@ export const ProjectsView: React.FC<ProjectsViewProps> = ({ onProjectLoad }) => 
                     onToggleExpand={() => handleToggleExpand(episode.id)}
                     onLoad={handleLoadProject}
                     onDelete={setDeleteTarget}
+                    onPrefetch={handlePrefetch}
                     onStageStatusChange={(stageId, status) =>
                       handleStageStatusChange(episode.id, stageId, status)
                     }

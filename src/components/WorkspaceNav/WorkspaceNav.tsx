@@ -11,6 +11,7 @@ import {
   ChevronDownIcon,
 } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
+import { getMediaUrl } from "../../lib/api";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useAuthStore } from "../../stores/authStore";
 
@@ -93,13 +94,13 @@ export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNav
               {/* Workspace icon/avatar - show cover image if available */}
               {currentPodcast?.coverImageUrl ? (
                 <img
-                  src={currentPodcast.coverImageUrl}
+                  src={getMediaUrl(currentPodcast.coverImageUrl)}
                   alt={workspaceName}
                   className="h-5 w-5 flex-shrink-0 rounded object-cover"
                 />
               ) : podcastMetadata.coverImage ? (
                 <img
-                  src={podcastMetadata.coverImage}
+                  src={getMediaUrl(podcastMetadata.coverImage)}
                   alt={workspaceName}
                   className="h-5 w-5 flex-shrink-0 rounded object-cover"
                 />

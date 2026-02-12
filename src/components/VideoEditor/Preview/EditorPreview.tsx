@@ -468,7 +468,7 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
                       height: 200 * resolvedPreviewScale,
                     }}
                   >
-                    <AnimationOverlay url={anim.assetUrl!} source={anim.assetSource} />
+                    <AnimationOverlay url={anim.assetUrl ?? ""} source={anim.assetSource} />
                   </div>
                 </div>
               );

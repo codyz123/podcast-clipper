@@ -392,7 +392,9 @@ export const AppShell: React.FC<AppShellProps> = ({
                               return (
                                 <button
                                   key={subStage.id}
-                                  onClick={() => handleSubStageSelect(displayStage!, subStage.id)}
+                                  onClick={() =>
+                                    displayStage && handleSubStageSelect(displayStage, subStage.id)
+                                  }
                                   className={cn(
                                     "flex w-full items-center gap-2 px-3 py-2 text-sm",
                                     isActive
