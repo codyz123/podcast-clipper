@@ -8,7 +8,7 @@ import { useAuthStore } from "../stores/authStore";
  * Get the API base URL from settings
  */
 export function getApiBase(): string {
-  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3001";
+  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3002";
 }
 
 /**
@@ -44,13 +44,24 @@ export async function authFetch(url: string, options: RequestInit = {}): Promise
 /**
  * Convert a media URL to go through our server proxy.
  * Handles direct R2 URLs (existing data) by routing them through /api/media/.
+ * In development, returns R2 public URLs directly (no proxy needed for media tags).
  */
 export function getMediaUrl(url: string | undefined | null): string | undefined {
   if (!url) return undefined;
   const apiBase = getApiBase();
-  // Already going through our server
-  if (url.includes("/api/media/") || url.includes("/api/local-media/")) return url;
-  // Direct R2 URL - extract the key (path after hostname) and proxy it
+  // Rewrite absolute localhost media URLs to use the current backend
+  // (handles stale URLs stored with old ports like localhost:3001)
+  const localMediaIdx = url.indexOf("/api/local-media/");
+  if (localMediaIdx !== -1) {
+    return `${apiBase}${url.slice(localMediaIdx)}`;
+  }
+  const mediaIdx = url.indexOf("/api/media/");
+  if (mediaIdx !== -1) {
+    return `${apiBase}${url.slice(mediaIdx)}`;
+  }
+  // In dev, use R2 public URLs directly — avoids needing R2 credentials locally
+  if (import.meta.env.DEV) return url;
+  // Production: proxy through our server to avoid CORS issues
   try {
     const parsed = new URL(url);
     const key = parsed.pathname.slice(1); // Remove leading "/"

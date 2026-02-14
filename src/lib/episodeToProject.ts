@@ -58,7 +58,39 @@ export function episodeToProject(
     templateId: c.templateId as Clip["templateId"],
     background: c.background as Clip["background"],
     subtitle: c.subtitle as Clip["subtitle"],
+    multicamLayout: c.multicamLayout as Clip["multicamLayout"],
+    generatedAssets: c.generatedAssets as Clip["generatedAssets"],
+    hookAnalysis: c.hookAnalysis as Clip["hookAnalysis"],
   }));
+
+  // Re-derive clip words from the active transcript so edits propagate automatically.
+  // This ensures transcript changes on the Transcribe page flow to clips.
+  const activeTranscriptForSync =
+    transcripts.find((t) => t.id === preferredTranscriptId) || transcripts[0];
+  // Re-derive clip words — epsilon handles float precision mismatch between
+  // PostgreSQL real (32-bit) and JSONB doubles (64-bit) for boundary comparisons
+  const eps = 0.05;
+  if (activeTranscriptForSync?.words?.length) {
+    for (const clip of clips) {
+      const freshWords = activeTranscriptForSync.words.filter(
+        (w) => w.start >= clip.startTime - eps && w.end <= clip.endTime + eps
+      );
+      if (freshWords.length > 0) {
+        clip.words = freshWords;
+        clip.transcript = freshWords.map((w) => w.text).join(" ");
+      }
+    }
+  }
+
+  // When no explicit preference, prefer a transcript that has speaker IDs assigned
+  // (indicates the user identified speakers in the transcript editor)
+  const resolvedTranscriptId = (() => {
+    if (preferredTranscriptId && transcripts.some((t) => t.id === preferredTranscriptId)) {
+      return preferredTranscriptId;
+    }
+    const withSpeakerIds = transcripts.find((t) => t.segments?.some((s) => s.speakerId));
+    return withSpeakerIds?.id ?? transcripts[0]?.id;
+  })();
 
   return {
     id: episode.id,
@@ -76,15 +108,16 @@ export function episodeToProject(
     explicit: episode.explicit,
     guests: episode.guests,
     stageStatus: episode.stageStatus,
-    transcript:
-      (preferredTranscriptId && transcripts.find((t) => t.id === preferredTranscriptId)) ||
-      transcripts[0],
+    transcript: transcripts.find((t) => t.id === resolvedTranscriptId) || transcripts[0],
     transcripts,
-    activeTranscriptId:
-      preferredTranscriptId && transcripts.some((t) => t.id === preferredTranscriptId)
-        ? preferredTranscriptId
-        : transcripts[0]?.id,
+    activeTranscriptId: resolvedTranscriptId,
     clips,
+    mediaType: episode.mediaType,
+    defaultVideoSourceId: episode.defaultVideoSourceId,
+    primaryAudioSourceId: episode.primaryAudioSourceId,
+    mixedAudioBlobUrl: episode.mixedAudioBlobUrl,
+    videoSyncStatus: episode.videoSyncStatus,
+    videoSources: episode.videoSources,
     exportHistory: [],
   };
 }

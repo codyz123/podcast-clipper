@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckIcon, StarFilledIcon } from "@radix-ui/react-icons";
+import { StarFilledIcon } from "@radix-ui/react-icons";
 import { cn } from "../../lib/utils";
 import { formatTimestamp, formatDuration } from "../../lib/formats";
 import { Clip } from "../../lib/types";
@@ -8,17 +8,10 @@ interface ClipStackItemProps {
   clip: Clip;
   index: number;
   isActive: boolean;
-  isAccepted: boolean;
   onClick: () => void;
 }
 
-export const ClipStackItem: React.FC<ClipStackItemProps> = ({
-  clip,
-  index,
-  isActive,
-  isAccepted,
-  onClick,
-}) => {
+export const ClipStackItem: React.FC<ClipStackItemProps> = ({ clip, index, isActive, onClick }) => {
   const getScoreColor = (score: number) => {
     if (score >= 8) return "text-[hsl(var(--success))]";
     if (score >= 6) return "text-[hsl(var(--primary))]";
@@ -33,8 +26,7 @@ export const ClipStackItem: React.FC<ClipStackItemProps> = ({
         "border",
         isActive
           ? "border-[hsl(var(--cyan))] bg-[hsl(var(--cyan)/0.1)]"
-          : "border-transparent bg-[hsl(var(--bg-surface))] hover:border-[hsl(var(--border-subtle))] hover:bg-[hsl(var(--bg-elevated))]",
-        isAccepted && !isActive && "border-l-2 border-l-[hsl(var(--success))]"
+          : "border-transparent bg-[hsl(var(--bg-surface))] hover:border-[hsl(var(--border-subtle))] hover:bg-[hsl(var(--bg-elevated))]"
       )}
     >
       <div className="flex items-start gap-2">
@@ -61,7 +53,6 @@ export const ClipStackItem: React.FC<ClipStackItemProps> = ({
             >
               {clip.name}
             </span>
-            {isAccepted && <CheckIcon className="h-3 w-3 shrink-0 text-[hsl(var(--success))]" />}
           </div>
 
           {/* Time info */}

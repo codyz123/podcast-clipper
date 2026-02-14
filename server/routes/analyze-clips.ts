@@ -10,6 +10,7 @@ interface AnalyzeClipsRequest {
   clipCount: number;
   clipDuration: number;
   keywords?: string;
+  existingClips?: Array<{ startTime: number; endTime: number }>;
 }
 
 router.post("/analyze-clips", async (req, res) => {
@@ -21,7 +22,8 @@ router.post("/analyze-clips", async (req, res) => {
     return;
   }
 
-  const { transcript, clipCount, clipDuration, keywords } = req.body as AnalyzeClipsRequest;
+  const { transcript, clipCount, clipDuration, keywords, existingClips } =
+    req.body as AnalyzeClipsRequest;
 
   if (!transcript?.words || !Array.isArray(transcript.words)) {
     res.status(400).json({ error: "Invalid transcript data" });
@@ -30,8 +32,12 @@ router.post("/analyze-clips", async (req, res) => {
 
   const openai = new OpenAI({ apiKey });
 
-  const prompt = `Analyze this podcast transcript and identify the top ${clipCount} most "clippable" segments of approximately ${clipDuration} seconds each.
+  const existingClipsInstruction = existingClips?.length
+    ? `\nIMPORTANT: The following time ranges are already used by existing clips. You MUST NOT select segments that overlap with any of these ranges by more than 5 seconds. Find clips in OTHER parts of the transcript.\nExisting clips:\n${existingClips.map((c) => `- ${c.startTime.toFixed(1)}s to ${c.endTime.toFixed(1)}s`).join("\n")}\n`
+    : "";
 
+  const prompt = `Analyze this podcast transcript and identify the top ${clipCount} most "clippable" segments of up to ${clipDuration} seconds each. Use your discretion to find optimal start and end points — clips can be shorter than the maximum duration if the content warrants it. Prioritize natural, complete thoughts over hitting a specific length.
+${existingClipsInstruction}
 For each segment, evaluate:
 1. HOOK (1-10): Does it grab attention immediately?
 2. CLARITY (1-10): Understandable without prior context?

@@ -146,6 +146,13 @@ export const projects = pgTable(
         twitter?: string;
       }>
     >(),
+    // Video support
+    mediaType: varchar("media_type", { length: 10 }).default("audio"), // 'audio' | 'video'
+    defaultVideoSourceId: uuid("default_video_source_id"),
+    primaryAudioSourceId: uuid("primary_audio_source_id"),
+    mixedAudioBlobUrl: text("mixed_audio_blob_url"),
+    videoSyncStatus: varchar("video_sync_status", { length: 20 }), // 'pending' | 'syncing' | 'synced' | 'failed'
+
     createdById: uuid("created_by_id").references(() => users.id),
     stageStatus: jsonb("stage_status").$type<{
       // Stage-level status (independent of sub-steps)
@@ -211,10 +218,10 @@ export const uploadSessions = pgTable(
       .references(() => projects.id, { onDelete: "cascade" })
       .notNull(),
 
-    // Vercel Blob multipart identifiers (required for uploadPart/complete)
-    uploadId: varchar("upload_id", { length: 255 }).notNull(),
-    blobKey: varchar("blob_key", { length: 255 }).notNull(),
-    pathname: varchar("pathname", { length: 500 }).notNull(),
+    // R2 multipart identifiers (required for uploadPart/complete)
+    uploadId: text("upload_id").notNull(),
+    blobKey: text("blob_key").notNull(),
+    pathname: text("pathname").notNull(),
 
     // File metadata
     filename: varchar("filename", { length: 255 }).notNull(),
@@ -248,6 +255,61 @@ export const uploadSessions = pgTable(
     index("upload_sessions_episode_id_idx").on(table.episodeId),
     index("upload_sessions_status_idx").on(table.status),
     index("upload_sessions_expires_at_idx").on(table.expiresAt),
+  ]
+);
+
+// ============ Video Sources ============
+
+export const videoSources = pgTable(
+  "video_sources",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .references(() => projects.id, { onDelete: "cascade" })
+      .notNull(),
+    label: varchar("label", { length: 255 }).notNull(),
+    personId: uuid("person_id").references(() => podcastPeople.id, {
+      onDelete: "set null",
+    }),
+    sourceType: varchar("source_type", { length: 20 }).notNull().default("speaker"), // 'speaker' | 'wide' | 'broll'
+
+    // File URLs
+    videoBlobUrl: text("video_blob_url").notNull(),
+    proxyBlobUrl: text("proxy_blob_url"),
+    audioBlobUrl: text("audio_blob_url"),
+    thumbnailStripUrl: text("thumbnail_strip_url"),
+
+    // File metadata
+    fileName: varchar("file_name", { length: 500 }).notNull(),
+    contentType: varchar("content_type", { length: 100 }),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+
+    // Video metadata
+    durationSeconds: real("duration_seconds"),
+    width: integer("width"),
+    height: integer("height"),
+    fps: real("fps"),
+
+    // Sync
+    syncOffsetMs: integer("sync_offset_ms").default(0).notNull(),
+    syncMethod: varchar("sync_method", { length: 30 }), // 'duration-match' | 'audio-correlation' | 'manual'
+    syncConfidence: real("sync_confidence"),
+
+    // Crop
+    cropOffsetX: real("crop_offset_x").default(50).notNull(),
+    cropOffsetY: real("crop_offset_y").default(50).notNull(),
+
+    // Other
+    audioFingerprint: varchar("audio_fingerprint", { length: 64 }),
+    contentFingerprint: varchar("content_fingerprint", { length: 64 }), // SHA-256 of size + first 2MB
+    displayOrder: integer("display_order").default(0).notNull(),
+
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("video_sources_project_id_idx").on(table.projectId),
+    index("video_sources_person_id_idx").on(table.personId),
   ]
 );
 
@@ -346,6 +408,7 @@ export const clips = pgTable(
     subtitle: jsonb("subtitle"),
     tracks: jsonb("tracks"), // Track[] from types.ts
     captionStyle: jsonb("caption_style"), // CaptionStyle from types.ts
+    multicamLayout: jsonb("multicam_layout"), // MulticamLayout from types.ts
     segments: jsonb("segments").$type<
       Array<{
         speakerLabel: string;
@@ -668,11 +731,12 @@ export const podcastsRelations = relations(podcasts, ({ one, many }) => ({
   people: many(podcastPeople),
 }));
 
-export const podcastPeopleRelations = relations(podcastPeople, ({ one }) => ({
+export const podcastPeopleRelations = relations(podcastPeople, ({ one, many }) => ({
   podcast: one(podcasts, {
     fields: [podcastPeople.podcastId],
     references: [podcasts.id],
   }),
+  videoSources: many(videoSources),
 }));
 
 export const podcastMembersRelations = relations(podcastMembers, ({ one }) => ({
@@ -715,6 +779,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   mediaAssets: many(mediaAssets),
   textSnippets: many(textSnippets),
   uploadSessions: many(uploadSessions),
+  videoSources: many(videoSources),
 }));
 
 export const uploadSessionsRelations = relations(uploadSessions, ({ one }) => ({
@@ -729,6 +794,17 @@ export const uploadSessionsRelations = relations(uploadSessions, ({ one }) => ({
   createdBy: one(users, {
     fields: [uploadSessions.createdById],
     references: [users.id],
+  }),
+}));
+
+export const videoSourcesRelations = relations(videoSources, ({ one }) => ({
+  project: one(projects, {
+    fields: [videoSources.projectId],
+    references: [projects.id],
+  }),
+  person: one(podcastPeople, {
+    fields: [videoSources.personId],
+    references: [podcastPeople.id],
   }),
 }));
 
@@ -882,3 +958,5 @@ export type UploadSession = typeof uploadSessions.$inferSelect;
 export type NewUploadSession = typeof uploadSessions.$inferInsert;
 export type PodcastPerson = typeof podcastPeople.$inferSelect;
 export type NewPodcastPerson = typeof podcastPeople.$inferInsert;
+export type VideoSource = typeof videoSources.$inferSelect;
+export type NewVideoSource = typeof videoSources.$inferInsert;

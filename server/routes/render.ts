@@ -5,9 +5,9 @@ import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, asc } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { clips, projects, renderedClips } from "../db/schema.js";
+import { clips, projects, renderedClips, videoSources, transcripts } from "../db/schema.js";
 import { uploadMediaFromPath } from "../lib/media-storage.js";
 import {
   resolveCaptionStyle,
@@ -16,6 +16,11 @@ import {
   type SubtitleConfig,
   type CaptionStyle,
 } from "../../shared/clipTransform.js";
+import {
+  computeSwitchingTimeline,
+  applyPreRoll,
+  toFrameTimeline,
+} from "../../shared/multicamTransform.js";
 
 const router = Router();
 
@@ -146,8 +151,9 @@ type RenderOverrides = {
   renderScale?: number;
 };
 
-function getCompositionId(format: string): string {
-  return `ClipVideo-${format.replace(":", "-")}`;
+function getCompositionId(format: string, isMulticam: boolean = false): string {
+  const prefix = isMulticam ? "MulticamClipVideo" : "ClipVideo";
+  return `${prefix}-${format.replace(":", "-")}`;
 }
 
 const renderJobs = new Map<string, RenderJob>();
@@ -224,10 +230,7 @@ async function runRenderJob(jobId: string): Promise<void> {
     }
 
     const [project] = await db.select().from(projects).where(eq(projects.id, clip.projectId));
-
-    if (!project?.audioBlobUrl) {
-      throw new Error("Episode audio is missing");
-    }
+    const isMulticam = project?.mediaType === "video";
 
     const overrides = job.overrides;
     const overrideTracks = overrides?.tracks;
@@ -327,8 +330,8 @@ async function runRenderJob(jobId: string): Promise<void> {
       (track): track is NonNullable<typeof track> => !!track
     );
 
-    const props = {
-      audioUrl: project.audioBlobUrl,
+    // Build base props (shared between audio and multicam)
+    const baseProps = {
       audioStartFrame: Math.floor(clipStart * FPS),
       audioEndFrame: Math.ceil(clipEnd * FPS),
       words: wordTimings,
@@ -340,6 +343,121 @@ async function runRenderJob(jobId: string): Promise<void> {
       tracks: renderTracks.length > 0 ? renderTracks : undefined,
     };
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let props: Record<string, any>;
+
+    if (isMulticam) {
+      // Fetch video sources and transcript segments for multicam
+      const [sources, transcriptRows] = await Promise.all([
+        db
+          .select()
+          .from(videoSources)
+          .where(eq(videoSources.projectId, clip.projectId))
+          .orderBy(asc(videoSources.displayOrder)),
+        db.select().from(transcripts).where(eq(transcripts.projectId, clip.projectId)),
+      ]);
+
+      // Resolve audio URL
+      let audioUrl = project?.mixedAudioBlobUrl || "";
+      if (project?.primaryAudioSourceId) {
+        const primarySource = sources.find((s) => s.id === project.primaryAudioSourceId);
+        audioUrl = primarySource?.audioBlobUrl || audioUrl;
+      }
+      if (!audioUrl && sources.length > 0) {
+        // Fall back to first speaker source's audio
+        const firstSpeaker = sources.find((s) => s.sourceType === "speaker" && s.audioBlobUrl);
+        audioUrl = firstSpeaker?.audioBlobUrl || sources[0].audioBlobUrl || "";
+      }
+      if (!audioUrl) {
+        audioUrl = project?.audioBlobUrl || "";
+      }
+
+      // Get speaker segments from transcript
+      const transcript = transcriptRows[0];
+      const segments =
+        (transcript?.segments as Array<{
+          speakerLabel: string;
+          startTime: number;
+          endTime: number;
+        }>) || [];
+
+      // Get multicam layout from clip
+      const multicamLayout = clip.multicamLayout as {
+        mode?: string;
+        pipEnabled?: boolean;
+        pipScale?: number;
+        pipPositions?: Array<{ videoSourceId: string; positionX: number; positionY: number }>;
+        overrides?: Array<{ startTime: number; endTime: number; activeVideoSourceId: string }>;
+        transitionStyle?: string;
+        transitionDurationFrames?: number;
+        soloSourceId?: string;
+      } | null;
+
+      // Build switching timeline
+      const layoutSources = sources.map((s) => ({
+        id: s.id,
+        label: s.label,
+        personId: s.personId,
+        sourceType: s.sourceType,
+        syncOffsetMs: s.syncOffsetMs,
+        cropOffsetX: s.cropOffsetX,
+        cropOffsetY: s.cropOffsetY,
+        width: s.width,
+        height: s.height,
+        displayOrder: s.displayOrder,
+      }));
+
+      const switchingConfig = {
+        defaultVideoSourceId: project?.defaultVideoSourceId || undefined,
+        holdPreviousMs: 1500,
+        minShotDurationMs: 1500,
+        overrides: multicamLayout?.overrides,
+      };
+
+      let switchTimeline = computeSwitchingTimeline(
+        clipStart,
+        clipEnd,
+        segments,
+        layoutSources,
+        switchingConfig
+      );
+      switchTimeline = applyPreRoll(switchTimeline);
+      const frameTimeline = toFrameTimeline(switchTimeline, clipStart, FPS);
+
+      props = {
+        ...baseProps,
+        audioUrl,
+        videoSources: sources.map((s) => ({
+          id: s.id,
+          label: s.label,
+          videoUrl: s.videoBlobUrl, // Full-res for rendering
+          syncOffsetMs: s.syncOffsetMs,
+          sourceType: s.sourceType,
+          cropOffsetX: s.cropOffsetX,
+          cropOffsetY: s.cropOffsetY,
+          width: s.width || 1920,
+          height: s.height || 1080,
+        })),
+        switchingTimeline: frameTimeline,
+        layoutMode: multicamLayout?.mode || "active-speaker",
+        pipEnabled: multicamLayout?.pipEnabled || false,
+        pipPositions: multicamLayout?.pipPositions || [],
+        pipScale: multicamLayout?.pipScale || 0.2,
+        clipStartTimeSeconds: clipStart,
+        transitionStyle: multicamLayout?.transitionStyle || "cut",
+        transitionDurationFrames: multicamLayout?.transitionDurationFrames || 3,
+      };
+    } else {
+      // Standard audio-only render
+      if (!project?.audioBlobUrl) {
+        throw new Error("Episode audio is missing");
+      }
+      props = {
+        ...baseProps,
+        audioUrl: project.audioBlobUrl,
+      };
+    }
+
     const renderDir = path.join(process.cwd(), ".context", "renders");
     fs.mkdirSync(renderDir, { recursive: true });
 
@@ -349,7 +467,7 @@ async function runRenderJob(jobId: string): Promise<void> {
     );
 
     const serveUrl = await getBundle();
-    const compositionId = getCompositionId(job.format);
+    const compositionId = getCompositionId(job.format, isMulticam);
     const composition = await selectComposition({
       serveUrl,
       id: compositionId,

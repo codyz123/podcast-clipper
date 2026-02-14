@@ -12,6 +12,7 @@ export function usePodcast() {
   const fetchPodcast = useCallback(async () => {
     if (!currentPodcastId) return;
 
+    setPodcast(null);
     setIsLoading(true);
     setError(null);
 

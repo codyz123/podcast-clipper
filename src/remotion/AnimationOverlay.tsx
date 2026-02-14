@@ -1,16 +1,19 @@
 import React from "react";
 import { Img } from "remotion";
 import { Lottie } from "@remotion/lottie";
-import type { TrackClipData } from "./types";
+import type { TrackClipData, WordTiming } from "./types";
+import { WaveformOverlay } from "./overlays/WaveformOverlay";
+import { YouTubeCtaOverlay } from "./overlays/YouTubeCtaOverlay";
+import { ApplePodcastsCtaOverlay } from "./overlays/ApplePodcastsCtaOverlay";
 
 interface AnimationOverlayProps {
   clip: TrackClipData;
+  podcast?: { name: string; coverImageUrl?: string; author?: string; category?: string };
+  words?: WordTiming[];
 }
 
-export const AnimationOverlay: React.FC<AnimationOverlayProps> = ({ clip }) => {
+export const AnimationOverlay: React.FC<AnimationOverlayProps> = ({ clip, podcast, words }) => {
   const { assetUrl, assetSource, lottieData, positionX, positionY } = clip;
-
-  if (!assetUrl && !lottieData) return null;
 
   const containerStyle: React.CSSProperties = {
     position: "absolute",
@@ -22,6 +25,32 @@ export const AnimationOverlay: React.FC<AnimationOverlayProps> = ({ clip }) => {
     pointerEvents: "none",
   };
 
+  // Custom overlay types
+  if (assetSource === "waveform") {
+    return (
+      <div style={containerStyle}>
+        <WaveformOverlay words={words || []} />
+      </div>
+    );
+  }
+
+  if (assetSource === "youtube-cta") {
+    return (
+      <div style={containerStyle}>
+        <YouTubeCtaOverlay />
+      </div>
+    );
+  }
+
+  if (assetSource === "apple-podcasts-cta") {
+    return (
+      <div style={containerStyle}>
+        <ApplePodcastsCtaOverlay podcast={podcast} />
+      </div>
+    );
+  }
+
+  // Legacy: GIPHY / Tenor stickers
   if ((assetSource === "giphy" || assetSource === "tenor") && assetUrl) {
     return (
       <div style={containerStyle}>
@@ -30,11 +59,11 @@ export const AnimationOverlay: React.FC<AnimationOverlayProps> = ({ clip }) => {
     );
   }
 
+  // Legacy: Lottie animations
   if (lottieData) {
     return (
       <div style={containerStyle}>
         <Lottie
-          // Lottie data is fetched as JSON and typed loosely; cast to satisfy Remotion's strict type
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           animationData={lottieData as any}
           loop={true}

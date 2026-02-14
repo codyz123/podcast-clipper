@@ -3,7 +3,13 @@
  * These are plain async functions (not hooks) that React Query calls as queryFn/mutationFn.
  */
 import { apiCall, authFetch, getApiBase } from "./api";
-import type { Episode, EpisodeWithDetails, Transcript, Clip } from "../hooks/useEpisodes";
+import type {
+  Episode,
+  EpisodeWithDetails,
+  Transcript,
+  Clip,
+  VideoSource,
+} from "../hooks/useEpisodes";
 
 // ============ Query Key Factory ============
 
@@ -24,14 +30,18 @@ export function fetchEpisodeDetail(
   podcastId: string,
   episodeId: string
 ): Promise<EpisodeWithDetails> {
-  return apiCall<{ episode: Episode; transcripts: Transcript[]; clips: Clip[] }>(
-    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}`
-  ).then(
+  return apiCall<{
+    episode: Episode;
+    transcripts: Transcript[];
+    clips: Clip[];
+    videoSources?: VideoSource[];
+  }>(`${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}`).then(
     (d) =>
       ({
         ...d.episode,
         transcripts: d.transcripts || [],
         clips: d.clips || [],
+        videoSources: d.videoSources || [],
       }) as EpisodeWithDetails
   );
 }
@@ -196,5 +206,120 @@ export function updateSubStepStatusApi(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ subStepId, status }),
     }
+  );
+}
+
+// ============ Video Sources ============
+
+export const videoSourceKeys = {
+  all: (podcastId: string, episodeId: string) => ["videoSources", podcastId, episodeId] as const,
+};
+
+export function fetchVideoSources(podcastId: string, episodeId: string): Promise<VideoSource[]> {
+  return apiCall<{ videoSources: VideoSource[] }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/video-sources`
+  ).then((d) => d.videoSources);
+}
+
+export function checkDuplicateVideosApi(
+  podcastId: string,
+  episodeId: string,
+  fingerprints: string[]
+): Promise<string[]> {
+  return apiCall<{ duplicates: string[] }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/video-sources/check-duplicates`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fingerprints }),
+    }
+  ).then((d) => d.duplicates);
+}
+
+export function createVideoSourceApi(
+  podcastId: string,
+  episodeId: string,
+  data: {
+    videoBlobUrl: string;
+    fileName: string;
+    label?: string;
+    personId?: string;
+    sourceType?: string;
+    contentType?: string;
+    sizeBytes?: number;
+    displayOrder?: number;
+    contentFingerprint?: string;
+  }
+): Promise<VideoSource> {
+  return apiCall<{ videoSource: VideoSource }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/video-sources`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }
+  ).then((d) => d.videoSource);
+}
+
+export function updateVideoSourceApi(
+  podcastId: string,
+  episodeId: string,
+  sourceId: string,
+  updates: Partial<VideoSource>
+): Promise<VideoSource> {
+  return apiCall<{ videoSource: VideoSource }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/video-sources/${sourceId}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    }
+  ).then((d) => d.videoSource);
+}
+
+export function deleteVideoSourceApi(
+  podcastId: string,
+  episodeId: string,
+  sourceId: string
+): Promise<void> {
+  return apiCall<{ success: boolean }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/video-sources/${sourceId}`,
+    { method: "DELETE" }
+  ).then(() => undefined);
+}
+
+export function processVideoSourceApi(
+  podcastId: string,
+  episodeId: string,
+  sourceId: string
+): Promise<void> {
+  return apiCall<{ status: string }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/video-sources/${sourceId}/process`,
+    { method: "POST" }
+  ).then(() => undefined);
+}
+
+export function updateVideoConfigApi(
+  podcastId: string,
+  episodeId: string,
+  config: { defaultVideoSourceId?: string; primaryAudioSourceId?: string }
+): Promise<void> {
+  return apiCall<{ success: boolean }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/video-config`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }
+  ).then(() => undefined);
+}
+
+export function mixVideoAudioApi(
+  podcastId: string,
+  episodeId: string
+): Promise<{ mixedAudioBlobUrl: string }> {
+  return apiCall<{ mixedAudioBlobUrl: string }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/mix-audio`,
+    { method: "POST" }
   );
 }

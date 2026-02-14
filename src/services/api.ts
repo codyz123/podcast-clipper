@@ -3,7 +3,7 @@ import { useSettingsStore } from "../stores/settingsStore";
 
 class ApiClient {
   private getBaseUrl(): string {
-    return useSettingsStore.getState().settings.backendUrl || "http://localhost:3001";
+    return useSettingsStore.getState().settings.backendUrl || "http://localhost:3002";
   }
 
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {

@@ -102,6 +102,7 @@ export type SubStepId =
   | "rss"
   | "youtube-dist"
   // Marketing
+  | "clips"
   | "x"
   | "instagram-reel"
   | "instagram-post"
@@ -110,10 +111,10 @@ export type SubStepId =
 
 export const STAGE_SUB_STEPS: Record<StageId, SubStepId[]> = {
   planning: ["guest", "topic", "logistics"],
-  production: ["recording"],
-  "post-production": ["mixing", "editing", "transcription"],
+  production: [],
+  "post-production": ["recording", "mixing", "editing", "transcription"],
   distribution: ["rss", "youtube-dist"],
-  marketing: ["x", "instagram-reel", "instagram-post", "youtube-short", "tiktok"],
+  marketing: ["clips", "x", "instagram-reel", "instagram-post", "youtube-short", "tiktok"],
 };
 
 export const SUB_STEP_LABELS: Record<SubStepId, string> = {
@@ -131,6 +132,7 @@ export const SUB_STEP_LABELS: Record<SubStepId, string> = {
   rss: "RSS",
   "youtube-dist": "YouTube",
   // Marketing
+  clips: "Clips",
   x: "X",
   "instagram-reel": "Instagram Reel",
   "instagram-post": "Instagram Post",
@@ -145,12 +147,13 @@ export const SUB_STEP_TO_STAGE: Record<SubStepId, StageId> = {
   guest: "planning",
   topic: "planning",
   logistics: "planning",
-  recording: "production",
+  recording: "post-production",
   mixing: "post-production",
   editing: "post-production",
   transcription: "post-production",
   rss: "distribution",
   "youtube-dist": "distribution",
+  clips: "marketing",
   x: "marketing",
   "instagram-reel": "marketing",
   "instagram-post": "marketing",
@@ -171,6 +174,7 @@ export const VALID_SUB_STEPS: SubStepId[] = [
   "transcription",
   "rss",
   "youtube-dist",
+  "clips",
   "x",
   "instagram-reel",
   "instagram-post",
@@ -189,7 +193,7 @@ export const ROUTE_TO_SUB_STEP: Record<string, SubStepId> = {
   notes: "logistics",
   record: "recording",
   transcript: "transcription",
-  // Marketing pages don't map to sub-steps (except Publish has dropdown)
+  editor: "clips",
 };
 
 // ============ Combined Status Types ============

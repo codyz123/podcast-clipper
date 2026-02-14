@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   MagicWandIcon,
   PlusIcon,
@@ -15,8 +15,10 @@ import { useEpisodes } from "../../hooks/useEpisodes";
 import { ClippabilityScore, Word, SpeakerSegment } from "../../lib/types";
 import { retryWithBackoff, cn } from "../../lib/utils";
 import { authFetch } from "../../lib/api";
+import { reconcileWords } from "../../lib/wordReconcile";
 import { ClipEditor } from "./ClipEditor";
 import { ClipStackItem } from "./ClipStackItem";
+import type { SpeakerSegmentLike, MulticamOverride } from "../../../shared/multicamTransform";
 
 /**
  * Compute segments for a clip from transcript segments.
@@ -33,9 +35,10 @@ function computeClipSegments(
   // Find which transcript word indices are included in the clip (time-based filter)
   let firstGlobalIdx = -1;
   let lastGlobalIdx = -1;
+  const eps = 0.05;
   for (let i = 0; i < transcriptWords.length; i++) {
     const w = transcriptWords[i];
-    if (w.start >= clipStartTime && w.end <= clipEndTime) {
+    if (w.start >= clipStartTime - eps && w.end <= clipEndTime + eps) {
       if (firstGlobalIdx === -1) firstGlobalIdx = i;
       lastGlobalIdx = i;
     }
@@ -53,12 +56,22 @@ function computeClipSegments(
     }));
 }
 
+const WAVEFORM_PEAKS_PER_SECOND = 100;
+
 export const ClipSelector: React.FC = () => {
-  const { currentProject, addClip, removeClip, updateClip } = useProjectStore();
+  const {
+    currentProject,
+    addClip,
+    removeClip,
+    updateClip,
+    refreshClipWords,
+    removeTranscriptWord,
+    updateTranscriptWord,
+    getActiveTranscript,
+  } = useProjectStore();
   const { settings } = useSettingsStore();
   const accessToken = useAuthStore((state) => state.accessToken);
   const { saveClips } = useEpisodes();
-
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -74,16 +87,44 @@ export const ClipSelector: React.FC = () => {
   const [audioDuration, setAudioDuration] = useState(0);
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
-  const [acceptedClips, setAcceptedClips] = useState<Set<string>>(new Set());
   const [activeClipIndex, setActiveClipIndex] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [viewMode, setViewMode] = useState<"editor" | "finder">("editor");
+  const [waveformPeaks, setWaveformPeaks] = useState<Float32Array | null>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
+  const playRangeEndRef = useRef<number | null>(null);
+  const currentTimeRef = useRef(0);
+  const lastStateUpdateRef = useRef(0);
+
+  // On mount, re-derive clip words from the current transcript.
+  // This ensures clips always reflect the latest transcript edits,
+  // even if the edit happened before the Clips page was visited.
+  useEffect(() => {
+    refreshClipWords();
+  }, [refreshClipWords]);
 
   const clips = currentProject?.clips || [];
   const transcript = currentProject?.transcript;
   const activeClip = clips[activeClipIndex] || null;
+
+  // Video podcast support
+  const isVideoEpisode = currentProject?.mediaType === "video";
+  const videoSources = currentProject?.videoSources;
+
+  const speakerSegments = useMemo((): SpeakerSegmentLike[] => {
+    if (!isVideoEpisode || !currentProject?.transcripts?.length) return [];
+    const activeTranscript =
+      currentProject.transcripts.find((t) => t.id === currentProject.activeTranscriptId) ||
+      currentProject.transcripts[currentProject.transcripts.length - 1];
+    if (!activeTranscript?.segments) return [];
+    return activeTranscript.segments.map((s) => ({
+      speakerLabel: s.speakerLabel,
+      speakerId: s.speakerId,
+      startTime: s.startTime,
+      endTime: s.endTime,
+    }));
+  }, [isVideoEpisode, currentProject?.transcripts, currentProject?.activeTranscriptId]);
 
   // Load audio from IndexedDB
   useEffect(() => {
@@ -111,19 +152,14 @@ export const ClipSelector: React.FC = () => {
   // Sync clips to backend when they change (debounced)
   const clipsRef = useRef(clips);
   const syncTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSyncFnRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    // Skip if clips haven't actually changed (compare by length, IDs, and times)
+    // Skip if clips haven't actually changed — use reference comparison to detect
+    // ANY property change (tracks, captionStyle, background, subtitle, etc.)
     const prevClips = clipsRef.current;
     const clipsChanged =
-      clips.length !== prevClips.length ||
-      clips.some(
-        (c, i) =>
-          c.id !== prevClips[i]?.id ||
-          c.startTime !== prevClips[i]?.startTime ||
-          c.endTime !== prevClips[i]?.endTime ||
-          c.name !== prevClips[i]?.name
-      );
+      clips.length !== prevClips.length || clips.some((c, i) => c !== prevClips[i]);
 
     if (!clipsChanged || !currentProject?.id) {
       clipsRef.current = clips;
@@ -137,14 +173,19 @@ export const ClipSelector: React.FC = () => {
       clearTimeout(syncTimeoutRef.current);
     }
 
-    syncTimeoutRef.current = setTimeout(async () => {
-      try {
-        await saveClips(currentProject.id, clips);
-        console.log("[ClipSelector] Synced", clips.length, "clips to backend");
-      } catch (err) {
-        console.error("[ClipSelector] Failed to sync clips:", err);
-      }
-    }, 2000); // 2 second debounce
+    const doSync = () => {
+      pendingSyncFnRef.current = null;
+      saveClips(currentProject.id, clips)
+        .then(() => {
+          console.log("[ClipSelector] Synced", clips.length, "clips to backend");
+        })
+        .catch((err) => {
+          console.error("[ClipSelector] Failed to sync clips:", err);
+        });
+    };
+
+    pendingSyncFnRef.current = doSync;
+    syncTimeoutRef.current = setTimeout(doSync, 2000);
 
     return () => {
       if (syncTimeoutRef.current) {
@@ -152,6 +193,15 @@ export const ClipSelector: React.FC = () => {
       }
     };
   }, [clips, currentProject?.id, saveClips]);
+
+  // Flush any pending sync on unmount so changes aren't lost
+  useEffect(() => {
+    return () => {
+      if (pendingSyncFnRef.current) {
+        pendingSyncFnRef.current();
+      }
+    };
+  }, []);
 
   // Handle audio duration once loaded
   useEffect(() => {
@@ -164,6 +214,71 @@ export const ClipSelector: React.FC = () => {
 
     audio.addEventListener("loadedmetadata", handleLoadedMetadata);
     return () => audio.removeEventListener("loadedmetadata", handleLoadedMetadata);
+  }, [audioUrl]);
+
+  // Generate waveform peaks from audio
+  useEffect(() => {
+    if (!audioUrl) {
+      setWaveformPeaks(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const generatePeaks = async () => {
+      try {
+        const response = await fetch(audioUrl);
+        const arrayBuffer = await response.arrayBuffer();
+        const audioContext = new AudioContext();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+        if (cancelled) {
+          audioContext.close();
+          return;
+        }
+
+        const channelData = audioBuffer.getChannelData(0);
+        const sampleRate = audioBuffer.sampleRate;
+        const samplesPerPeak = Math.floor(sampleRate / WAVEFORM_PEAKS_PER_SECOND);
+        const totalPeaks = Math.ceil(channelData.length / samplesPerPeak);
+        const peaks = new Float32Array(totalPeaks);
+
+        for (let i = 0; i < totalPeaks; i++) {
+          const start = i * samplesPerPeak;
+          const end = Math.min(start + samplesPerPeak, channelData.length);
+          let max = 0;
+          for (let j = start; j < end; j++) {
+            const abs = Math.abs(channelData[j]);
+            if (abs > max) max = abs;
+          }
+          peaks[i] = max;
+        }
+
+        // Normalize
+        let globalMax = 0;
+        for (let i = 0; i < peaks.length; i++) {
+          if (peaks[i] > globalMax) globalMax = peaks[i];
+        }
+        if (globalMax > 0) {
+          for (let i = 0; i < peaks.length; i++) {
+            peaks[i] /= globalMax;
+          }
+        }
+
+        if (!cancelled) {
+          setWaveformPeaks(peaks);
+        }
+        audioContext.close();
+      } catch (err) {
+        console.error("[ClipSelector] Failed to generate waveform:", err);
+      }
+    };
+
+    generatePeaks();
+
+    return () => {
+      cancelled = true;
+    };
   }, [audioUrl]);
 
   // Handle playback end events
@@ -189,10 +304,25 @@ export const ClipSelector: React.FC = () => {
 
     const updatePlayhead = () => {
       if (!audio.paused) {
-        setCurrentTime(audio.currentTime);
+        const time = audio.currentTime;
+        currentTimeRef.current = time;
 
-        // Stop at clip end
-        if (playingClip && audio.currentTime >= playingClip.endTime) {
+        // Throttle React state updates to ~30fps for playhead rendering
+        const now = performance.now();
+        if (now - lastStateUpdateRef.current > 33) {
+          setCurrentTime(time);
+          lastStateUpdateRef.current = now;
+        }
+
+        // Stop at range end (preview) or clip end
+        const rangeEnd = playRangeEndRef.current;
+        if (rangeEnd !== null && time >= rangeEnd) {
+          audio.pause();
+          setPlayingClipId(null);
+          playRangeEndRef.current = null;
+          return;
+        }
+        if (playingClip && time >= playingClip.endTime) {
           audio.pause();
           setPlayingClipId(null);
           return;
@@ -218,17 +348,30 @@ export const ClipSelector: React.FC = () => {
     }
   }, [clips.length, activeClipIndex]);
 
-  // Initialize currentTime when active clip changes
+  // Initialize currentTime when active clip changes or audio becomes available.
+  // audioUrl is in deps so the effect re-runs once the audio element mounts
+  // (audio loads asynchronously from IndexedDB).
   useEffect(() => {
-    if (activeClip && audioRef.current) {
-      const audio = audioRef.current;
-      // Only reset if not currently in this clip's range
-      if (audio.currentTime < activeClip.startTime || audio.currentTime > activeClip.endTime) {
+    if (!activeClip) return;
+
+    const audio = audioRef.current;
+    if (
+      audio &&
+      audio.currentTime >= activeClip.startTime &&
+      audio.currentTime <= activeClip.endTime
+    ) {
+      // Audio is already in this clip's range — use its position
+      currentTimeRef.current = audio.currentTime;
+      setCurrentTime(audio.currentTime);
+    } else {
+      // Always set currentTime to clip start (even if audio isn't loaded yet)
+      currentTimeRef.current = activeClip.startTime;
+      setCurrentTime(activeClip.startTime);
+      if (audio) {
         audio.currentTime = activeClip.startTime;
-        setCurrentTime(activeClip.startTime);
       }
     }
-  }, [activeClip?.id]);
+  }, [activeClip?.id, audioUrl]);
 
   const playClip = useCallback(
     (clipId: string) => {
@@ -240,6 +383,7 @@ export const ClipSelector: React.FC = () => {
       if (audio.currentTime < clip.startTime || audio.currentTime > clip.endTime) {
         audio.currentTime = clip.startTime;
       }
+      playRangeEndRef.current = null;
       audio.play();
       setPlayingClipId(clipId);
     },
@@ -252,12 +396,14 @@ export const ClipSelector: React.FC = () => {
       const clip = clips.find((c) => c.id === clipId);
       if (!audio) return;
 
+      playRangeEndRef.current = null;
       audio.pause();
       setPlayingClipId(null);
 
       // Reset playhead to clip start
       if (clip) {
         audio.currentTime = clip.startTime;
+        currentTimeRef.current = clip.startTime;
         setCurrentTime(clip.startTime);
       }
     },
@@ -270,6 +416,7 @@ export const ClipSelector: React.FC = () => {
       if (!audio) return;
 
       audio.currentTime = time;
+      currentTimeRef.current = time;
       setCurrentTime(time);
 
       // If currently playing this clip, continue playing from new position
@@ -299,16 +446,16 @@ export const ClipSelector: React.FC = () => {
     }
   }, [isMuted]);
 
-  const acceptClip = useCallback((clipId: string) => {
-    setAcceptedClips((prev) => {
-      const next = new Set(prev);
-      if (next.has(clipId)) {
-        next.delete(clipId);
-      } else {
-        next.add(clipId);
-      }
-      return next;
-    });
+  const handlePlayRange = useCallback((clipId: string, start: number, end: number) => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    audio.currentTime = start;
+    currentTimeRef.current = start;
+    setCurrentTime(start);
+    playRangeEndRef.current = end;
+    audio.play();
+    setPlayingClipId(clipId);
   }, []);
 
   const handleBoundaryChange = useCallback(
@@ -331,20 +478,114 @@ export const ClipSelector: React.FC = () => {
 
   const handleTranscriptEdit = useCallback(
     (clipId: string, newTranscript: string) => {
-      updateClip(clipId, { transcript: newTranscript });
+      const clip = currentProject?.clips.find((c) => c.id === clipId);
+      const newWords = clip?.words ? reconcileWords(clip.words, newTranscript) : [];
+      updateClip(clipId, {
+        transcript: newTranscript,
+        words: newWords,
+      });
+    },
+    [updateClip, currentProject?.clips]
+  );
+
+  const handleWordsChange = useCallback(
+    (clipId: string, newWords: Word[]) => {
+      updateClip(clipId, {
+        words: newWords,
+        transcript: newWords.map((w) => w.text).join(" "),
+      });
     },
     [updateClip]
   );
 
-  const handleRemoveClip = useCallback(
-    (clipId: string) => {
+  const handleWordDelete = useCallback(
+    (deletedWord: Word) => {
+      const activeTranscript = getActiveTranscript();
+      if (!activeTranscript?.words) return;
+      const eps = 0.001;
+      const transcriptIdx = activeTranscript.words.findIndex(
+        (tw) =>
+          Math.abs(tw.start - deletedWord.start) < eps && Math.abs(tw.end - deletedWord.end) < eps
+      );
+      if (transcriptIdx >= 0) {
+        removeTranscriptWord(transcriptIdx);
+      }
+    },
+    [getActiveTranscript, removeTranscriptWord]
+  );
+
+  const handleWordTextEdit = useCallback(
+    (editedWord: Word, newText: string) => {
+      const activeTranscript = getActiveTranscript();
+      if (!activeTranscript?.words) return;
+      const eps = 0.001;
+      const transcriptIdx = activeTranscript.words.findIndex(
+        (tw) =>
+          Math.abs(tw.start - editedWord.start) < eps && Math.abs(tw.end - editedWord.end) < eps
+      );
+      if (transcriptIdx >= 0) {
+        updateTranscriptWord(transcriptIdx, newText);
+      }
+    },
+    [getActiveTranscript, updateTranscriptWord]
+  );
+
+  const handleOverridesChange = useCallback(
+    (clipId: string, newOverrides: MulticamOverride[]) => {
+      const clip = currentProject?.clips.find((c) => c.id === clipId);
+      if (!clip) return;
+      const currentLayout = clip.multicamLayout || {
+        mode: "active-speaker" as const,
+        pipEnabled: false,
+        pipScale: 0.2,
+        pipPositions: [],
+        overrides: [],
+        transitionStyle: "cut" as const,
+        transitionDurationFrames: 0,
+      };
+      updateClip(clipId, {
+        multicamLayout: { ...currentLayout, overrides: newOverrides },
+      });
+    },
+    [currentProject?.clips, updateClip]
+  );
+
+  const handleSeek = useCallback((time: number) => {
+    if (!audioRef.current) return;
+    audioRef.current.currentTime = time;
+  }, []);
+
+  const currentPodcastId = useAuthStore((state) => state.currentPodcastId);
+
+  const handleDeleteClip = useCallback(
+    async (clipId: string) => {
+      // Remove from local state immediately
       removeClip(clipId);
       // Adjust active index if needed
       if (activeClipIndex >= clips.length - 1 && activeClipIndex > 0) {
         setActiveClipIndex(activeClipIndex - 1);
       }
+
+      // Delete from database
+      if (currentProject?.id && currentPodcastId) {
+        try {
+          await authFetch(
+            `${settings.backendUrl || "http://localhost:3002"}/api/podcasts/${currentPodcastId}/episodes/${currentProject.id}/clips/${clipId}`,
+            { method: "DELETE" }
+          );
+        } catch (err) {
+          console.error("[ClipSelector] Failed to delete clip from DB:", err);
+        }
+      }
     },
-    [removeClip, activeClipIndex, clips.length]
+    [
+      removeClip,
+      activeClipIndex,
+      clips.length,
+      currentProject?.id,
+      currentPodcastId,
+      settings.backendUrl,
+    ]
   );
 
   // Check if backend is configured
@@ -394,6 +635,11 @@ export const ClipSelector: React.FC = () => {
           headers.set("X-OpenAI-Key", settings.openaiApiKey);
         }
 
+        const existingClipRanges = clips.map((c) => ({
+          startTime: c.startTime,
+          endTime: c.endTime,
+        }));
+
         const response = await authFetch(`${settings.backendUrl}/api/analyze-clips`, {
           method: "POST",
           headers,
@@ -408,6 +654,7 @@ export const ClipSelector: React.FC = () => {
             clipCount,
             clipDuration,
             keywords: keywords || undefined,
+            existingClips: existingClipRanges.length > 0 ? existingClipRanges : undefined,
           }),
         });
 
@@ -420,8 +667,13 @@ export const ClipSelector: React.FC = () => {
         setProgress(70);
       } else {
         // Direct OpenAI call
-        const prompt = `Analyze this podcast transcript and identify the top ${clipCount} most "clippable" segments of approximately ${clipDuration} seconds each.
+        const existingClipsInstruction =
+          clips.length > 0
+            ? `\nIMPORTANT: The following time ranges are already used by existing clips. You MUST NOT select segments that overlap with any of these ranges by more than 5 seconds. Find clips in OTHER parts of the transcript.\nExisting clips:\n${clips.map((c) => `- ${c.startTime.toFixed(1)}s to ${c.endTime.toFixed(1)}s`).join("\n")}\n`
+            : "";
 
+        const prompt = `Analyze this podcast transcript and identify the top ${clipCount} most "clippable" segments of approximately ${clipDuration} seconds each.
+${existingClipsInstruction}
 For each segment, evaluate:
 1. HOOK (1-10): Does it grab attention immediately?
 2. CLARITY (1-10): Understandable without prior context?
@@ -497,30 +749,52 @@ Return ONLY valid JSON in this exact format (no other text):
 
       setProgress(90);
 
-      const segments = analysis.segments || [];
+      const MAX_OVERLAP_SECONDS = 5;
+      const allSegments = analysis.segments || [];
+
+      // Filter out segments that overlap with existing clips by more than 5 seconds
+      const segments =
+        clips.length > 0
+          ? allSegments.filter((seg: { start_time: number; end_time: number }) => {
+              return !clips.some((existing) => {
+                const overlap = Math.max(
+                  0,
+                  Math.min(seg.end_time, existing.endTime) -
+                    Math.max(seg.start_time, existing.startTime)
+                );
+                return overlap > MAX_OVERLAP_SECONDS;
+              });
+            })
+          : allSegments;
+
+      if (segments.length === 0 && allSegments.length > 0) {
+        throw new Error(
+          "All suggested clips overlap with existing clips. Try deleting some clips first, or use manual mode to select a specific time range."
+        );
+      }
+
+      let addedCount = 0;
       const startingClipNumber = clips.length + 1;
       segments.forEach(
-        (
-          segment: {
-            start_time: number;
-            end_time: number;
-            text?: string;
-            explanation?: string;
-            scores: {
-              hook: number;
-              clarity: number;
-              emotion: number;
-              quotable: number;
-              completeness: number;
-            };
-          },
-          index: number
-        ) => {
+        (segment: {
+          start_time: number;
+          end_time: number;
+          text?: string;
+          explanation?: string;
+          scores: {
+            hook: number;
+            clarity: number;
+            emotion: number;
+            quotable: number;
+            completeness: number;
+          };
+        }) => {
           const startTime = segment.start_time;
           const endTime = segment.end_time;
 
+          const eps = 0.05;
           const segmentWords = transcript.words.filter(
-            (w) => w.start >= startTime && w.end <= endTime
+            (w) => w.start >= startTime - eps && w.end <= endTime + eps
           );
 
           const scores = segment.scores;
@@ -542,10 +816,13 @@ Return ONLY valid JSON in this exact format (no other text):
 
           addClip({
             projectId: currentProject!.id,
-            name: `Clip ${startingClipNumber + index}`,
+            name: `Clip ${startingClipNumber + addedCount}`,
             startTime,
             endTime,
-            transcript: segment.text || segmentWords.map((w) => w.text).join(" "),
+            transcript:
+              segmentWords.length > 0
+                ? segmentWords.map((w) => w.text).join(" ")
+                : segment.text || "",
             words: segmentWords,
             segments: computeClipSegments(
               transcript.segments,
@@ -556,8 +833,15 @@ Return ONLY valid JSON in this exact format (no other text):
             clippabilityScore,
             isManual: false,
           });
+          addedCount++;
         }
       );
+
+      if (addedCount < allSegments.length) {
+        setError(
+          `Found ${allSegments.length} clips but added ${addedCount} — ${allSegments.length - addedCount} overlapped too much with existing clips.`
+        );
+      }
 
       setProgress(100);
     } catch (err) {
@@ -582,7 +866,10 @@ Return ONLY valid JSON in this exact format (no other text):
       return;
     }
 
-    const segmentWords = transcript.words.filter((w) => w.start >= start && w.end <= end);
+    const eps = 0.05;
+    const segmentWords = transcript.words.filter(
+      (w) => w.start >= start - eps && w.end <= end + eps
+    );
 
     const clipNumber = clips.length + 1;
     addClip({
@@ -607,7 +894,7 @@ Return ONLY valid JSON in this exact format (no other text):
 
   const progressMessages: Record<number, string> = {
     10: "Preparing transcript...",
-    30: "Sending to GPT-4...",
+    30: "Sending to AI...",
     70: "Analyzing moments...",
     90: "Creating clips...",
     100: "Complete!",
@@ -626,7 +913,7 @@ Return ONLY valid JSON in this exact format (no other text):
   // If no clips, show the finder UI
   if (clips.length === 0) {
     return (
-      <div className="min-h-full">
+      <div className="min-h-full p-6">
         <div className="mx-auto max-w-4xl">
           {/* AI Analysis Card */}
           <Card variant="default" className="animate-fadeIn mb-5">
@@ -638,7 +925,7 @@ Return ONLY valid JSON in this exact format (no other text):
                 <div>
                   <p className="text-sm font-medium text-[hsl(var(--text))]">AI Clip Finder</p>
                   <p className="text-xs text-[hsl(var(--text-subtle))]">
-                    GPT-4 analyzes your transcript for viral-worthy moments
+                    AI analyzes your transcript for viral-worthy moments
                   </p>
                 </div>
               </div>
@@ -668,7 +955,7 @@ Return ONLY valid JSON in this exact format (no other text):
                     </div>
                     <div>
                       <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
-                        Duration (sec)
+                        Max Duration (sec)
                       </label>
                       <Input
                         type="number"
@@ -868,7 +1155,6 @@ Return ONLY valid JSON in this exact format (no other text):
                   clip={clip}
                   index={index}
                   isActive={index === activeClipIndex}
-                  isAccepted={acceptedClips.has(clip.id)}
                   onClick={() => setActiveClipIndex(index)}
                 />
               ))}
@@ -914,16 +1200,15 @@ Return ONLY valid JSON in this exact format (no other text):
               index={activeClipIndex}
               totalClips={clips.length}
               isPlaying={playingClipId === activeClip.id}
-              isAccepted={acceptedClips.has(activeClip.id)}
               isMuted={isMuted}
               currentTime={currentTime}
+              currentTimeRef={currentTimeRef}
               audioDuration={audioDuration || 1}
               transcriptWords={transcript?.words || []}
               onPlay={() => playClip(activeClip.id)}
               onPause={() => pauseClip(activeClip.id)}
               onSeek={(time) => seekClip(activeClip.id, time)}
-              onAccept={() => acceptClip(activeClip.id)}
-              onReject={() => handleRemoveClip(activeClip.id)}
+              onDelete={() => handleDeleteClip(activeClip.id)}
               onBoundaryChange={(newStart, newEnd, newWords) =>
                 handleBoundaryChange(activeClip.id, newStart, newEnd, newWords)
               }
@@ -935,6 +1220,18 @@ Return ONLY valid JSON in this exact format (no other text):
               onScrubStart={handleScrubStart}
               onScrubEnd={handleScrubEnd}
               onMuteToggle={handleMuteToggle}
+              videoSources={isVideoEpisode ? videoSources : undefined}
+              segments={isVideoEpisode ? speakerSegments : undefined}
+              defaultVideoSourceId={currentProject?.defaultVideoSourceId}
+              multicamLayout={activeClip.multicamLayout}
+              onOverridesChange={(overrides) => handleOverridesChange(activeClip.id, overrides)}
+              waveformPeaks={waveformPeaks}
+              waveformPeaksPerSecond={WAVEFORM_PEAKS_PER_SECOND}
+              onPlayRange={(start, end) => handlePlayRange(activeClip.id, start, end)}
+              onWordsChange={(words) => handleWordsChange(activeClip.id, words)}
+              onWordDelete={handleWordDelete}
+              onWordTextEdit={handleWordTextEdit}
+              onWordSeek={handleSeek}
             />
           )}
 
@@ -974,7 +1271,7 @@ Return ONLY valid JSON in this exact format (no other text):
                           </div>
                           <div>
                             <label className="mb-1.5 block text-xs font-medium text-[hsl(var(--text-subtle))]">
-                              Target Duration
+                              Max Duration (sec)
                             </label>
                             <Input
                               type="number"

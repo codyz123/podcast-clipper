@@ -11,7 +11,7 @@ interface OAuthResult {
 
 function getBackendConfig(): { backendUrl: string; accessCode: string } {
   const { settings } = useSettingsStore.getState();
-  const backendUrl = settings.backendUrl || "http://localhost:3001";
+  const backendUrl = settings.backendUrl || "http://localhost:3002";
   const accessCode = settings.accessCode || "";
   return { backendUrl, accessCode };
 }

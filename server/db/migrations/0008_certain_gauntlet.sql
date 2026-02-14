@@ -1,0 +1,1 @@
+ALTER TABLE "video_sources" ADD COLUMN "thumbnail_strip_url" text;

@@ -131,9 +131,13 @@ export function toWordTimings(
   clipEnd: number,
   fps: number = 30
 ): WordTiming[] {
+  // Use eps tolerance to match the boundary filtering in episodeToProject and
+  // handleBoundaryChange — without this, words right at clip edges (included via
+  // eps in those filters) get dropped here by exact comparison.
+  const eps = 0.05;
   return words
     .filter((word) => typeof word.start === "number" && typeof word.end === "number")
-    .filter((word) => (word.end ?? 0) >= clipStart && (word.start ?? 0) <= clipEnd)
+    .filter((word) => (word.end ?? 0) >= clipStart - eps && (word.start ?? 0) <= clipEnd + eps)
     .map((word) => {
       const startTime = Math.max(0, (word.start ?? 0) - clipStart);
       const endTime = Math.max(startTime + 1 / fps, (word.end ?? 0) - clipStart);

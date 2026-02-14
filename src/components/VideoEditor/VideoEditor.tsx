@@ -7,13 +7,18 @@ import {
   MinusIcon,
   CaretDownIcon,
   TrashIcon,
+  Cross2Icon,
 } from "@radix-ui/react-icons";
 import { Button } from "../ui";
 import { useProjectStore, getAudioBlob } from "../../stores/projectStore";
 import { useEditorStore, createDefaultTracks } from "../../stores/editorStore";
+import type { SpeakerSegmentLike, VideoSourceLike } from "../../../shared/multicamTransform";
+import { computeSwitchingTimeline } from "../../../shared/multicamTransform";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { useWorkspaceStore } from "../../stores/workspaceStore";
 import { useEpisodes } from "../../hooks/useEpisodes";
+import { usePodcastPeople } from "../../hooks/usePodcastPeople";
+import { usePodcast } from "../../hooks/usePodcast";
 import {
   VideoFormat,
   VIDEO_FORMATS,
@@ -22,9 +27,12 @@ import {
   Track,
   TrackType,
   TrackClip,
+  BackgroundConfig,
   CAPTION_PRESETS,
   CaptionStyle,
+  SpeakerNameFormat,
 } from "../../lib/types";
+import { generateColorPalette } from "../../lib/colorExtractor";
 import { generateId } from "../../lib/utils";
 import { cn } from "../../lib/utils";
 import { MultiTrackTimeline } from "./Timeline/MultiTrackTimeline";
@@ -32,6 +40,8 @@ import { EditorPreview } from "./Preview/EditorPreview";
 import { TransportControls } from "./Controls/TransportControls";
 import { AssetsPanel } from "./Panels/AssetsPanel";
 import { useAudioFade } from "../../hooks/useAudioFade";
+import { useMulticamOverrides } from "../../hooks/useMulticamOverrides";
+import { formatTimestamp } from "../../lib/formats";
 
 interface VideoEditorProps {
   onExport?: () => void;
@@ -43,6 +53,8 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
   const { templates, settings } = useSettingsStore();
   const { brandColors } = useWorkspaceStore();
   const { saveClips } = useEpisodes();
+  const { people: speakerPeople } = usePodcastPeople();
+  const { podcast } = usePodcast();
   const {
     activeClipId,
     setActiveClip,
@@ -64,23 +76,43 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     redo,
     undoStack,
     redoStack,
+    layoutMode,
+    pipEnabled,
+    pipPositions,
+    pipScale,
+    transitionStyle,
+    soloSourceId,
+    setLayoutMode,
+    setPipEnabled,
+    setTransitionStyle,
+    setSoloSourceId,
   } = useEditorStore();
 
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [selectedFormat, setSelectedFormat] = useState<VideoFormat>("9:16");
-  const [selectedTemplateId, setSelectedTemplateId] = useState(settings.defaultTemplate);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(
+    settings.defaultTemplate
+  );
   const [showAddTrackMenu, setShowAddTrackMenu] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [customColorInput, setCustomColorInput] = useState("");
   const [colorPickerPosition, setColorPickerPosition] = useState({ top: 0, left: 0 });
   const [selectedTimelineClipId, setSelectedTimelineClipId] = useState<string | null>(null);
+  const [bgMode, setBgMode] = useState<"solid" | "gradient">("solid");
+  const [showBgColorPicker, setShowBgColorPicker] = useState(false);
+  const [customBgColor, setCustomBgColor] = useState("#000000");
+  const [customGradStart, setCustomGradStart] = useState("#000000");
+  const [customGradEnd, setCustomGradEnd] = useState("#333333");
+  const [bgPickerPosition, setBgPickerPosition] = useState({ top: 0, left: 0 });
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const animationRef = useRef<number | null>(null);
   const colorPickerButtonRef = useRef<HTMLButtonElement>(null);
+  const bgColorPickerRef = useRef<HTMLButtonElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveFnRef = useRef<(() => void) | null>(null);
   const lastSavedSignatureRef = useRef<string>("");
 
   const clips = currentProject?.clips || [];
@@ -88,7 +120,85 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
   const activeClipIndex = clips.findIndex((c) => c.id === activeClipId);
   const clipDuration = activeClip ? activeClip.endTime - activeClip.startTime : 0;
 
-  // Persist clip changes (captions, templates, tracks) with a debounce
+  // Podcast metadata for overlay components (Apple Podcasts CTA)
+  const podcastMeta = useMemo(
+    () =>
+      podcast
+        ? {
+            name: podcast.name,
+            coverImageUrl: podcast.coverImageUrl,
+            author: podcast.podcastMetadata?.author,
+            category: podcast.podcastMetadata?.category,
+          }
+        : undefined,
+    [podcast]
+  );
+
+  // Multicam data
+  const isVideoEpisode = currentProject?.mediaType === "video";
+  const videoSources = currentProject?.videoSources;
+
+  // Extract speaker segments from the active transcript for multicam switching
+  const speakerSegments = useMemo((): SpeakerSegmentLike[] => {
+    if (!isVideoEpisode || !currentProject?.transcripts?.length) return [];
+    const activeTranscript =
+      currentProject.transcripts.find((t) => t.id === currentProject.activeTranscriptId) ||
+      currentProject.transcripts[currentProject.transcripts.length - 1];
+    if (!activeTranscript?.segments) return [];
+    return activeTranscript.segments.map((s) => ({
+      speakerLabel: s.speakerLabel,
+      speakerId: s.speakerId,
+      startTime: s.startTime,
+      endTime: s.endTime,
+    }));
+  }, [isVideoEpisode, currentProject?.transcripts, currentProject?.activeTranscriptId]);
+
+  // Get the active transcript (used for enriching stale clip segments)
+  const activeTranscript = useMemo(() => {
+    if (!currentProject?.transcripts?.length) return null;
+    return (
+      currentProject.transcripts.find((t) => t.id === currentProject.activeTranscriptId) ||
+      currentProject.transcripts[currentProject.transcripts.length - 1]
+    );
+  }, [currentProject?.transcripts, currentProject?.activeTranscriptId]);
+
+  // Build VideoSourceLike array for multicam hook and auto-gen effect
+  const sourcesForTimeline: VideoSourceLike[] = useMemo(() => {
+    if (!videoSources) return [];
+    return videoSources.map((s) => ({
+      id: s.id,
+      label: s.label,
+      personId: s.personId ?? null,
+      sourceType: s.sourceType,
+      syncOffsetMs: s.syncOffsetMs,
+      cropOffsetX: s.cropOffsetX,
+      cropOffsetY: s.cropOffsetY,
+      width: s.width ?? null,
+      height: s.height ?? null,
+      displayOrder: s.displayOrder,
+    }));
+  }, [videoSources]);
+
+  // Multicam override CRUD + track regeneration
+  const {
+    overrides: multicamOverrides,
+    addOverride,
+    removeOverride,
+    regenerateMulticamTrack,
+  } = useMulticamOverrides({
+    clip: activeClip,
+    videoSources: sourcesForTimeline,
+    speakerSegments,
+    defaultVideoSourceId: currentProject?.defaultVideoSourceId,
+  });
+
+  // State for pending override (waiting for speaker selection)
+  const [pendingOverride, setPendingOverride] = useState<{
+    startTime: number;
+    endTime: number;
+  } | null>(null);
+
+  // Persist clip changes (captions, templates, tracks, multicam) with a debounce
   useEffect(() => {
     if (!currentProject?.id || clips.length === 0) return;
 
@@ -99,6 +209,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       endTime: clip.endTime,
       transcript: clip.transcript,
       words: clip.words,
+      segments: clip.segments,
       clippabilityScore: clip.clippabilityScore,
       isManual: clip.isManual,
       tracks: clip.tracks,
@@ -107,6 +218,9 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       templateId: clip.templateId,
       background: clip.background,
       subtitle: clip.subtitle,
+      multicamLayout: clip.multicamLayout,
+      generatedAssets: clip.generatedAssets,
+      hookAnalysis: clip.hookAnalysis,
     }));
 
     const signature = JSON.stringify(payload);
@@ -117,11 +231,15 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       clearTimeout(saveTimeoutRef.current);
     }
 
-    saveTimeoutRef.current = setTimeout(() => {
+    const doSave = () => {
+      pendingSaveFnRef.current = null;
       saveClips(currentProject.id, payload).catch((err) => {
         console.error("[VideoEditor] Failed to sync clips:", err);
       });
-    }, 1500);
+    };
+
+    pendingSaveFnRef.current = doSave;
+    saveTimeoutRef.current = setTimeout(doSave, 1500);
 
     return () => {
       if (saveTimeoutRef.current) {
@@ -129,6 +247,15 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       }
     };
   }, [clips, currentProject?.id, saveClips]);
+
+  // Flush any pending save on unmount so changes aren't lost
+  useEffect(() => {
+    return () => {
+      if (pendingSaveFnRef.current) {
+        pendingSaveFnRef.current();
+      }
+    };
+  }, []);
 
   // Keep selected template in sync with the active clip
   useEffect(() => {
@@ -192,20 +319,196 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     }
   }, [activeClip, updateClip]);
 
-  // Migrate old track names (B-Roll -> Video)
+  // Auto-generate multicam track for video episodes with multiple sources
+  useEffect(() => {
+    if (
+      !activeClip?.tracks ||
+      !isVideoEpisode ||
+      !videoSources ||
+      videoSources.length <= 1 ||
+      speakerSegments.length === 0
+    )
+      return;
+
+    // Check if multicam track already exists
+    const hasMulticamTrack = activeClip.tracks.some((t) => t.type === "multicam");
+    if (hasMulticamTrack) return;
+
+    const timeline = computeSwitchingTimeline(
+      activeClip.startTime,
+      activeClip.endTime,
+      speakerSegments,
+      sourcesForTimeline,
+      {
+        defaultVideoSourceId: currentProject?.defaultVideoSourceId,
+        holdPreviousMs: 1500,
+        minShotDurationMs: 1500,
+        overrides: multicamOverrides,
+      }
+    );
+
+    const multicamTrackId = generateId();
+    const multicamTrack: Track = {
+      id: multicamTrackId,
+      type: "multicam",
+      name: "Camera",
+      order: -1, // Above all other tracks
+      locked: false,
+      muted: false,
+      volume: 1,
+      opacity: 1,
+      clips: timeline.map((interval) => ({
+        id: generateId(),
+        trackId: multicamTrackId,
+        startTime: interval.startTime - activeClip.startTime,
+        duration: interval.endTime - interval.startTime,
+        type: "video" as const,
+        assetId: interval.videoSourceId,
+      })),
+    };
+
+    const updatedTracks = [multicamTrack, ...activeClip.tracks];
+    updateClip(activeClip.id, { tracks: updatedTracks });
+  }, [
+    activeClip?.id,
+    activeClip?.tracks,
+    isVideoEpisode,
+    videoSources,
+    sourcesForTimeline,
+    speakerSegments,
+    currentProject?.defaultVideoSourceId,
+    multicamOverrides,
+    updateClip,
+  ]);
+
+  // Migrate old track names (B-Roll -> Video) and empty default Video -> Background
   useEffect(() => {
     if (activeClip?.tracks) {
-      const needsMigration = activeClip.tracks.some(
-        (t) => t.type === "video-overlay" && t.name === "B-Roll"
-      );
+      let needsMigration = false;
+      const migratedTracks = activeClip.tracks.map((t) => {
+        if (t.type === "video-overlay" && t.name === "B-Roll") {
+          needsMigration = true;
+          return { ...t, name: "Video" };
+        }
+        // Migrate empty default "Video" track to "Background"
+        if (t.type === "video-overlay" && t.name === "Video" && t.clips.length === 0) {
+          needsMigration = true;
+          return { ...t, type: "background" as const, name: "Background" };
+        }
+        return t;
+      });
       if (needsMigration) {
-        const migratedTracks = activeClip.tracks.map((t) =>
-          t.type === "video-overlay" && t.name === "B-Roll" ? { ...t, name: "Video" } : t
-        );
         updateClip(activeClip.id, { tracks: migratedTracks });
       }
     }
   }, [activeClip?.id, activeClip?.tracks, updateClip]);
+
+  // Enrich stale clip segments from the parent transcript when speakers have been
+  // identified on the transcript but the clip's copy predates that identification.
+  // This is a one-time data upgrade per clip, not an ongoing sync.
+  useEffect(() => {
+    if (!activeClip?.segments?.length || !activeTranscript?.segments?.length) return;
+
+    // Bail out if the clip already has speaker IDs (already enriched or created post-identification)
+    const clipHasSpeakerIds = activeClip.segments.some((s) => s.speakerId);
+    if (clipHasSpeakerIds) return;
+
+    // Bail out if the parent transcript doesn't have speaker IDs yet
+    const transcriptHasSpeakerIds = activeTranscript.segments.some((s) => s.speakerId);
+    if (!transcriptHasSpeakerIds) return;
+
+    // Enrich clip segments by matching time ranges against parent transcript
+    const enrichedSegments = activeClip.segments.map((clipSeg) => {
+      const midpoint = (clipSeg.startTime + clipSeg.endTime) / 2;
+      const matchingParent = activeTranscript.segments!.find(
+        (ps) => midpoint >= ps.startTime && midpoint < ps.endTime
+      );
+      if (matchingParent) {
+        return {
+          ...clipSeg,
+          speakerLabel: matchingParent.speakerLabel,
+          speakerId: matchingParent.speakerId,
+        };
+      }
+      return clipSeg;
+    });
+
+    const updates: Partial<Clip> = { segments: enrichedSegments };
+
+    // Also refresh speaker track clips if a speaker track exists
+    if (activeClip.tracks) {
+      const speakerTrack = activeClip.tracks.find((t) => t.type === "speaker");
+      if (speakerTrack && speakerTrack.clips.length > 0) {
+        const clipStart = activeClip.startTime;
+        const clipEnd = activeClip.endTime;
+        const newSpeakerClips: TrackClip[] = activeTranscript.segments
+          .filter((seg) => seg.endTime > clipStart && seg.startTime < clipEnd)
+          .map((seg) => {
+            const segStart = Math.max(0, seg.startTime - clipStart);
+            const segEnd = Math.min(clipEnd - clipStart, seg.endTime - clipStart);
+            return {
+              id: generateId(),
+              trackId: speakerTrack.id,
+              startTime: segStart,
+              duration: segEnd - segStart,
+              type: "video" as const,
+              assetId: seg.speakerLabel,
+              assetUrl: seg.speakerId,
+            };
+          });
+        updates.tracks = activeClip.tracks.map((t) =>
+          t.id === speakerTrack.id ? { ...t, clips: newSpeakerClips } : t
+        );
+      }
+    }
+
+    updateClip(activeClip.id, updates);
+  }, [
+    activeClip?.id,
+    activeClip?.segments,
+    activeClip?.tracks,
+    activeTranscript?.segments,
+    updateClip,
+  ]);
+
+  // Auto-refresh clip words from the active transcript when they've diverged.
+  // This handles the case where the user edited the parent transcript (corrected words, etc.)
+  // and expects those changes to appear in existing clips.
+  // Skip if the user has manually edited the clip's transcript text.
+  useEffect(() => {
+    if (!activeClip?.words?.length || !activeTranscript?.words?.length) return;
+
+    // Get transcript words for this clip's time range (eps tolerance matches
+    // episodeToProject and handleBoundaryChange to avoid dropping boundary words)
+    const eps = 0.05;
+    const transcriptWords = activeTranscript.words.filter(
+      (w) => w.start >= activeClip.startTime - eps && w.end <= activeClip.endTime + eps
+    );
+    if (transcriptWords.length === 0) return;
+
+    // Check if clip words already match
+    const clipWordsText = activeClip.words.map((w) => w.text).join(" ");
+    const transcriptWordsText = transcriptWords.map((w) => w.text).join(" ");
+    if (clipWordsText === transcriptWordsText) return;
+
+    // Check if the user has manually edited the clip transcript (don't overwrite their edits)
+    const cleanTranscript = activeClip.transcript.replace(/\[\d+\.?\d*\]\s*/g, "").trim();
+    if (cleanTranscript !== clipWordsText) return; // User has manually edited - skip
+
+    // Transcript words have changed - update the clip
+    updateClip(activeClip.id, {
+      words: transcriptWords,
+      transcript: transcriptWordsText,
+    });
+  }, [
+    activeClip?.id,
+    activeClip?.words,
+    activeClip?.transcript,
+    activeClip?.startTime,
+    activeClip?.endTime,
+    activeTranscript?.words,
+    updateClip,
+  ]);
 
   // Set active clip on mount
   useEffect(() => {
@@ -323,12 +626,30 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       // Delete or Backspace to delete selected clip
       if ((e.code === "Delete" || e.code === "Backspace") && selectedTimelineClipId) {
         e.preventDefault();
-        handleDeleteTimelineClip();
+        // Check if the selected clip is a multicam override
+        const multicamTrack = activeClip?.tracks?.find((t) => t.type === "multicam");
+        const selectedClip = multicamTrack?.clips.find((c) => c.id === selectedTimelineClipId);
+        if (selectedClip?.assetSource === "override" && activeClip) {
+          // Find matching override by time range and remove it
+          const absStart = activeClip.startTime + selectedClip.startTime;
+          const absEnd = absStart + selectedClip.duration;
+          const idx = multicamOverrides.findIndex(
+            (o) => Math.abs(o.startTime - absStart) < 0.1 && Math.abs(o.endTime - absEnd) < 0.1
+          );
+          if (idx >= 0) {
+            removeOverride(idx);
+            setTimeout(() => regenerateMulticamTrack(), 0);
+          }
+          setSelectedTimelineClipId(null);
+        } else {
+          handleDeleteTimelineClip();
+        }
       }
 
       // Escape to deselect
       if (e.code === "Escape") {
         setSelectedTimelineClipId(null);
+        setPendingOverride(null);
       }
     };
 
@@ -342,6 +663,9 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     setIsPlaying,
     selectedTimelineClipId,
     handleDeleteTimelineClip,
+    multicamOverrides,
+    removeOverride,
+    regenerateMulticamTrack,
   ]);
 
   // Handle play/pause
@@ -454,6 +778,9 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
         "video-overlay": "Video",
         "text-graphics": "Text Graphics",
         captions: "Captions",
+        multicam: "Multicam",
+        speaker: "Speaker",
+        background: "Background",
       };
 
       // Count existing tracks of this type
@@ -464,8 +791,42 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       // Find highest order and add 1
       const maxOrder = currentTracks.reduce((max, t) => Math.max(max, t.order), -1);
 
+      const trackId = generateId();
+
+      // Auto-populate speaker track with segment clips from the clip's own transcript copy.
+      // Fall back to parent transcript segments if the clip's copy predates speaker identification.
+      let speakerClips: TrackClip[] = [];
+      if (trackType === "speaker") {
+        const clipHasSpeakerIds = activeClip.segments?.some((s) => s.speakerId);
+        const sourceSegments =
+          clipHasSpeakerIds || !activeTranscript?.segments?.length
+            ? activeClip.segments
+            : activeTranscript.segments;
+
+        if (sourceSegments?.length) {
+          const clipStart = activeClip.startTime;
+          const clipEnd = activeClip.endTime;
+
+          speakerClips = sourceSegments
+            .filter((seg) => seg.endTime > clipStart && seg.startTime < clipEnd)
+            .map((seg) => {
+              const segStart = Math.max(0, seg.startTime - clipStart);
+              const segEnd = Math.min(clipEnd - clipStart, seg.endTime - clipStart);
+              return {
+                id: generateId(),
+                trackId,
+                startTime: segStart,
+                duration: segEnd - segStart,
+                type: "video" as const,
+                assetId: seg.speakerLabel, // speaker label used as the color/label key
+                assetUrl: seg.speakerId, // PodcastPerson.id for direct lookup
+              };
+            });
+        }
+      }
+
       const newTrack: Track = {
-        id: generateId(),
+        id: trackId,
         type: trackType,
         name,
         order: maxOrder + 1,
@@ -473,7 +834,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
         muted: false,
         volume: 1,
         opacity: 1,
-        clips: [],
+        clips: speakerClips.length > 0 ? speakerClips : [],
         ...(trackType === "captions" && {
           captionStyle: { ...CAPTION_PRESETS.hormozi, preset: "hormozi" as const },
         }),
@@ -482,7 +843,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       updateClip(activeClip.id, { tracks: [...currentTracks, newTrack] });
       setShowAddTrackMenu(false);
     },
-    [activeClip, updateClip, pushSnapshot]
+    [activeClip, updateClip, pushSnapshot, activeTranscript]
   );
 
   // Get current caption style from clip or use default
@@ -530,6 +891,46 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     return track?.type === "video-overlay";
   }, [selectedTrackId, activeClip?.tracks]);
 
+  // Get the selected track type for conditional inspector rendering
+  const selectedTrackType = useMemo((): TrackType | null => {
+    if (!selectedTrackId || !activeClip?.tracks) return null;
+    const track = activeClip.tracks.find((t) => t.id === selectedTrackId);
+    return track?.type ?? null;
+  }, [selectedTrackId, activeClip?.tracks]);
+
+  // Get speaker track settings from the selected speaker track
+  const speakerTrackSettings = useMemo(() => {
+    if (!activeClip?.tracks) return null;
+    const track = activeClip.tracks.find((t) => t.type === "speaker");
+    if (!track) return null;
+    return {
+      displayMode: track.speakerDisplayMode || "fill",
+      showName: track.showSpeakerName !== false, // default true
+      nameFormat:
+        track.speakerNameFormat ||
+        (track.showSpeakerName === false ? ("off" as const) : ("full-name" as const)),
+    };
+  }, [activeClip?.tracks]);
+
+  // Handle speaker track setting changes
+  const handleSpeakerTrackChange = useCallback(
+    (updates: {
+      speakerDisplayMode?: "fill" | "circle";
+      showSpeakerName?: boolean;
+      speakerNameFormat?: SpeakerNameFormat;
+    }) => {
+      if (!activeClip?.tracks) return;
+      const speakerTrack = activeClip.tracks.find((t) => t.type === "speaker");
+      if (!speakerTrack) return;
+      pushSnapshot(activeClip.tracks, activeClip.captionStyle);
+      const updatedTracks = activeClip.tracks.map((t) =>
+        t.id === speakerTrack.id ? { ...t, ...updates } : t
+      );
+      updateClip(activeClip.id, { tracks: updatedTracks });
+    },
+    [activeClip, updateClip, pushSnapshot]
+  );
+
   // Handle caption position change from preview drag
   const handleCaptionPositionChange = useCallback(
     (positionX: number, positionY: number) => {
@@ -563,7 +964,13 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       animationUrl: string,
       _name: string,
       duration: number,
-      source: "lottie" | "giphy" | "tenor" = "lottie"
+      source:
+        | "lottie"
+        | "giphy"
+        | "tenor"
+        | "waveform"
+        | "youtube-cta"
+        | "apple-podcasts-cta" = "lottie"
     ) => {
       if (!activeClip) return;
 
@@ -633,6 +1040,27 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     selectedTemplateId,
     templates,
   ]);
+
+  // Sync background mode to clip
+  useEffect(() => {
+    if (activeClip?.background?.type === "gradient") {
+      setBgMode("gradient");
+    } else {
+      setBgMode("solid");
+    }
+  }, [activeClip?.id]);
+
+  const colorPalette = useMemo(() => generateColorPalette(brandColors ?? null), [brandColors]);
+
+  const handleBackgroundChange = useCallback(
+    (bg: BackgroundConfig) => {
+      if (!activeClip) return;
+      pushSnapshot(activeClip.tracks || [], activeClip.captionStyle);
+      updateClip(activeClip.id, { background: bg });
+      setSelectedTemplateId(null);
+    },
+    [activeClip, updateClip, pushSnapshot]
+  );
 
   const handleTemplateSelect = useCallback(
     (template: VideoTemplate) => {
@@ -805,6 +1233,20 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
             onAnimationPositionChange={handleAnimationPositionChange}
             selectedClipId={selectedTimelineClipId}
             onSelectClip={setSelectedTimelineClipId}
+            // Multicam props
+            videoSources={isVideoEpisode ? videoSources : undefined}
+            segments={isVideoEpisode ? speakerSegments : undefined}
+            layoutMode={layoutMode}
+            pipEnabled={pipEnabled}
+            pipPositions={pipPositions}
+            pipScale={pipScale}
+            defaultVideoSourceId={currentProject?.defaultVideoSourceId}
+            multicamOverrides={multicamOverrides}
+            transitionStyle={transitionStyle}
+            speakerPeople={speakerPeople}
+            speakerDisplayMode={speakerTrackSettings?.displayMode}
+            speakerNameFormat={speakerTrackSettings?.nameFormat || "full-name"}
+            podcast={podcastMeta}
           />
         </div>
 
@@ -861,201 +1303,284 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
                   </div>
                 </div>
 
-                {/* Template selector */}
-                <div>
-                  <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
-                    Template
-                  </h3>
-                  <div className="space-y-1.5">
-                    {templates.slice(0, 4).map((template) => (
-                      <button
-                        key={template.id}
-                        onClick={() => handleTemplateSelect(template)}
-                        className={cn(
-                          "flex w-full items-center gap-2 rounded-md border p-2 text-left transition-colors",
-                          selectedTemplateId === template.id
-                            ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)]"
-                            : "border-[hsl(var(--border-subtle))] hover:border-[hsl(var(--border))]"
-                        )}
-                      >
-                        <div
-                          className="h-6 w-6 shrink-0 rounded"
-                          style={{
-                            background:
-                              template.background.type === "gradient"
-                                ? `linear-gradient(135deg, ${template.background.gradientColors?.[0]}, ${template.background.gradientColors?.[1]})`
-                                : template.background.color,
-                          }}
-                        />
-                        <span className="truncate text-xs text-[hsl(var(--text))]">
-                          {template.name}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Caption controls */}
-                <div>
-                  <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
-                    Captions
-                  </h3>
-                  <div className="space-y-3">
-                    {/* Words per line */}
+                {/* Multicam controls (video episodes with 2+ sources, multicam track selected) */}
+                {isVideoEpisode &&
+                  videoSources &&
+                  videoSources.length > 1 &&
+                  (selectedTrackType === "multicam" || selectedTrackType === "speaker") && (
                     <div>
-                      <div className="mb-1.5 flex items-center justify-between">
-                        <label className="text-[10px] text-[hsl(var(--text-muted))]">
-                          Words on screen
-                        </label>
-                        <span className="text-[10px] font-medium text-[hsl(var(--text))]">
-                          {currentCaptionStyle.wordsPerLine}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="1"
-                        max="8"
-                        value={currentCaptionStyle.wordsPerLine}
-                        onChange={(e) =>
-                          handleCaptionStyleChange({ wordsPerLine: parseInt(e.target.value) })
-                        }
-                        className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[hsl(var(--surface))] accent-[hsl(var(--cyan))]"
-                      />
-                      <div className="mt-1 flex justify-between text-[8px] text-[hsl(var(--text-ghost))]">
-                        <span>1</span>
-                        <span>8</span>
-                      </div>
-                    </div>
+                      <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
+                        Camera
+                      </h3>
+                      <div className="space-y-3">
+                        {/* Layout mode */}
+                        <div>
+                          <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                            Layout
+                          </label>
+                          <div className="grid grid-cols-2 gap-1">
+                            {(
+                              [
+                                { id: "active-speaker", label: "Speaker" },
+                                { id: "side-by-side", label: "Split" },
+                                { id: "grid", label: "Grid" },
+                                { id: "solo", label: "Solo" },
+                              ] as const
+                            )
+                              .filter((m) => {
+                                const count = videoSources.length;
+                                if (count === 1) return m.id === "solo";
+                                if (count === 2) return m.id !== "grid";
+                                return true;
+                              })
+                              .map((mode) => (
+                                <button
+                                  key={mode.id}
+                                  onClick={() => setLayoutMode(mode.id)}
+                                  className={cn(
+                                    "rounded-md border px-2 py-1 text-[10px] font-medium transition-colors",
+                                    layoutMode === mode.id
+                                      ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
+                                      : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--border))]"
+                                  )}
+                                >
+                                  {mode.label}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
 
-                    {/* Highlight toggle */}
-                    <div className="flex items-center justify-between">
-                      <label className="text-[10px] text-[hsl(var(--text-muted))]">
-                        Highlight active word
-                      </label>
-                      <button
-                        onClick={handleToggleHighlight}
-                        className={cn(
-                          "relative h-5 w-9 rounded-full transition-colors",
-                          isHighlightEnabled ? "bg-[hsl(var(--cyan))]" : "bg-[hsl(var(--surface))]"
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
-                            isHighlightEnabled ? "translate-x-4" : "translate-x-0.5"
-                          )}
-                        />
-                      </button>
-                    </div>
-
-                    {/* Highlight color (only shown when highlight is enabled) */}
-                    {isHighlightEnabled && (
-                      <div>
-                        <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
-                          Highlight color
-                        </label>
-                        <div className="flex gap-1.5">
-                          {/* Brand colors (primary, secondary) + off-white as fallback */}
-                          {[
-                            brandColors?.primary || "#FFD700",
-                            brandColors?.secondary || "#FF00FF",
-                            "#FAFAFA",
-                          ].map((color, index) => (
+                        {/* PiP toggle (only in active-speaker mode) */}
+                        {layoutMode === "active-speaker" && videoSources.length > 1 && (
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] text-[hsl(var(--text-muted))]">
+                              Picture-in-Picture
+                            </label>
                             <button
-                              key={color}
-                              onClick={() => handleCaptionStyleChange({ highlightColor: color })}
+                              onClick={() => setPipEnabled(!pipEnabled)}
                               className={cn(
-                                "h-6 w-6 rounded-md border-2 transition-all",
-                                currentCaptionStyle.highlightColor === color
-                                  ? "scale-110 border-white"
-                                  : "border-transparent hover:scale-105"
+                                "relative h-5 w-9 rounded-full transition-colors",
+                                pipEnabled ? "bg-[hsl(var(--cyan))]" : "bg-[hsl(var(--surface))]"
                               )}
-                              style={{ backgroundColor: color }}
-                              title={
-                                index === 0
-                                  ? "Brand Primary"
-                                  : index === 1
-                                    ? "Brand Secondary"
-                                    : "Light"
-                              }
-                            />
+                            >
+                              <div
+                                className={cn(
+                                  "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                                  pipEnabled ? "translate-x-4" : "translate-x-0.5"
+                                )}
+                              />
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Transition style */}
+                        <div>
+                          <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                            Transition
+                          </label>
+                          <div className="grid grid-cols-2 gap-1">
+                            {(["cut", "crossfade"] as const).map((style) => (
+                              <button
+                                key={style}
+                                onClick={() => setTransitionStyle(style)}
+                                className={cn(
+                                  "rounded-md border px-2 py-1 text-[10px] font-medium capitalize transition-colors",
+                                  transitionStyle === style
+                                    ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
+                                    : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--border))]"
+                                )}
+                              >
+                                {style}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Solo source selector */}
+                        {layoutMode === "solo" && (
+                          <div>
+                            <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                              Camera
+                            </label>
+                            <div className="space-y-1">
+                              {videoSources.map((source) => (
+                                <button
+                                  key={source.id}
+                                  onClick={() => setSoloSourceId(source.id)}
+                                  className={cn(
+                                    "flex w-full items-center gap-2 rounded-md border p-1.5 text-left text-[10px] transition-colors",
+                                    soloSourceId === source.id
+                                      ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
+                                      : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--border))]"
+                                  )}
+                                >
+                                  {source.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Manual Overrides */}
+                        <div>
+                          <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                            Manual Overrides ({multicamOverrides.length})
+                          </label>
+
+                          {multicamOverrides.map((o, idx) => (
+                            <div
+                              key={idx}
+                              className="mb-1 flex items-center gap-1.5 rounded-md border border-[hsl(var(--border-subtle))] px-2 py-1"
+                            >
+                              <span className="font-mono text-[9px] text-[hsl(var(--text-muted))]">
+                                {formatTimestamp(o.startTime - (activeClip?.startTime || 0))} –{" "}
+                                {formatTimestamp(o.endTime - (activeClip?.startTime || 0))}
+                              </span>
+                              <span className="flex-1 text-[10px] font-medium text-[hsl(var(--text-secondary))]">
+                                {videoSources.find((s) => s.id === o.activeVideoSourceId)?.label ||
+                                  "Unknown"}
+                              </span>
+                              <button
+                                onClick={() => {
+                                  removeOverride(idx);
+                                  setTimeout(() => regenerateMulticamTrack(), 0);
+                                }}
+                                className="rounded p-0.5 text-[hsl(var(--text-tertiary))] hover:bg-[hsl(var(--error)/0.1)] hover:text-[hsl(var(--error))]"
+                              >
+                                <Cross2Icon className="h-3 w-3" />
+                              </button>
+                            </div>
                           ))}
-                          {/* Custom color picker button */}
-                          <div className="relative">
+
+                          <button
+                            onClick={() => {
+                              if (!activeClip) return;
+                              const absTime = activeClip.startTime + currentTime;
+                              setPendingOverride({
+                                startTime: Math.max(activeClip.startTime, absTime - 1),
+                                endTime: Math.min(activeClip.endTime, absTime + 1),
+                              });
+                            }}
+                            className="mt-1 flex items-center gap-1 rounded-md border border-dashed border-[hsl(var(--border-subtle))] px-2 py-1 text-[10px] text-[hsl(var(--text-tertiary))] hover:border-[hsl(var(--border))] hover:text-[hsl(var(--text-muted))]"
+                          >
+                            <PlusIcon className="h-3 w-3" />
+                            Add at Playhead
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                {/* Background color picker (background track selected, non-video episodes) */}
+                {!isVideoEpisode && selectedTrackType === "background" && (
+                  <div>
+                    <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
+                      Background
+                    </h3>
+                    <div className="space-y-3">
+                      {/* Mode toggle */}
+                      <div className="grid grid-cols-2 gap-1">
+                        {(["solid", "gradient"] as const).map((mode) => (
+                          <button
+                            key={mode}
+                            onClick={() => setBgMode(mode)}
+                            className={cn(
+                              "rounded-md border px-2 py-1 text-[10px] font-medium capitalize transition-colors",
+                              bgMode === mode
+                                ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
+                                : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--border))]"
+                            )}
+                          >
+                            {mode}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Solid palette */}
+                      {bgMode === "solid" && (
+                        <div>
+                          <div className="grid grid-cols-4 gap-1.5">
+                            {colorPalette.solids.map((color) => (
+                              <button
+                                key={color}
+                                onClick={() => handleBackgroundChange({ type: "solid", color })}
+                                className={cn(
+                                  "h-6 w-6 rounded-md border-2 transition-all",
+                                  activeClip?.background?.type === "solid" &&
+                                    activeClip.background.color === color
+                                    ? "scale-110 border-white"
+                                    : "border-transparent hover:scale-105"
+                                )}
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </div>
+                          {/* Custom color */}
+                          <div className="mt-2">
                             <button
-                              ref={colorPickerButtonRef}
+                              ref={bgColorPickerRef}
                               onClick={() => {
-                                if (!showColorPicker && colorPickerButtonRef.current) {
-                                  const rect = colorPickerButtonRef.current.getBoundingClientRect();
-                                  setColorPickerPosition({
+                                if (!showBgColorPicker && bgColorPickerRef.current) {
+                                  const rect = bgColorPickerRef.current.getBoundingClientRect();
+                                  setBgPickerPosition({
                                     top: rect.bottom + 8,
-                                    left: Math.max(8, rect.right - 192), // 192px = popover width (w-48)
+                                    left: Math.max(8, rect.right - 192),
                                   });
                                 }
-                                setCustomColorInput(currentCaptionStyle.highlightColor);
-                                setShowColorPicker(!showColorPicker);
+                                setCustomBgColor(activeClip?.background?.color || "#000000");
+                                setShowBgColorPicker(!showBgColorPicker);
                               }}
                               className={cn(
-                                "flex h-6 w-6 items-center justify-center rounded-md border-2 transition-all",
-                                showColorPicker ||
-                                  ![
-                                    brandColors?.primary || "#FFD700",
-                                    brandColors?.secondary || "#FF00FF",
-                                    "#FAFAFA",
-                                  ].includes(currentCaptionStyle.highlightColor)
-                                  ? "scale-110 border-white"
-                                  : "border-transparent hover:scale-105",
-                                "bg-gradient-to-br from-red-500 via-green-500 to-blue-500"
+                                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] transition-colors",
+                                showBgColorPicker
+                                  ? "border-[hsl(var(--cyan)/0.5)] text-[hsl(var(--text))]"
+                                  : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--border))]"
                               )}
-                              title="Custom color"
                             >
-                              <PlusIcon className="h-3 w-3 text-white drop-shadow-md" />
+                              <div className="h-3 w-3 rounded-sm bg-gradient-to-br from-red-500 via-green-500 to-blue-500" />
+                              Custom
                             </button>
-                            {/* Color picker popover */}
-                            {showColorPicker && (
+                            {showBgColorPicker && (
                               <>
                                 <div
                                   className="fixed inset-0 z-40"
-                                  onClick={() => setShowColorPicker(false)}
+                                  onClick={() => setShowBgColorPicker(false)}
                                 />
                                 <div
                                   className="fixed z-50 w-48 rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-elevated))] p-3 shadow-xl"
-                                  style={{
-                                    top: colorPickerPosition.top,
-                                    left: colorPickerPosition.left,
-                                  }}
+                                  style={{ top: bgPickerPosition.top, left: bgPickerPosition.left }}
                                 >
                                   <label className="mb-2 block text-[10px] text-[hsl(var(--text-muted))]">
                                     Custom color
                                   </label>
-                                  {/* Color wheel input */}
                                   <input
                                     type="color"
-                                    value={customColorInput || currentCaptionStyle.highlightColor}
+                                    value={customBgColor}
                                     onChange={(e) => {
-                                      setCustomColorInput(e.target.value);
-                                      handleCaptionStyleChange({ highlightColor: e.target.value });
+                                      setCustomBgColor(e.target.value);
+                                      handleBackgroundChange({
+                                        type: "solid",
+                                        color: e.target.value,
+                                      });
                                     }}
                                     className="mb-2 h-8 w-full cursor-pointer rounded border-0 bg-transparent"
                                   />
-                                  {/* Hex input */}
                                   <div className="flex gap-2">
                                     <input
                                       type="text"
-                                      value={customColorInput || currentCaptionStyle.highlightColor}
+                                      value={customBgColor}
                                       onChange={(e) => {
                                         const value = e.target.value;
-                                        setCustomColorInput(value);
-                                        // Only apply if it's a valid hex color
+                                        setCustomBgColor(value);
                                         if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
-                                          handleCaptionStyleChange({ highlightColor: value });
+                                          handleBackgroundChange({ type: "solid", color: value });
                                         }
                                       }}
-                                      placeholder="#FFFFFF"
+                                      placeholder="#000000"
                                       className="flex-1 rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface))] px-2 py-1 text-[10px] text-[hsl(var(--text))] placeholder-[hsl(var(--text-ghost))] focus:border-[hsl(var(--cyan))] focus:outline-none"
                                     />
                                     <button
-                                      onClick={() => setShowColorPicker(false)}
+                                      onClick={() => setShowBgColorPicker(false)}
                                       className="rounded bg-[hsl(var(--cyan))] px-2 py-1 text-[10px] font-medium text-[hsl(var(--bg-base))]"
                                     >
                                       Done
@@ -1066,10 +1591,553 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
                             )}
                           </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+
+                      {/* Gradient palette */}
+                      {bgMode === "gradient" && (
+                        <div>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {colorPalette.gradients.map((g, i) => (
+                              <button
+                                key={i}
+                                onClick={() =>
+                                  handleBackgroundChange({
+                                    type: "gradient",
+                                    gradientColors: g.colors,
+                                    gradientDirection: g.direction,
+                                  })
+                                }
+                                className={cn(
+                                  "h-6 w-10 rounded-md border-2 transition-all",
+                                  activeClip?.background?.type === "gradient" &&
+                                    activeClip.background.gradientColors?.[0] === g.colors[0] &&
+                                    activeClip.background.gradientColors?.[1] === g.colors[1]
+                                    ? "scale-110 border-white"
+                                    : "border-transparent hover:scale-105"
+                                )}
+                                style={{
+                                  background: `linear-gradient(${g.direction}deg, ${g.colors[0]}, ${g.colors[1]})`,
+                                }}
+                              />
+                            ))}
+                          </div>
+                          {/* Custom gradient */}
+                          <div className="mt-2">
+                            <button
+                              ref={bgColorPickerRef}
+                              onClick={() => {
+                                if (!showBgColorPicker && bgColorPickerRef.current) {
+                                  const rect = bgColorPickerRef.current.getBoundingClientRect();
+                                  setBgPickerPosition({
+                                    top: rect.bottom + 8,
+                                    left: Math.max(8, rect.right - 192),
+                                  });
+                                }
+                                setCustomGradStart(
+                                  activeClip?.background?.gradientColors?.[0] || "#000000"
+                                );
+                                setCustomGradEnd(
+                                  activeClip?.background?.gradientColors?.[1] || "#333333"
+                                );
+                                setShowBgColorPicker(!showBgColorPicker);
+                              }}
+                              className={cn(
+                                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] transition-colors",
+                                showBgColorPicker
+                                  ? "border-[hsl(var(--cyan)/0.5)] text-[hsl(var(--text))]"
+                                  : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--border))]"
+                              )}
+                            >
+                              <div className="h-3 w-3 rounded-sm bg-gradient-to-br from-red-500 via-green-500 to-blue-500" />
+                              Custom
+                            </button>
+                            {showBgColorPicker && (
+                              <>
+                                <div
+                                  className="fixed inset-0 z-40"
+                                  onClick={() => setShowBgColorPicker(false)}
+                                />
+                                <div
+                                  className="fixed z-50 w-48 rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-elevated))] p-3 shadow-xl"
+                                  style={{ top: bgPickerPosition.top, left: bgPickerPosition.left }}
+                                >
+                                  <label className="mb-2 block text-[10px] text-[hsl(var(--text-muted))]">
+                                    Start color
+                                  </label>
+                                  <input
+                                    type="color"
+                                    value={customGradStart}
+                                    onChange={(e) => {
+                                      setCustomGradStart(e.target.value);
+                                      handleBackgroundChange({
+                                        type: "gradient",
+                                        gradientColors: [e.target.value, customGradEnd],
+                                        gradientDirection: 135,
+                                      });
+                                    }}
+                                    className="mb-2 h-8 w-full cursor-pointer rounded border-0 bg-transparent"
+                                  />
+                                  <label className="mb-2 block text-[10px] text-[hsl(var(--text-muted))]">
+                                    End color
+                                  </label>
+                                  <input
+                                    type="color"
+                                    value={customGradEnd}
+                                    onChange={(e) => {
+                                      setCustomGradEnd(e.target.value);
+                                      handleBackgroundChange({
+                                        type: "gradient",
+                                        gradientColors: [customGradStart, e.target.value],
+                                        gradientDirection: 135,
+                                      });
+                                    }}
+                                    className="mb-2 h-8 w-full cursor-pointer rounded border-0 bg-transparent"
+                                  />
+                                  <div className="mb-2">
+                                    <label className="mb-1 block text-[10px] text-[hsl(var(--text-muted))]">
+                                      Direction
+                                    </label>
+                                    <div className="grid grid-cols-4 gap-1">
+                                      {[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => (
+                                        <button
+                                          key={deg}
+                                          onClick={() =>
+                                            handleBackgroundChange({
+                                              type: "gradient",
+                                              gradientColors: [customGradStart, customGradEnd],
+                                              gradientDirection: deg,
+                                            })
+                                          }
+                                          className={cn(
+                                            "rounded border px-1 py-0.5 text-[8px] transition-colors",
+                                            activeClip?.background?.gradientDirection === deg
+                                              ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
+                                              : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))]"
+                                          )}
+                                        >
+                                          {deg}°
+                                        </button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => setShowBgColorPicker(false)}
+                                    className="w-full rounded bg-[hsl(var(--cyan))] px-2 py-1 text-[10px] font-medium text-[hsl(var(--bg-base))]"
+                                  >
+                                    Done
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
+
+                {/* Template selector (background track selected, non-video episodes) */}
+                {!isVideoEpisode && selectedTrackType === "background" && (
+                  <div>
+                    <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
+                      Template
+                    </h3>
+                    <div className="space-y-1.5">
+                      {templates.slice(0, 4).map((template) => (
+                        <button
+                          key={template.id}
+                          onClick={() => handleTemplateSelect(template)}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-md border p-2 text-left transition-colors",
+                            selectedTemplateId === template.id
+                              ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)]"
+                              : "border-[hsl(var(--border-subtle))] hover:border-[hsl(var(--border))]"
+                          )}
+                        >
+                          <div
+                            className="h-6 w-6 shrink-0 rounded"
+                            style={{
+                              background:
+                                template.background.type === "gradient"
+                                  ? `linear-gradient(135deg, ${template.background.gradientColors?.[0]}, ${template.background.gradientColors?.[1]})`
+                                  : template.background.color,
+                            }}
+                          />
+                          <span className="truncate text-xs text-[hsl(var(--text))]">
+                            {template.name}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Caption controls (captions track selected) */}
+                {selectedTrackType === "captions" && (
+                  <div>
+                    <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
+                      Captions
+                    </h3>
+                    <div className="space-y-3">
+                      {/* Words per line */}
+                      <div>
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <label className="text-[10px] text-[hsl(var(--text-muted))]">
+                            Words on screen
+                          </label>
+                          <span className="text-[10px] font-medium text-[hsl(var(--text))]">
+                            {currentCaptionStyle.wordsPerLine}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="8"
+                          value={currentCaptionStyle.wordsPerLine}
+                          onChange={(e) =>
+                            handleCaptionStyleChange({ wordsPerLine: parseInt(e.target.value) })
+                          }
+                          className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[hsl(var(--surface))] accent-[hsl(var(--cyan))]"
+                        />
+                        <div className="mt-1 flex justify-between text-[8px] text-[hsl(var(--text-ghost))]">
+                          <span>1</span>
+                          <span>8</span>
+                        </div>
+                      </div>
+
+                      {/* Caption size */}
+                      <div>
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <label className="text-[10px] text-[hsl(var(--text-muted))]">
+                            Caption size
+                          </label>
+                          <span className="text-[10px] font-medium text-[hsl(var(--text))]">
+                            {currentCaptionStyle.fontSize}px
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="24"
+                          max="80"
+                          step="2"
+                          value={currentCaptionStyle.fontSize}
+                          onChange={(e) =>
+                            handleCaptionStyleChange({ fontSize: parseInt(e.target.value) })
+                          }
+                          className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[hsl(var(--surface))] accent-[hsl(var(--cyan))]"
+                        />
+                        <div className="mt-1 flex justify-between text-[8px] text-[hsl(var(--text-ghost))]">
+                          <span>24</span>
+                          <span>80</span>
+                        </div>
+                      </div>
+
+                      {/* Highlight toggle */}
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] text-[hsl(var(--text-muted))]">
+                          Highlight active word
+                        </label>
+                        <button
+                          onClick={handleToggleHighlight}
+                          className={cn(
+                            "relative h-5 w-9 rounded-full transition-colors",
+                            isHighlightEnabled
+                              ? "bg-[hsl(var(--cyan))]"
+                              : "bg-[hsl(var(--surface))]"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                              isHighlightEnabled ? "translate-x-4" : "translate-x-0.5"
+                            )}
+                          />
+                        </button>
+                      </div>
+
+                      {/* Highlight color (only shown when highlight is enabled) */}
+                      {isHighlightEnabled && (
+                        <div>
+                          <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                            Highlight color
+                          </label>
+                          <div className="flex gap-1.5">
+                            {/* Brand colors (primary, secondary) + off-white as fallback */}
+                            {[
+                              brandColors?.primary || "#FFD700",
+                              brandColors?.secondary || "#FF00FF",
+                              "#FAFAFA",
+                            ].map((color, index) => (
+                              <button
+                                key={color}
+                                onClick={() => handleCaptionStyleChange({ highlightColor: color })}
+                                className={cn(
+                                  "h-6 w-6 rounded-md border-2 transition-all",
+                                  currentCaptionStyle.highlightColor === color
+                                    ? "scale-110 border-white"
+                                    : "border-transparent hover:scale-105"
+                                )}
+                                style={{ backgroundColor: color }}
+                                title={
+                                  index === 0
+                                    ? "Brand Primary"
+                                    : index === 1
+                                      ? "Brand Secondary"
+                                      : "Light"
+                                }
+                              />
+                            ))}
+                            {/* Custom color picker button */}
+                            <div className="relative">
+                              <button
+                                ref={colorPickerButtonRef}
+                                onClick={() => {
+                                  if (!showColorPicker && colorPickerButtonRef.current) {
+                                    const rect =
+                                      colorPickerButtonRef.current.getBoundingClientRect();
+                                    setColorPickerPosition({
+                                      top: rect.bottom + 8,
+                                      left: Math.max(8, rect.right - 192), // 192px = popover width (w-48)
+                                    });
+                                  }
+                                  setCustomColorInput(currentCaptionStyle.highlightColor);
+                                  setShowColorPicker(!showColorPicker);
+                                }}
+                                className={cn(
+                                  "flex h-6 w-6 items-center justify-center rounded-md border-2 transition-all",
+                                  showColorPicker ||
+                                    ![
+                                      brandColors?.primary || "#FFD700",
+                                      brandColors?.secondary || "#FF00FF",
+                                      "#FAFAFA",
+                                    ].includes(currentCaptionStyle.highlightColor)
+                                    ? "scale-110 border-white"
+                                    : "border-transparent hover:scale-105",
+                                  "bg-gradient-to-br from-red-500 via-green-500 to-blue-500"
+                                )}
+                                title="Custom color"
+                              >
+                                <PlusIcon className="h-3 w-3 text-white drop-shadow-md" />
+                              </button>
+                              {/* Color picker popover */}
+                              {showColorPicker && (
+                                <>
+                                  <div
+                                    className="fixed inset-0 z-40"
+                                    onClick={() => setShowColorPicker(false)}
+                                  />
+                                  <div
+                                    className="fixed z-50 w-48 rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-elevated))] p-3 shadow-xl"
+                                    style={{
+                                      top: colorPickerPosition.top,
+                                      left: colorPickerPosition.left,
+                                    }}
+                                  >
+                                    <label className="mb-2 block text-[10px] text-[hsl(var(--text-muted))]">
+                                      Custom color
+                                    </label>
+                                    {/* Color wheel input */}
+                                    <input
+                                      type="color"
+                                      value={customColorInput || currentCaptionStyle.highlightColor}
+                                      onChange={(e) => {
+                                        setCustomColorInput(e.target.value);
+                                        handleCaptionStyleChange({
+                                          highlightColor: e.target.value,
+                                        });
+                                      }}
+                                      className="mb-2 h-8 w-full cursor-pointer rounded border-0 bg-transparent"
+                                    />
+                                    {/* Hex input */}
+                                    <div className="flex gap-2">
+                                      <input
+                                        type="text"
+                                        value={
+                                          customColorInput || currentCaptionStyle.highlightColor
+                                        }
+                                        onChange={(e) => {
+                                          const value = e.target.value;
+                                          setCustomColorInput(value);
+                                          // Only apply if it's a valid hex color
+                                          if (/^#[0-9A-Fa-f]{6}$/.test(value)) {
+                                            handleCaptionStyleChange({ highlightColor: value });
+                                          }
+                                        }}
+                                        placeholder="#FFFFFF"
+                                        className="flex-1 rounded border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface))] px-2 py-1 text-[10px] text-[hsl(var(--text))] placeholder-[hsl(var(--text-ghost))] focus:border-[hsl(var(--cyan))] focus:outline-none"
+                                      />
+                                      <button
+                                        onClick={() => setShowColorPicker(false)}
+                                        className="rounded bg-[hsl(var(--cyan))] px-2 py-1 text-[10px] font-medium text-[hsl(var(--bg-base))]"
+                                      >
+                                        Done
+                                      </button>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Speaker track controls (speaker track selected) */}
+                {selectedTrackType === "speaker" && speakerTrackSettings && (
+                  <div>
+                    <h3 className="mb-2 text-[10px] font-semibold tracking-wider text-[hsl(var(--text-tertiary))] uppercase">
+                      Speaker
+                    </h3>
+                    <div className="space-y-3">
+                      {/* Display mode */}
+                      <div>
+                        <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                          Display
+                        </label>
+                        <div className="grid grid-cols-2 gap-1">
+                          {(
+                            [
+                              { id: "fill", label: "Fill" },
+                              { id: "circle", label: "Circle" },
+                            ] as const
+                          ).map((mode) => (
+                            <button
+                              key={mode.id}
+                              onClick={() =>
+                                handleSpeakerTrackChange({ speakerDisplayMode: mode.id })
+                              }
+                              className={cn(
+                                "rounded-md border px-2 py-1 text-[10px] font-medium transition-colors",
+                                speakerTrackSettings.displayMode === mode.id
+                                  ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
+                                  : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--border))]"
+                              )}
+                            >
+                              {mode.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Speaker name format */}
+                      <div>
+                        <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                          Name display
+                        </label>
+                        <div className="grid grid-cols-3 gap-1">
+                          {(
+                            [
+                              { id: "off", label: "Off" },
+                              { id: "first-name", label: "First" },
+                              { id: "full-name", label: "Full" },
+                            ] as const
+                          ).map((opt) => (
+                            <button
+                              key={opt.id}
+                              onClick={() =>
+                                handleSpeakerTrackChange({
+                                  speakerNameFormat: opt.id,
+                                  showSpeakerName: opt.id !== "off",
+                                })
+                              }
+                              className={cn(
+                                "rounded-md border px-2 py-1 text-[10px] font-medium transition-colors",
+                                speakerTrackSettings.nameFormat === opt.id
+                                  ? "border-[hsl(var(--cyan)/0.5)] bg-[hsl(var(--cyan)/0.1)] text-[hsl(var(--text))]"
+                                  : "border-[hsl(var(--border-subtle))] text-[hsl(var(--text-muted))] hover:border-[hsl(var(--border))]"
+                              )}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Assign speaker at playhead (fill gaps) */}
+                      {(() => {
+                        const speakerTrack = activeClip?.tracks?.find((t) => t.type === "speaker");
+                        if (!speakerTrack) return null;
+                        // Get unique speakers from existing clips
+                        const uniqueSpeakers = Array.from(
+                          new Map(
+                            speakerTrack.clips.map((c) => [
+                              c.assetId,
+                              { label: c.assetId, speakerId: c.assetUrl },
+                            ])
+                          ).values()
+                        );
+                        if (uniqueSpeakers.length === 0) return null;
+                        // Check if playhead is in a gap
+                        const isInGap = !speakerTrack.clips.some(
+                          (c) =>
+                            currentTime >= c.startTime && currentTime < c.startTime + c.duration
+                        );
+                        return (
+                          <div>
+                            <label className="mb-1.5 block text-[10px] text-[hsl(var(--text-muted))]">
+                              Assign speaker {isInGap ? "(gap at playhead)" : ""}
+                            </label>
+                            {isInGap && (
+                              <p className="mb-2 text-[9px] text-[hsl(var(--warning))]">
+                                No speaker assigned at current position
+                              </p>
+                            )}
+                            <div className="flex flex-wrap gap-1">
+                              {uniqueSpeakers.map((speaker) => (
+                                <button
+                                  key={speaker.label}
+                                  onClick={() => {
+                                    if (!activeClip || !speakerTrack) return;
+                                    // Find gap boundaries around playhead
+                                    const sorted = [...speakerTrack.clips].sort(
+                                      (a, b) => a.startTime - b.startTime
+                                    );
+                                    let gapStart = 0;
+                                    let gapEnd = clipDuration;
+                                    for (const c of sorted) {
+                                      const cEnd = c.startTime + c.duration;
+                                      if (cEnd <= currentTime) gapStart = Math.max(gapStart, cEnd);
+                                      if (c.startTime > currentTime) {
+                                        gapEnd = Math.min(gapEnd, c.startTime);
+                                        break;
+                                      }
+                                    }
+                                    if (gapEnd <= gapStart) return;
+                                    const newClip = {
+                                      id: generateId(),
+                                      trackId: speakerTrack.id,
+                                      startTime: gapStart,
+                                      duration: gapEnd - gapStart,
+                                      type: "video" as const,
+                                      assetId: speaker.label,
+                                      assetUrl: speaker.speakerId,
+                                    };
+                                    const updatedTracks = activeClip.tracks!.map((t) =>
+                                      t.id === speakerTrack.id
+                                        ? {
+                                            ...t,
+                                            clips: [...t.clips, newClip].sort(
+                                              (a, b) => a.startTime - b.startTime
+                                            ),
+                                          }
+                                        : t
+                                    );
+                                    updateClip(activeClip.id, { tracks: updatedTracks });
+                                  }}
+                                  className="rounded-md border border-[hsl(var(--border-subtle))] px-2 py-1 text-[10px] font-medium text-[hsl(var(--text-secondary))] hover:border-[hsl(var(--cyan)/0.5)] hover:bg-[hsl(var(--cyan)/0.1)]"
+                                >
+                                  {speaker.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -1125,6 +2193,12 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
                   >
                     Captions
                   </button>
+                  <button
+                    onClick={() => handleAddTrack("speaker")}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-xs text-[hsl(var(--text-muted))] hover:bg-[hsl(var(--surface))] hover:text-[hsl(var(--text))]"
+                  >
+                    Speaker
+                  </button>
                 </div>
               </>
             )}
@@ -1177,8 +2251,56 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
           onSelectClip={setSelectedTimelineClipId}
           words={activeClip?.words || []}
           clipStartTime={activeClip?.startTime || 0}
+          videoSources={
+            isVideoEpisode && videoSources
+              ? videoSources.map((s) => ({ id: s.id, label: s.label }))
+              : undefined
+          }
+          speakerPeople={speakerPeople}
+          onDoubleClickTrack={(trackId, timeInClip) => {
+            const track = activeClip?.tracks?.find((t) => t.id === trackId);
+            if (track?.type !== "multicam" || !activeClip) return;
+            const absTime = activeClip.startTime + timeInClip;
+            setPendingOverride({
+              startTime: Math.max(activeClip.startTime, absTime - 1),
+              endTime: Math.min(activeClip.endTime, absTime + 1),
+            });
+          }}
         />
       </div>
+
+      {/* Speaker picker popover for pending override */}
+      {pendingOverride && isVideoEpisode && videoSources && videoSources.length > 1 && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPendingOverride(null)} />
+          <div className="fixed top-1/2 left-1/2 z-50 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-elevated))] p-4 shadow-xl">
+            <p className="mb-3 text-xs font-medium text-[hsl(var(--text))]">
+              Select speaker for override
+            </p>
+            <p className="mb-3 text-[10px] text-[hsl(var(--text-muted))]">
+              {formatTimestamp(pendingOverride.startTime - (activeClip?.startTime || 0))} –{" "}
+              {formatTimestamp(pendingOverride.endTime - (activeClip?.startTime || 0))}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {videoSources
+                .filter((s) => s.sourceType === "speaker")
+                .map((source) => (
+                  <button
+                    key={source.id}
+                    onClick={() => {
+                      addOverride(pendingOverride.startTime, pendingOverride.endTime, source.id);
+                      setPendingOverride(null);
+                      setTimeout(() => regenerateMulticamTrack(), 0);
+                    }}
+                    className="rounded-md border border-[hsl(var(--border-subtle))] px-3 py-2 text-xs font-medium text-[hsl(var(--text-secondary))] hover:border-[hsl(var(--cyan)/0.5)] hover:bg-[hsl(var(--cyan)/0.1)]"
+                  >
+                    {source.label}
+                  </button>
+                ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

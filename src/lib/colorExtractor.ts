@@ -205,7 +205,7 @@ export async function extractBrandColors(imageDataUrl: string): Promise<BrandCol
 /**
  * Convert HSL string to hex color
  */
-function hslToHex(hsl: string): string {
+export function hslToHex(hsl: string): string {
   // Parse "H S% L%" format
   const match = hsl.match(/(\d+)\s+(\d+)%?\s+(\d+)%?/);
   if (!match) return "#00d4ff"; // fallback to default cyan
@@ -374,6 +374,78 @@ export function parseBrandColorsFromStorage(stored: {
     primaryHsl,
     secondaryHsl: secondaryHsl || primaryHsl, // Fallback to primary if no secondary
   };
+}
+
+/**
+ * Adjust lightness of an HSL string by a delta percentage
+ */
+function hslAdjustLightness(hsl: string, deltaPercent: number): string {
+  const match = hsl.match(/(\d+)\s+(\d+)%?\s+(\d+)%?/);
+  if (!match) return hsl;
+  const h = parseInt(match[1]);
+  const s = parseInt(match[2]);
+  const l = Math.max(0, Math.min(100, parseInt(match[3]) + deltaPercent));
+  return `${h} ${s}% ${l}%`;
+}
+
+/**
+ * Generate a color palette for background picker from brand colors
+ */
+export function generateColorPalette(brandColors: BrandColors | null): {
+  solids: string[];
+  gradients: Array<{ colors: [string, string]; direction: number }>;
+} {
+  if (!brandColors) {
+    return {
+      solids: [
+        "#1a1a2e",
+        "#16213e",
+        "#2d2d44",
+        "#0f0f1a",
+        "#334155",
+        "#1e293b",
+        "#000000",
+        "#FFFFFF",
+      ],
+      gradients: [
+        { colors: ["#1a1a2e", "#16213e"], direction: 135 },
+        { colors: ["#0f0f1a", "#2d2d44"], direction: 180 },
+        { colors: ["#16213e", "#334155"], direction: 180 },
+        { colors: ["#1a1a2e", "#000000"], direction: 180 },
+        { colors: ["#334155", "#000000"], direction: 180 },
+        { colors: ["#2d2d44", "#1e293b"], direction: 135 },
+      ],
+    };
+  }
+
+  const { primaryHsl, secondaryHsl } = brandColors;
+
+  const primaryLighter = hslAdjustLightness(primaryHsl, 20);
+  const primaryDarker = hslAdjustLightness(primaryHsl, -20);
+  const secondaryLighter = hslAdjustLightness(secondaryHsl, 20);
+  const secondaryDarker = hslAdjustLightness(secondaryHsl, -20);
+
+  const solids = [
+    hslToHex(primaryHsl),
+    hslToHex(secondaryHsl),
+    hslToHex(primaryLighter),
+    hslToHex(primaryDarker),
+    hslToHex(secondaryLighter),
+    hslToHex(secondaryDarker),
+    "#000000",
+    "#FFFFFF",
+  ];
+
+  const gradients: Array<{ colors: [string, string]; direction: number }> = [
+    { colors: [hslToHex(primaryHsl), hslToHex(secondaryHsl)], direction: 135 },
+    { colors: [hslToHex(primaryDarker), hslToHex(primaryLighter)], direction: 180 },
+    { colors: [hslToHex(secondaryDarker), hslToHex(secondaryLighter)], direction: 180 },
+    { colors: [hslToHex(primaryHsl), "#000000"], direction: 180 },
+    { colors: [hslToHex(secondaryHsl), "#000000"], direction: 180 },
+    { colors: [hslToHex(primaryLighter), hslToHex(secondaryDarker)], direction: 135 },
+  ];
+
+  return { solids, gradients };
 }
 
 export function applyBrandColors(colors: BrandColors | null): void {

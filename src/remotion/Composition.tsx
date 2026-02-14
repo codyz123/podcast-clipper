@@ -18,6 +18,7 @@ export const ClipVideo = (props: ClipVideoProps) => {
     subtitle,
     durationInFrames,
     tracks,
+    podcast,
   } = props;
   const formatConfig = VIDEO_FORMATS[format];
   const animationClips = (tracks ?? [])
@@ -44,7 +45,7 @@ export const ClipVideo = (props: ClipVideoProps) => {
       {/* Animation overlays */}
       {animationClips.map((clip) => (
         <Sequence key={clip.id} from={clip.startFrame} durationInFrames={clip.durationFrames}>
-          <AnimationOverlay clip={clip} />
+          <AnimationOverlay clip={clip} podcast={podcast} words={words} />
         </Sequence>
       ))}
 

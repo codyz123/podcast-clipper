@@ -886,7 +886,7 @@ export const Settings: React.FC = () => {
                     Built with React & Remotion
                   </p>
                   <p className="mt-0.5 text-xs text-[hsl(var(--text-ghost))]">
-                    AI powered by OpenAI Whisper & GPT-4
+                    AI powered by OpenAI
                   </p>
                 </div>
               </div>

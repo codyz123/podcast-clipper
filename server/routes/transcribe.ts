@@ -6,6 +6,7 @@ import { tmpdir } from "os";
 import { join } from "path";
 import { readFile, writeFile } from "fs/promises";
 import { randomUUID } from "crypto";
+import { eq, asc } from "drizzle-orm";
 import { needsConversion } from "../lib/audio-formats.js";
 import {
   convertToWav,
@@ -14,6 +15,10 @@ import {
   getAudioDuration,
   cleanupTempFiles,
 } from "../lib/audio-converter.js";
+import { bufferToTempFile } from "../lib/video-processing.js";
+import { db } from "../db/index.js";
+import { videoSources, podcastPeople } from "../db/schema.js";
+import { jwtAuthMiddleware } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -559,6 +564,449 @@ router.post("/transcribe", upload.single("file"), async (req: Request, res: Resp
     }
   } finally {
     await cleanupTempFiles(...filesToCleanup);
+  }
+});
+
+// ============ Multicam Transcription ============
+
+type TranscriptionStrategy = "PER_SPEAKER" | "SINGLE_SPEAKER" | "DIARIZE_WIDE";
+
+interface VideoSourceRow {
+  id: string;
+  label: string;
+  personId: string | null;
+  sourceType: string;
+  audioBlobUrl: string | null;
+  syncOffsetMs: number;
+  displayOrder: number;
+}
+
+function detectTranscriptionStrategy(sources: VideoSourceRow[]): {
+  strategy: TranscriptionStrategy;
+  speakerSources: VideoSourceRow[];
+} {
+  const speakerSources = sources.filter((s) => s.sourceType === "speaker");
+  const wideSources = sources.filter((s) => s.sourceType === "wide");
+
+  // Count unique persons among speaker sources
+  const uniquePersonIds = new Set(speakerSources.filter((s) => s.personId).map((s) => s.personId));
+
+  if (uniquePersonIds.size > 1) {
+    // Multiple speakers — transcribe one source per unique person
+    // Pick one source per personId (prefer the first by displayOrder)
+    const seen = new Set<string>();
+    const perPersonSources: VideoSourceRow[] = [];
+    for (const src of speakerSources) {
+      if (src.personId && !seen.has(src.personId)) {
+        seen.add(src.personId);
+        perPersonSources.push(src);
+      }
+    }
+    return { strategy: "PER_SPEAKER", speakerSources: perPersonSources };
+  }
+
+  if (uniquePersonIds.size === 1 || (speakerSources.length > 0 && uniquePersonIds.size === 0)) {
+    // Single speaker — just transcribe one source
+    return { strategy: "SINGLE_SPEAKER", speakerSources: [speakerSources[0]] };
+  }
+
+  if (wideSources.length > 0) {
+    // No speaker sources — use wide shot with diarization
+    return { strategy: "DIARIZE_WIDE", speakerSources: [wideSources[0]] };
+  }
+
+  throw new Error("No usable audio sources found for transcription");
+}
+
+/**
+ * Transcribe a single AssemblyAI source without speaker labels.
+ * Returns words with timestamps adjusted by syncOffsetMs.
+ */
+async function transcribeSingleSource(
+  source: VideoSourceRow,
+  personLabel: string,
+  progress: (event: ProgressEvent) => void,
+  apiKey?: string
+): Promise<{
+  words: WordTimestamp[];
+  segments: SpeakerSegment[];
+  text: string;
+  duration: number;
+}> {
+  if (!source.audioBlobUrl) {
+    throw new Error(`Source ${source.label} has no audio`);
+  }
+
+  // Download audio to temp file
+  const response = await fetch(source.audioBlobUrl);
+  if (!response.ok) throw new Error(`Failed to download audio for ${source.label}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const tempPath = await bufferToTempFile(buffer, "wav");
+
+  try {
+    const client = new AssemblyAI({ apiKey: apiKey || process.env.ASSEMBLYAI_API_KEY! });
+
+    progress({
+      stage: "uploading",
+      progress: 10,
+      message: `Uploading audio for ${personLabel}`,
+    });
+
+    const uploadUrl = await client.files.upload(tempPath);
+
+    progress({
+      stage: "transcribing",
+      progress: 30,
+      message: `Transcribing ${personLabel}`,
+    });
+
+    // No speaker labels — this is a single-person transcription
+    const transcript = await client.transcripts.submit({
+      audio_url: uploadUrl,
+      speaker_labels: false,
+      speech_models: ["universal-2"],
+    });
+
+    // Poll for completion
+    let status = transcript.status;
+    let pollCount = 0;
+    while (status !== "completed" && status !== "error") {
+      if (pollCount >= 300) throw new Error(`Transcription timed out for ${personLabel}`);
+      await new Promise((r) => setTimeout(r, 3000));
+      const polled = await client.transcripts.get(transcript.id);
+      status = polled.status;
+      pollCount++;
+
+      if (status === "processing") {
+        progress({
+          stage: "transcribing",
+          progress: Math.min(30 + pollCount * 2, 85),
+          message: `Transcribing ${personLabel}`,
+        });
+      }
+    }
+
+    const completed = await client.transcripts.get(transcript.id);
+    if (completed.status === "error") {
+      throw new Error(`Transcription failed for ${personLabel}: ${completed.error}`);
+    }
+
+    // Adjust timestamps by sync offset
+    const offsetSec = source.syncOffsetMs / 1000;
+
+    const words: WordTimestamp[] = (completed.words || []).map((w) => ({
+      word: w.text,
+      start: w.start / 1000 + offsetSec,
+      end: w.end / 1000 + offsetSec,
+      confidence: w.confidence,
+    }));
+
+    // Build a single segment for this entire speaker
+    const segments: SpeakerSegment[] =
+      words.length > 0 ? buildContiguousSegments(words, personLabel) : [];
+
+    return {
+      words,
+      segments,
+      text: completed.text || "",
+      duration: completed.audio_duration || 0,
+    };
+  } finally {
+    await cleanupTempFiles(tempPath);
+  }
+}
+
+/**
+ * Build contiguous speaker segments from words.
+ * Groups words that are close together (< 2s gap) into single segments.
+ */
+function buildContiguousSegments(
+  words: WordTimestamp[],
+  speakerLabel: string,
+  gapThreshold: number = 2.0
+): SpeakerSegment[] {
+  if (words.length === 0) return [];
+
+  const segments: SpeakerSegment[] = [];
+  let segStart = 0;
+
+  for (let i = 1; i < words.length; i++) {
+    if (words[i].start - words[i - 1].end > gapThreshold) {
+      segments.push({
+        speakerLabel,
+        startWordIndex: segStart,
+        endWordIndex: i,
+        startTime: words[segStart].start,
+        endTime: words[i - 1].end,
+      });
+      segStart = i;
+    }
+  }
+
+  // Final segment
+  segments.push({
+    speakerLabel,
+    startWordIndex: segStart,
+    endWordIndex: words.length,
+    startTime: words[segStart].start,
+    endTime: words[words.length - 1].end,
+  });
+
+  return segments;
+}
+
+/**
+ * Merge per-speaker transcription results into a unified timeline.
+ * Words are sorted by start time. Segments are rebuilt from the merged word list.
+ */
+function mergePerSpeakerResults(
+  results: Array<{
+    words: WordTimestamp[];
+    segments: SpeakerSegment[];
+    speakerLabel: string;
+  }>
+): { words: WordTimestamp[]; segments: SpeakerSegment[] } {
+  // Tag each word with its speaker
+  const taggedWords: Array<WordTimestamp & { speaker: string }> = [];
+  for (const result of results) {
+    for (const word of result.words) {
+      taggedWords.push({ ...word, speaker: result.speakerLabel });
+    }
+  }
+
+  // Sort by start time
+  taggedWords.sort((a, b) => a.start - b.start);
+
+  // Build unified word list and speaker segments
+  const words: WordTimestamp[] = taggedWords.map((w) => ({
+    word: w.word,
+    start: w.start,
+    end: w.end,
+    confidence: w.confidence,
+  }));
+
+  // Build segments from contiguous speaker runs
+  const segments: SpeakerSegment[] = [];
+  if (taggedWords.length > 0) {
+    let currentSpeaker = taggedWords[0].speaker;
+    let segStart = 0;
+
+    for (let i = 1; i < taggedWords.length; i++) {
+      if (taggedWords[i].speaker !== currentSpeaker) {
+        segments.push({
+          speakerLabel: currentSpeaker,
+          startWordIndex: segStart,
+          endWordIndex: i,
+          startTime: taggedWords[segStart].start,
+          endTime: taggedWords[i - 1].end,
+        });
+        currentSpeaker = taggedWords[i].speaker;
+        segStart = i;
+      }
+    }
+
+    // Final segment
+    segments.push({
+      speakerLabel: currentSpeaker,
+      startWordIndex: segStart,
+      endWordIndex: taggedWords.length,
+      startTime: taggedWords[segStart].start,
+      endTime: taggedWords[taggedWords.length - 1].end,
+    });
+  }
+
+  return { words, segments };
+}
+
+/**
+ * POST /api/transcribe-multicam
+ *
+ * Adaptive multicam transcription endpoint.
+ * Detects configuration and chooses optimal strategy.
+ * SSE progress streaming.
+ */
+router.post("/transcribe-multicam", jwtAuthMiddleware, async (req: Request, res: Response) => {
+  const { episodeId } = req.body;
+
+  if (!episodeId) {
+    res.status(400).json({ error: "episodeId is required" });
+    return;
+  }
+
+  const assemblyaiKey = process.env.ASSEMBLYAI_API_KEY;
+  if (!assemblyaiKey) {
+    res.status(500).json({ error: "ASSEMBLYAI_API_KEY not configured" });
+    return;
+  }
+
+  // SSE setup
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const progress = (event: ProgressEvent) => {
+    console.log(
+      `[multicam-transcribe] [${event.stage}] ${event.progress}% - ${event.message}${event.detail ? ` (${event.detail})` : ""}`
+    );
+    sendProgress(res, event);
+  };
+
+  try {
+    // Fetch video sources
+    const sources = await db
+      .select()
+      .from(videoSources)
+      .where(eq(videoSources.projectId, episodeId))
+      .orderBy(asc(videoSources.displayOrder));
+
+    if (sources.length === 0) {
+      res.write(`data: ${JSON.stringify({ stage: "error", error: "No video sources found" })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Detect strategy
+    const { strategy, speakerSources } = detectTranscriptionStrategy(sources);
+
+    progress({
+      stage: "detected",
+      progress: 5,
+      message: `Strategy: ${strategy}`,
+      detail: `${speakerSources.length} source(s) to transcribe`,
+    });
+
+    let words: WordTimestamp[] = [];
+    let segments: SpeakerSegment[] = [];
+    let totalDuration = 0;
+
+    if (strategy === "PER_SPEAKER") {
+      // Fetch person names for labels
+      const personIds = speakerSources.map((s) => s.personId).filter(Boolean) as string[];
+
+      const people = personIds.length > 0 ? await db.select().from(podcastPeople) : [];
+
+      const personNameMap = new Map(people.map((p) => [p.id, p.name]));
+
+      // Transcribe each speaker independently
+      const perSpeakerResults: Array<{
+        words: WordTimestamp[];
+        segments: SpeakerSegment[];
+        speakerLabel: string;
+      }> = [];
+
+      for (let i = 0; i < speakerSources.length; i++) {
+        const source = speakerSources[i];
+        const personLabel = source.personId
+          ? personNameMap.get(source.personId) || source.label
+          : source.label;
+
+        const baseProgress = 5 + (i / speakerSources.length) * 85;
+
+        const speakerProgress = (event: ProgressEvent) => {
+          progress({
+            ...event,
+            progress: Math.round(
+              baseProgress + (event.progress / 100) * (85 / speakerSources.length)
+            ),
+            message: `[${i + 1}/${speakerSources.length}] ${event.message}`,
+          });
+        };
+
+        const result = await transcribeSingleSource(
+          source,
+          personLabel,
+          speakerProgress,
+          assemblyaiKey
+        );
+
+        perSpeakerResults.push({
+          words: result.words,
+          segments: result.segments,
+          speakerLabel: personLabel,
+        });
+
+        totalDuration = Math.max(totalDuration, result.duration);
+      }
+
+      // Merge all speaker results
+      progress({
+        stage: "merging",
+        progress: 92,
+        message: "Merging speaker timelines",
+      });
+
+      const merged = mergePerSpeakerResults(perSpeakerResults);
+      words = merged.words;
+      segments = merged.segments;
+    } else if (strategy === "SINGLE_SPEAKER") {
+      const source = speakerSources[0];
+      const personLabel = source.label;
+
+      const result = await transcribeSingleSource(source, personLabel, progress, assemblyaiKey);
+
+      words = result.words;
+      segments = result.segments;
+      totalDuration = result.duration;
+    } else {
+      // DIARIZE_WIDE — use AssemblyAI with speaker diarization
+      const source = speakerSources[0];
+
+      if (!source.audioBlobUrl) {
+        throw new Error("Wide shot has no audio for transcription");
+      }
+
+      const response = await fetch(source.audioBlobUrl);
+      if (!response.ok) throw new Error("Failed to download wide shot audio");
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const tempPath = await bufferToTempFile(buffer, "wav");
+
+      try {
+        const result = await transcribeWithAssemblyAI(tempPath, progress, assemblyaiKey);
+
+        // Adjust timestamps by sync offset
+        const offsetSec = source.syncOffsetMs / 1000;
+        words = result.words.map((w) => ({
+          ...w,
+          start: w.start + offsetSec,
+          end: w.end + offsetSec,
+        }));
+        segments = result.segments.map((s) => ({
+          ...s,
+          startTime: s.startTime + offsetSec,
+          endTime: s.endTime + offsetSec,
+        }));
+        totalDuration = result.duration;
+      } finally {
+        await cleanupTempFiles(tempPath);
+      }
+    }
+
+    progress({
+      stage: "complete",
+      progress: 100,
+      message: "Multicam transcription complete",
+      detail: `${words.length} words, ${new Set(segments.map((s) => s.speakerLabel)).size} speakers`,
+    });
+
+    const responseData = {
+      stage: "result",
+      task: "transcribe",
+      language: "en",
+      duration: totalDuration,
+      text: words.map((w) => w.word).join(" "),
+      words,
+      segments,
+      service: "assemblyai",
+      strategy,
+    };
+
+    res.write(`data: ${JSON.stringify(responseData)}\n\n`);
+    res.end();
+  } catch (error) {
+    console.error("Multicam transcription error:", error);
+    res.write(`data: ${JSON.stringify({ stage: "error", error: (error as Error).message })}\n\n`);
+    res.end();
   }
 });
 

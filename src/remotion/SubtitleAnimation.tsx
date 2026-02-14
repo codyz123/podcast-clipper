@@ -21,22 +21,14 @@ export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({ words, con
     }
     return frame >= word.startFrame && frame <= word.endFrame;
   };
-  const getWordStart = (word: WordTiming) =>
-    typeof word.startTime === "number" ? word.startTime : word.startFrame / fps;
-
   const activeWordIndex = words.findIndex((word) => isWithinWord(word));
-  let currentWordIndex = activeWordIndex;
 
-  if (currentWordIndex === -1) {
-    const nextIndex = words.findIndex((word) => getWordStart(word) > currentTimeSeconds);
-    if (nextIndex > 0) {
-      currentWordIndex = nextIndex - 1;
-    } else if (nextIndex === 0) {
-      currentWordIndex = 0;
-    }
+  // No word is active — hide captions entirely during gaps
+  if (activeWordIndex === -1) {
+    return null;
   }
 
-  if (currentWordIndex === -1) currentWordIndex = 0;
+  const currentWordIndex = activeWordIndex;
 
   const groupStartIndex = Math.floor(currentWordIndex / wordsPerGroup) * wordsPerGroup;
   const currentGroup = words.slice(groupStartIndex, groupStartIndex + wordsPerGroup);

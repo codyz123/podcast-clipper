@@ -57,7 +57,7 @@ interface SubStageOption {
 const stageOptions: StageOption[] = [
   { id: "info", label: "Episode Info", icon: InfoCircledIcon },
   { id: "planning", label: "Planning", icon: Pencil1Icon },
-  { id: "production", label: "Production", icon: SpeakerLoudIcon },
+  { id: "production", label: "Production", icon: SpeakerLoudIcon, disabled: true },
   { id: "post-production", label: "Post", icon: MixerHorizontalIcon },
   { id: "distribution", label: "Distribution", icon: RocketIcon, disabled: true },
   { id: "marketing", label: "Marketing", icon: Share1Icon },
@@ -69,17 +69,16 @@ const planningSubStages: SubStageOption[] = [
   { id: "notes", label: "Notes", icon: FileTextIcon },
 ];
 
-const productionSubStages: SubStageOption[] = [
-  { id: "record", label: "Record", icon: SpeakerLoudIcon },
-];
+const productionSubStages: SubStageOption[] = [];
 
 const postProductionSubStages: SubStageOption[] = [
+  { id: "record", label: "Media", icon: SpeakerLoudIcon },
   { id: "transcript", label: "Transcribe", icon: TextIcon },
 ];
 
 const marketingSubStages: SubStageOption[] = [
   { id: "clips", label: "Clips", icon: ScissorsIcon },
-  { id: "editor", label: "Editor", icon: VideoIcon },
+  { id: "editor", label: "Clips Editor", icon: VideoIcon },
   { id: "text-content", label: "Text Content", icon: FileTextIcon },
   { id: "export", label: "Publish", icon: DownloadIcon },
 ];
@@ -439,41 +438,42 @@ export const AppShell: React.FC<AppShellProps> = ({
 
         {/* Right: Notifications + Account */}
         <div className="flex items-center gap-1">
-          {/* Stage Status Indicator - show dropdown for marketing, sub-step for others */}
-          {activeStage && activeStage !== "info" && (
-            <>
-              {activeStage === "marketing" && onMarketingSubStepStatusChange ? (
-                // Marketing pages show a dropdown with all marketing sub-steps
-                <StatusDropdown
-                  label="Marketing"
-                  items={STAGE_SUB_STEPS.marketing.map((subStepId) => {
-                    const subStepEntry = stageStatusWithSubSteps?.subSteps?.[subStepId];
-                    const status = (subStepEntry?.status as StageStatus) || "not-started";
-                    return {
-                      id: subStepId,
-                      label: SUB_STEP_LABELS[subStepId],
-                      status,
-                    };
-                  })}
-                  onStatusChange={onMarketingSubStepStatusChange}
-                />
-              ) : subStepId && onSubStepStatusClick ? (
-                <StageStatusIndicator
-                  status={subStepStatus || "not-started"}
-                  stageName={activeStage}
-                  displayName={SUB_STEP_LABELS[subStepId]}
-                  onClick={onSubStepStatusClick}
-                />
-              ) : onStageStatusClick ? (
-                <StageStatusIndicator
-                  status={stageStatus || "not-started"}
-                  stageName={activeStage}
-                  onClick={onStageStatusClick}
-                />
-              ) : null}
-              <div className="h-4 w-px bg-[hsl(var(--border-subtle))]" />
-            </>
-          )}
+          {/* Stage Status Indicator - show sub-step indicator, marketing dropdown, or stage indicator */}
+          {activeStage &&
+            activeStage !== "info" &&
+            !(activeStage === "marketing" && activeSubStage === "clips") && (
+              <>
+                {subStepId && onSubStepStatusClick ? (
+                  <StageStatusIndicator
+                    status={subStepStatus || "not-started"}
+                    stageName={activeStage}
+                    displayName={SUB_STEP_LABELS[subStepId]}
+                    onClick={onSubStepStatusClick}
+                  />
+                ) : activeStage === "marketing" && onMarketingSubStepStatusChange ? (
+                  <StatusDropdown
+                    label="Marketing"
+                    items={STAGE_SUB_STEPS.marketing.map((subStepId) => {
+                      const subStepEntry = stageStatusWithSubSteps?.subSteps?.[subStepId];
+                      const status = (subStepEntry?.status as StageStatus) || "not-started";
+                      return {
+                        id: subStepId,
+                        label: SUB_STEP_LABELS[subStepId],
+                        status,
+                      };
+                    })}
+                    onStatusChange={onMarketingSubStepStatusChange}
+                  />
+                ) : onStageStatusClick ? (
+                  <StageStatusIndicator
+                    status={stageStatus || "not-started"}
+                    stageName={activeStage}
+                    onClick={onStageStatusClick}
+                  />
+                ) : null}
+                <div className="h-4 w-px bg-[hsl(var(--border-subtle))]" />
+              </>
+            )}
 
           {/* Notifications */}
           <button

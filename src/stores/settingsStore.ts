@@ -107,13 +107,13 @@ interface SettingsState {
 }
 
 // Current settings version - increment when adding new required fields
-const SETTINGS_VERSION = 4;
+const SETTINGS_VERSION = 5;
 
 // Detect production environment and use appropriate backend URL
 const isProduction = window.location.hostname !== "localhost";
 const DEFAULT_BACKEND_URL = isProduction
   ? "https://podcastomatic-api-production.up.railway.app"
-  : "http://localhost:3001";
+  : "http://localhost:3002";
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -213,6 +213,14 @@ export const useSettingsStore = create<SettingsState>()(
     {
       name: "podcastomatic-settings",
       version: SETTINGS_VERSION,
+      onRehydrateStorage: () => {
+        return (state) => {
+          // Force-fix stale port 3001 URLs regardless of migration state
+          if (state && state.settings?.backendUrl === "http://localhost:3001") {
+            state.updateSettings({ backendUrl: DEFAULT_BACKEND_URL });
+          }
+        };
+      },
       migrate: (persistedState: any, version: number) => {
         let state = persistedState;
 
@@ -237,6 +245,20 @@ export const useSettingsStore = create<SettingsState>()(
               accessCode: state.settings?.accessCode || "podcast-friends",
             },
           };
+        }
+
+        // Migration v4 -> v5: update default backend port from 3001 to 3002
+        if (version < 5) {
+          const url = state.settings?.backendUrl;
+          if (url === "http://localhost:3001") {
+            state = {
+              ...state,
+              settings: {
+                ...state.settings,
+                backendUrl: DEFAULT_BACKEND_URL,
+              },
+            };
+          }
         }
 
         return state;

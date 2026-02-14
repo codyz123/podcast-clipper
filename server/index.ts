@@ -13,6 +13,7 @@ import { podcastPeopleRouter } from "./routes/podcast-people.js";
 import { textSnippetsRouter } from "./routes/text-snippets.js";
 import { generateSnippetRouter } from "./routes/generate-snippet.js";
 import { uploadsRouter } from "./routes/uploads.js";
+import { videoSourcesRouter } from "./routes/video-sources.js";
 import { youtubeUploadRouter } from "./routes/youtube-upload.js";
 import { instagramUploadRouter } from "./routes/instagram-upload.js";
 import { tiktokUploadRouter } from "./routes/tiktok-upload.js";
@@ -25,7 +26,7 @@ import { initializeMediaTables } from "./lib/media-storage.js";
 import { validateEnv } from "./utils/validateEnv.js";
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 // Middleware
 app.use(cors());
@@ -94,6 +95,9 @@ app.use("/api/podcasts", podcastPeopleRouter);
 
 // Multipart upload routes for large files (JWT auth handled internally)
 app.use("/api/podcasts", uploadsRouter);
+
+// Video source routes (JWT auth handled internally)
+app.use("/api/podcasts", videoSourcesRouter);
 
 // Text snippets routes - scoped to podcast (JWT auth handled internally)
 app.use("/api/podcasts", textSnippetsRouter);

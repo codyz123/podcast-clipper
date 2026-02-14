@@ -11,6 +11,33 @@ import {
 } from "../lib/types";
 import { generateId } from "../lib/utils";
 
+// ============ Active Transcript Persistence (localStorage) ============
+// Zustand's partialize only persists `projects` (not `currentProject`), and
+// episodes loaded via React Query never enter the `projects` array. So the
+// user's transcript selection is lost on navigation. This standalone map
+// bridges that gap with no database migration.
+
+const TRANSCRIPT_PREFS_KEY = "podcastomatic-active-transcripts";
+
+export function getPersistedTranscriptId(episodeId: string): string | undefined {
+  try {
+    const map = JSON.parse(localStorage.getItem(TRANSCRIPT_PREFS_KEY) || "{}");
+    return map[episodeId];
+  } catch {
+    return undefined;
+  }
+}
+
+function setPersistedTranscriptId(episodeId: string, transcriptId: string): void {
+  try {
+    const map = JSON.parse(localStorage.getItem(TRANSCRIPT_PREFS_KEY) || "{}");
+    map[episodeId] = transcriptId;
+    localStorage.setItem(TRANSCRIPT_PREFS_KEY, JSON.stringify(map));
+  } catch {
+    // Ignore localStorage errors (e.g., private browsing)
+  }
+}
+
 // Ensure a transcript always has segments — defaults to a single "Person 1" segment
 function ensureSegments(t: Transcript): Transcript {
   if (t.segments && t.segments.length > 0) return t;
@@ -27,6 +54,30 @@ function ensureSegments(t: Transcript): Transcript {
       },
     ],
   };
+}
+
+/**
+ * Re-derive clip words from the given transcript.
+ * Ensures clips always reflect the latest transcript edits.
+ */
+function reDeriveClipWords(clips: Clip[], transcript: Transcript): Clip[] {
+  if (!transcript.words?.length || !clips.length) return clips;
+  // Epsilon handles float precision mismatch between PostgreSQL real (32-bit)
+  // and JSONB doubles (64-bit) for clip boundary comparisons
+  const eps = 0.05;
+  return clips.map((clip) => {
+    const freshWords = transcript.words.filter(
+      (w) => w.start >= clip.startTime - eps && w.end <= clip.endTime + eps
+    );
+    if (freshWords.length > 0) {
+      return {
+        ...clip,
+        words: freshWords,
+        transcript: freshWords.map((w) => w.text).join(" "),
+      };
+    }
+    return clip;
+  });
 }
 
 // ============ One-time Migration: Rename from podcast-clipper to podcastomatic ============
@@ -482,6 +533,7 @@ interface ProjectState {
   deleteSegmentWithWords: (segmentIndex: number) => void;
 
   // Clip actions
+  refreshClipWords: () => void;
   addClip: (clip: Omit<Clip, "id" | "createdAt">) => Clip;
   updateClip: (clipId: string, updates: Partial<Clip>) => void;
   removeClip: (clipId: string) => void;
@@ -552,7 +604,9 @@ export const useProjectStore = create<ProjectState>()(
               const currentProject = get().currentProject;
               if (currentProject?.id === projectId && transcripts.length > 0) {
                 const activeId =
-                  currentProject.activeTranscriptId || transcripts[transcripts.length - 1].id;
+                  currentProject.activeTranscriptId ||
+                  getPersistedTranscriptId(projectId) ||
+                  transcripts[transcripts.length - 1].id;
                 const activeTranscript =
                   transcripts.find((t) => t.id === activeId) || transcripts[transcripts.length - 1];
 
@@ -635,6 +689,7 @@ export const useProjectStore = create<ProjectState>()(
             transcripts,
             activeTranscriptId: transcript.id,
           });
+          setPersistedTranscriptId(state.currentProject.id, transcript.id);
 
           // Persist to IndexedDB (async, fire-and-forget)
           saveTranscriptsToDB(state.currentProject.id, transcripts);
@@ -653,6 +708,7 @@ export const useProjectStore = create<ProjectState>()(
             activeTranscriptId: transcript.id,
             transcript, // Also set as legacy transcript
           });
+          setPersistedTranscriptId(state.currentProject.id, transcript.id);
 
           // Persist to IndexedDB (async, fire-and-forget)
           saveTranscriptsToDB(state.currentProject.id, transcripts);
@@ -665,6 +721,7 @@ export const useProjectStore = create<ProjectState>()(
 
           const transcript = state.currentProject.transcripts?.find((t) => t.id === transcriptId);
           if (transcript) {
+            setPersistedTranscriptId(state.currentProject.id, transcriptId);
             get().updateProject({
               activeTranscriptId: transcriptId,
               transcript, // Also set as legacy transcript
@@ -697,6 +754,10 @@ export const useProjectStore = create<ProjectState>()(
             activeTranscriptId,
             transcript,
           });
+
+          if (activeTranscriptId) {
+            setPersistedTranscriptId(state.currentProject.id, activeTranscriptId);
+          }
 
           // Persist to IndexedDB (async, fire-and-forget)
           saveTranscriptsToDB(state.currentProject.id, transcripts);
@@ -785,11 +846,15 @@ export const useProjectStore = create<ProjectState>()(
             // Persist to IndexedDB (async, fire-and-forget)
             saveTranscriptsToDB(projectId, transcripts);
 
+            // Re-derive clip words from the updated transcript
+            const updatedClips = reDeriveClipWords(state.currentProject.clips, updatedTranscript);
+
             return {
               currentProject: {
                 ...state.currentProject,
                 transcript: updatedTranscript,
                 transcripts,
+                clips: updatedClips,
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
@@ -798,6 +863,7 @@ export const useProjectStore = create<ProjectState>()(
                       ...p,
                       transcript: updatedTranscript,
                       transcripts,
+                      clips: updatedClips,
                       updatedAt: new Date().toISOString(),
                     }
                   : p
@@ -898,11 +964,14 @@ export const useProjectStore = create<ProjectState>()(
 
             saveTranscriptsToDB(projectId, transcripts);
 
+            const updatedClips = reDeriveClipWords(state.currentProject.clips, updatedTranscript);
+
             return {
               currentProject: {
                 ...state.currentProject,
                 transcript: updatedTranscript,
                 transcripts,
+                clips: updatedClips,
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
@@ -911,6 +980,7 @@ export const useProjectStore = create<ProjectState>()(
                       ...p,
                       transcript: updatedTranscript,
                       transcripts,
+                      clips: updatedClips,
                       updatedAt: new Date().toISOString(),
                     }
                   : p
@@ -982,11 +1052,14 @@ export const useProjectStore = create<ProjectState>()(
 
             saveTranscriptsToDB(projectId, transcripts);
 
+            const updatedClips = reDeriveClipWords(state.currentProject.clips, updatedTranscript);
+
             return {
               currentProject: {
                 ...state.currentProject,
                 transcript: updatedTranscript,
                 transcripts,
+                clips: updatedClips,
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
@@ -995,6 +1068,7 @@ export const useProjectStore = create<ProjectState>()(
                       ...p,
                       transcript: updatedTranscript,
                       transcripts,
+                      clips: updatedClips,
                       updatedAt: new Date().toISOString(),
                     }
                   : p
@@ -1058,11 +1132,14 @@ export const useProjectStore = create<ProjectState>()(
 
             saveTranscriptsToDB(projectId, transcripts);
 
+            const updatedClips = reDeriveClipWords(state.currentProject.clips, updatedTranscript);
+
             return {
               currentProject: {
                 ...state.currentProject,
                 transcript: updatedTranscript,
                 transcripts,
+                clips: updatedClips,
                 updatedAt: new Date().toISOString(),
               },
               projects: state.projects.map((p) =>
@@ -1071,9 +1148,34 @@ export const useProjectStore = create<ProjectState>()(
                       ...p,
                       transcript: updatedTranscript,
                       transcripts,
+                      clips: updatedClips,
                       updatedAt: new Date().toISOString(),
                     }
                   : p
+              ),
+            };
+          });
+        },
+
+        refreshClipWords: () => {
+          set((state) => {
+            if (!state.currentProject) return state;
+            const transcript = state.currentProject.activeTranscriptId
+              ? state.currentProject.transcripts?.find(
+                  (t) => t.id === state.currentProject!.activeTranscriptId
+                )
+              : state.currentProject.transcript;
+            if (!transcript?.words?.length || !state.currentProject.clips?.length) return state;
+            const updatedClips = reDeriveClipWords(state.currentProject.clips, transcript);
+            const changed = updatedClips.some((c, i) => c !== state.currentProject!.clips[i]);
+            if (!changed) return state;
+            return {
+              currentProject: {
+                ...state.currentProject,
+                clips: updatedClips,
+              },
+              projects: state.projects.map((p) =>
+                p.id === state.currentProject!.id ? { ...p, clips: updatedClips } : p
               ),
             };
           });
@@ -1255,7 +1357,7 @@ export const useProjectStore = create<ProjectState>()(
           for (const project of projects) {
             const transcripts = (await getTranscriptsFromDB(project.id)).map(ensureSegments);
             // Preserve the user's active transcript selection if it's still valid
-            const preferredId = project.activeTranscriptId;
+            const preferredId = project.activeTranscriptId || getPersistedTranscriptId(project.id);
             const activeTranscriptId =
               preferredId && transcripts.some((t) => t.id === preferredId)
                 ? preferredId

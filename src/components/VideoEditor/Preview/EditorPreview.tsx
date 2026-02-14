@@ -1,7 +1,15 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import Lottie from "lottie-react";
-import { Clip, VideoFormat, VideoTemplate, VIDEO_FORMATS, TrackClip } from "../../../lib/types";
+import {
+  Clip,
+  VideoFormat,
+  VideoTemplate,
+  VIDEO_FORMATS,
+  TrackClip,
+  PodcastPerson,
+  SpeakerNameFormat,
+} from "../../../lib/types";
 import { cn } from "../../../lib/utils";
+import { getMediaUrl } from "../../../lib/api";
 import { resolveFontFamily } from "../../../lib/fonts";
 import {
   resolveCaptionStyle,
@@ -9,53 +17,18 @@ import {
   toWordTimings,
   type CaptionStyle,
 } from "../../../lib/clipTransform";
-import { fetchLottieData } from "../../../services/assets/lottieService";
-
-// Component to render a single Lottie animation with lazy loading
-const LottieOverlay: React.FC<{ url: string }> = ({ url }) => {
-  const [animationData, setAnimationData] = useState<object | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    fetchLottieData(url).then((data) => {
-      if (mounted && data) {
-        setAnimationData(data);
-      }
-    });
-    return () => {
-      mounted = false;
-    };
-  }, [url]);
-
-  if (!animationData) return null;
-
-  return (
-    <Lottie animationData={animationData} loop={true} autoplay={true} className="h-full w-full" />
-  );
-};
-
-// Component to render GIF/WebP stickers (for GIPHY and Tenor)
-const StickerOverlay: React.FC<{ url: string }> = ({ url }) => {
-  return (
-    <img
-      src={url}
-      alt=""
-      className="h-full w-full object-contain"
-      style={{ pointerEvents: "none" }}
-    />
-  );
-};
-
-// Unified animation overlay that renders based on source type
-const AnimationOverlay: React.FC<{
-  url: string;
-  source?: "lottie" | "giphy" | "tenor";
-}> = ({ url, source = "lottie" }) => {
-  if (source === "giphy" || source === "tenor") {
-    return <StickerOverlay url={url} />;
-  }
-  return <LottieOverlay url={url} />;
-};
+import { findActiveWord } from "../../../lib/findActiveWord";
+import { MulticamPreview } from "./MulticamPreview";
+import { WaveformOverlay } from "../Overlays/WaveformOverlay";
+import { YouTubeCtaOverlay } from "../Overlays/YouTubeCtaOverlay";
+import { ApplePodcastsCtaOverlay } from "../Overlays/ApplePodcastsCtaOverlay";
+import type { VideoSource as EpisodeVideoSource } from "../../../hooks/useEpisodes";
+import type {
+  SpeakerSegmentLike,
+  LayoutMode,
+  PipPosition,
+  MulticamOverride,
+} from "../../../../shared/multicamTransform";
 
 // Snap points as percentages (0-100)
 const SNAP_POINTS = {
@@ -94,6 +67,22 @@ interface EditorPreviewProps {
   showFormatControls?: boolean;
   showFormatInfo?: boolean;
   showFrameDecorations?: boolean;
+  // Multicam video props
+  videoSources?: EpisodeVideoSource[];
+  segments?: SpeakerSegmentLike[];
+  layoutMode?: LayoutMode;
+  pipEnabled?: boolean;
+  pipPositions?: PipPosition[];
+  pipScale?: number;
+  defaultVideoSourceId?: string;
+  multicamOverrides?: MulticamOverride[];
+  transitionStyle?: "cut" | "crossfade";
+  // Speaker track props
+  speakerPeople?: PodcastPerson[];
+  speakerDisplayMode?: "fill" | "circle";
+  speakerNameFormat?: SpeakerNameFormat;
+  // Podcast metadata for Apple Podcasts CTA overlay
+  podcast?: { name: string; coverImageUrl?: string; author?: string; category?: string };
 }
 
 export const EditorPreview: React.FC<EditorPreviewProps> = ({
@@ -113,6 +102,19 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
   showFormatControls = true,
   showFormatInfo = true,
   showFrameDecorations = true,
+  videoSources,
+  segments,
+  layoutMode = "active-speaker",
+  pipEnabled = false,
+  pipPositions = [],
+  pipScale: multicamPipScale = 0.2,
+  defaultVideoSourceId,
+  multicamOverrides,
+  transitionStyle = "cut",
+  speakerPeople,
+  speakerDisplayMode = "fill",
+  speakerNameFormat = "full-name",
+  podcast,
 }) => {
   const formatConfig = VIDEO_FORMATS[format];
   const previewRef = useRef<HTMLDivElement>(null);
@@ -129,6 +131,16 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
     x: null,
     y: null,
   });
+  const [speakerPhotoFailed, setSpeakerPhotoFailed] = useState(false);
+
+  const formatSpeakerName = useCallback(
+    (name: string): string | null => {
+      if (speakerNameFormat === "off") return null;
+      if (speakerNameFormat === "first-name") return name.split(" ")[0];
+      return name; // "full-name"
+    },
+    [speakerNameFormat]
+  );
 
   const captionStyle: CaptionStyle | null = clip ? resolveCaptionStyle(clip) : null;
   const subtitleConfig = captionStyle ? toSubtitleConfig(captionStyle) : null;
@@ -142,37 +154,89 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
     [clip]
   );
 
-  // Get current words to display
+  // Map wordTimings to Word-compatible objects so findActiveWord can search them.
+  // This ensures activeWordIndex maps to wordTimings (not clip.words, which may
+  // differ if toWordTimings filters boundary words due to eps tolerance).
+  const wordTimingsAsWords = useMemo(
+    () =>
+      wordTimings.map((wt) => ({
+        text: wt.text,
+        start: wt.startTime,
+        end: wt.endTime,
+        confidence: 1,
+      })),
+    [wordTimings]
+  );
+
+  const activeWordIndex = useMemo(() => {
+    if (!clip || wordTimingsAsWords.length === 0) return -1;
+    return findActiveWord(wordTimingsAsWords, currentTime);
+  }, [clip, wordTimingsAsWords, currentTime]);
+
+  // Get current words to display (grouped for subtitle rendering)
   const getCurrentWords = () => {
-    if (!clip || wordTimings.length === 0) return [];
+    if (!clip || wordTimings.length === 0 || activeWordIndex < 0) return [];
 
-    const currentFrame = Math.round(currentTime * FPS);
     const wordsPerGroup = subtitleConfig?.wordsPerGroup || 4;
-
-    let currentWordIndex = wordTimings.findIndex(
-      (w) => currentFrame >= w.startFrame && currentFrame <= w.endFrame
-    );
-
-    if (currentWordIndex === -1) {
-      currentWordIndex = wordTimings.findIndex((w) => w.startFrame > currentFrame);
-      if (currentWordIndex > 0) currentWordIndex--;
-    }
-    if (currentWordIndex === -1) currentWordIndex = 0;
-
-    const groupStart = Math.floor(currentWordIndex / wordsPerGroup) * wordsPerGroup;
+    const groupStart = Math.floor(activeWordIndex / wordsPerGroup) * wordsPerGroup;
     return wordTimings.slice(groupStart, groupStart + wordsPerGroup);
   };
 
-  // Find the current active word for highlighting
-  const getActiveWordIndex = () => {
-    if (!clip || wordTimings.length === 0) return -1;
-    const currentFrame = Math.round(currentTime * FPS);
-    return wordTimings.findIndex((w) => currentFrame >= w.startFrame && currentFrame <= w.endFrame);
-  };
-
   const words = getCurrentWords();
-  const activeWordIndex = getActiveWordIndex();
   const bg = template.background;
+
+  // Speaker color palette (matches MultiTrackTimeline)
+  const SPEAKER_COLORS = [
+    "hsl(200 80% 50%)",
+    "hsl(340 80% 50%)",
+    "hsl(130 60% 45%)",
+    "hsl(40 90% 50%)",
+    "hsl(270 70% 55%)",
+    "hsl(15 80% 55%)",
+  ];
+
+  // Find the active speaker from the speaker track at current time
+  const activeSpeaker = useMemo(() => {
+    if (!clip?.tracks) return null;
+
+    const speakerTrack = clip.tracks.find((t) => t.type === "speaker");
+    if (!speakerTrack?.clips.length) return null;
+
+    // Find which clip is active at currentTime
+    const activeClip = speakerTrack.clips.find(
+      (c) => currentTime >= c.startTime && currentTime < c.startTime + c.duration
+    );
+    if (!activeClip?.assetId) return null;
+
+    const speakerLabel = activeClip.assetId;
+
+    // Build unique speaker labels in order to assign colors
+    const labels: string[] = [];
+    for (const c of speakerTrack.clips) {
+      if (c.assetId && !labels.includes(c.assetId)) {
+        labels.push(c.assetId);
+      }
+    }
+    const speakerIndex = labels.indexOf(speakerLabel);
+    const color = SPEAKER_COLORS[speakerIndex % SPEAKER_COLORS.length];
+
+    // Look up person by speakerId (stored in assetUrl)
+    const person =
+      activeClip.assetUrl && speakerPeople
+        ? (speakerPeople.find((p) => p.id === activeClip.assetUrl) ?? null)
+        : null;
+
+    return {
+      label: person?.name || speakerLabel,
+      photoUrl: person?.photoUrl || null,
+      color,
+    };
+  }, [clip?.tracks, currentTime, speakerPeople]);
+
+  // Reset photo error state when speaker changes
+  useEffect(() => {
+    setSpeakerPhotoFailed(false);
+  }, [activeSpeaker?.photoUrl]);
 
   // Get active animation clips (currently visible based on currentTime)
   const activeAnimations = useMemo((): TrackClip[] => {
@@ -185,7 +249,7 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
       for (const trackClip of track.clips) {
         if (
           trackClip.type === "animation" &&
-          trackClip.assetUrl &&
+          (trackClip.assetUrl || trackClip.assetSource) &&
           currentTime >= trackClip.startTime &&
           currentTime < trackClip.startTime + trackClip.duration
         ) {
@@ -196,6 +260,13 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
 
     return animations;
   }, [clip?.tracks, currentTime]);
+
+  // Determine if someone is currently speaking (for waveform overlay)
+  const isSpeaking = useMemo(() => {
+    if (!clip?.words?.length) return false;
+    const absoluteTime = clip.startTime + currentTime;
+    return clip.words.some((w) => absoluteTime >= w.start && absoluteTime <= w.end);
+  }, [clip?.words, clip?.startTime, currentTime]);
 
   // Calculate preview dimensions to fit container while maintaining aspect ratio
   const previewMaxHeight = 380;
@@ -223,8 +294,12 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
 
   const resolvedPreviewScale = previewHeight / formatConfig.height;
 
+  const isMulticam = videoSources && videoSources.length > 0;
+
   const backgroundStyle: React.CSSProperties = {};
-  if (bg.type === "solid") {
+  if (isMulticam) {
+    backgroundStyle.backgroundColor = "#000";
+  } else if (bg.type === "solid") {
     backgroundStyle.backgroundColor = bg.color;
   } else if (bg.type === "gradient") {
     backgroundStyle.background = `linear-gradient(${bg.gradientDirection || 135}deg, ${bg.gradientColors?.join(", ")})`;
@@ -395,6 +470,156 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
           </div>
         ) : (
           <>
+            {/* Multicam video background layer */}
+            {videoSources && videoSources.length > 0 && (
+              <MulticamPreview
+                videoSources={videoSources.map((s) => ({
+                  id: s.id,
+                  label: s.label,
+                  personId: s.personId ?? null,
+                  sourceType: s.sourceType,
+                  syncOffsetMs: s.syncOffsetMs,
+                  cropOffsetX: s.cropOffsetX,
+                  cropOffsetY: s.cropOffsetY,
+                  width: s.width ?? null,
+                  height: s.height ?? null,
+                  displayOrder: s.displayOrder,
+                  proxyBlobUrl: s.proxyBlobUrl,
+                }))}
+                segments={segments || []}
+                currentTime={currentTime}
+                clipStartTime={clip.startTime}
+                width={previewWidth}
+                height={previewHeight}
+                layoutMode={layoutMode}
+                pipEnabled={pipEnabled}
+                pipPositions={pipPositions}
+                pipScale={multicamPipScale}
+                defaultVideoSourceId={defaultVideoSourceId}
+                overrides={multicamOverrides}
+                transitionStyle={transitionStyle}
+              />
+            )}
+
+            {/* Active speaker overlay (from speaker track) */}
+            {activeSpeaker && !isMulticam && (
+              <div className="absolute inset-0">
+                {speakerDisplayMode === "circle" ? (
+                  // Circle cutout mode
+                  <div className="flex h-full w-full flex-col items-center justify-center">
+                    {activeSpeaker.photoUrl && !speakerPhotoFailed ? (
+                      <div
+                        className="overflow-hidden rounded-full"
+                        style={{
+                          width: Math.min(previewWidth, previewHeight) * 0.55,
+                          height: Math.min(previewWidth, previewHeight) * 0.55,
+                        }}
+                      >
+                        <img
+                          src={getMediaUrl(activeSpeaker.photoUrl)}
+                          alt={activeSpeaker.label}
+                          className="h-full w-full object-cover"
+                          onError={() => setSpeakerPhotoFailed(true)}
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        className="flex items-center justify-center rounded-full"
+                        style={{
+                          width: Math.min(previewWidth, previewHeight) * 0.55,
+                          height: Math.min(previewWidth, previewHeight) * 0.55,
+                          backgroundColor: `${activeSpeaker.color}30`,
+                        }}
+                      >
+                        <span
+                          className="font-bold"
+                          style={{
+                            fontSize: Math.min(previewWidth, previewHeight) * 0.18,
+                            color: activeSpeaker.color,
+                          }}
+                        >
+                          {activeSpeaker.label.slice(0, 2).toUpperCase()}
+                        </span>
+                      </div>
+                    )}
+                    {formatSpeakerName(activeSpeaker.label) && (
+                      <span
+                        className="mt-2 font-semibold"
+                        style={{
+                          fontSize: Math.max(10, Math.min(previewWidth, previewHeight) * 0.06),
+                          color: activeSpeaker.color,
+                        }}
+                      >
+                        {formatSpeakerName(activeSpeaker.label)}
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  // Fill mode (default)
+                  <>
+                    {activeSpeaker.photoUrl && !speakerPhotoFailed ? (
+                      <>
+                        <img
+                          src={getMediaUrl(activeSpeaker.photoUrl)}
+                          alt={activeSpeaker.label}
+                          className="h-full w-full object-cover"
+                          onError={() => setSpeakerPhotoFailed(true)}
+                        />
+                        {formatSpeakerName(activeSpeaker.label) && (
+                          <div
+                            className="absolute bottom-8 left-1/2 -translate-x-1/2 rounded-full px-3 py-1"
+                            style={{ backgroundColor: `${activeSpeaker.color}CC` }}
+                          >
+                            <span
+                              className="text-xs font-semibold whitespace-nowrap text-white"
+                              style={{ fontSize: Math.max(10, previewHeight * 0.035) }}
+                            >
+                              {formatSpeakerName(activeSpeaker.label)}
+                            </span>
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div
+                        className="flex h-full w-full flex-col items-center justify-center"
+                        style={{ backgroundColor: `${activeSpeaker.color}20` }}
+                      >
+                        <div
+                          className="flex items-center justify-center rounded-full"
+                          style={{
+                            width: Math.min(previewWidth, previewHeight) * 0.5,
+                            height: Math.min(previewWidth, previewHeight) * 0.5,
+                            backgroundColor: `${activeSpeaker.color}30`,
+                          }}
+                        >
+                          <span
+                            className="font-bold"
+                            style={{
+                              fontSize: Math.min(previewWidth, previewHeight) * 0.18,
+                              color: activeSpeaker.color,
+                            }}
+                          >
+                            {activeSpeaker.label.slice(0, 2).toUpperCase()}
+                          </span>
+                        </div>
+                        {formatSpeakerName(activeSpeaker.label) && (
+                          <span
+                            className="mt-2 font-medium"
+                            style={{
+                              fontSize: Math.min(previewWidth, previewHeight) * 0.06,
+                              color: activeSpeaker.color,
+                            }}
+                          >
+                            {formatSpeakerName(activeSpeaker.label)}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Snap guides (shown while dragging) */}
             {isDragging && (
               <>
@@ -468,70 +693,78 @@ export const EditorPreview: React.FC<EditorPreviewProps> = ({
                       height: 200 * resolvedPreviewScale,
                     }}
                   >
-                    <AnimationOverlay url={anim.assetUrl!} source={anim.assetSource} />
+                    {anim.assetSource === "waveform" ? (
+                      <WaveformOverlay isActive={isSpeaking} />
+                    ) : anim.assetSource === "youtube-cta" ? (
+                      <YouTubeCtaOverlay />
+                    ) : anim.assetSource === "apple-podcasts-cta" ? (
+                      <ApplePodcastsCtaOverlay podcast={podcast} />
+                    ) : null}
                   </div>
                 </div>
               );
             })}
 
-            {/* Subtitle - draggable when captions track selected */}
-            <div
-              className={cn(
-                "absolute flex items-center justify-center px-4",
-                isCaptionsTrackSelected && "cursor-move"
-              )}
-              style={{
-                left: `${displayPositionX}%`,
-                top: `${displayPositionY}%`,
-                transform: "translate(-50%, -50%)",
-                width: "90%",
-                maxWidth: "90%",
-              }}
-              onMouseDown={handleCaptionDragStart}
-            >
+            {/* Subtitle - hidden when no active word, draggable when captions track selected */}
+            {words.length > 0 && (
               <div
                 className={cn(
-                  "",
-                  isCaptionsTrackSelected && isDraggingCaption && "ring-2 ring-[hsl(var(--cyan))]"
+                  "absolute flex items-center justify-center px-4",
+                  isCaptionsTrackSelected && "cursor-move"
                 )}
                 style={{
-                  backgroundColor: subtitleConfig?.backgroundColor || undefined,
-                  padding: `${4 * resolvedPreviewScale}px ${8 * resolvedPreviewScale}px`,
-                  borderRadius: `${4 * resolvedPreviewScale}px`,
+                  left: `${displayPositionX}%`,
+                  top: `${displayPositionY}%`,
+                  transform: "translate(-50%, -50%)",
+                  width: "90%",
+                  maxWidth: "90%",
                 }}
+                onMouseDown={handleCaptionDragStart}
               >
-                <p
+                <div
+                  className={cn(
+                    "",
+                    isCaptionsTrackSelected && isDraggingCaption && "ring-2 ring-[hsl(var(--cyan))]"
+                  )}
                   style={{
-                    fontFamily: resolveFontFamily(subtitleConfig?.fontFamily),
-                    fontSize: `${(subtitleConfig?.fontSize || 36) * resolvedPreviewScale}px`,
-                    fontWeight: subtitleConfig?.fontWeight || 600,
-                    lineHeight: 1.2,
-                    textAlign: "center",
-                    WebkitFontSmoothing: "antialiased",
-                    MozOsxFontSmoothing: "grayscale",
-                    textRendering: "geometricPrecision",
+                    backgroundColor: subtitleConfig?.backgroundColor || undefined,
+                    padding: `${4 * resolvedPreviewScale}px ${8 * resolvedPreviewScale}px`,
+                    borderRadius: `${4 * resolvedPreviewScale}px`,
                   }}
                 >
-                  {words.map((w, i) => {
-                    const globalIndex = wordTimings.indexOf(w);
-                    const isActive = globalIndex === activeWordIndex;
-                    return (
-                      <span
-                        key={i}
-                        style={{
-                          color: isActive
-                            ? subtitleConfig?.highlightColor || subtitleConfig?.color || "#FFD700"
-                            : subtitleConfig?.color || "#FFFFFF",
-                        }}
-                      >
-                        {w.text}
-                        {i < words.length - 1 ? " " : ""}
-                      </span>
-                    );
-                  })}
-                </p>
+                  <p
+                    style={{
+                      fontFamily: resolveFontFamily(subtitleConfig?.fontFamily),
+                      fontSize: `${(subtitleConfig?.fontSize || 36) * resolvedPreviewScale}px`,
+                      fontWeight: subtitleConfig?.fontWeight || 600,
+                      lineHeight: 1.2,
+                      textAlign: "center",
+                      WebkitFontSmoothing: "antialiased",
+                      MozOsxFontSmoothing: "grayscale",
+                      textRendering: "geometricPrecision",
+                    }}
+                  >
+                    {words.map((w, i) => {
+                      const globalIndex = wordTimings.indexOf(w);
+                      const isActive = globalIndex === activeWordIndex;
+                      return (
+                        <span
+                          key={i}
+                          style={{
+                            color: isActive
+                              ? subtitleConfig?.highlightColor || subtitleConfig?.color || "#FFD700"
+                              : subtitleConfig?.color || "#FFFFFF",
+                          }}
+                        >
+                          {w.text}
+                          {i < words.length - 1 ? " " : ""}
+                        </span>
+                      );
+                    })}
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Drag hint when captions track selected */}
             {showUiOverlays && isCaptionsTrackSelected && !isDragging && (

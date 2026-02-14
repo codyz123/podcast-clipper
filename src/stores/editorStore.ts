@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { Track, HookAnalysis, VisualSuggestion, CaptionStyle, CAPTION_PRESETS } from "../lib/types";
+import type { LayoutMode, PipPosition } from "../../shared/multicamTransform";
 import { generateId } from "../lib/utils";
 
 // Editor snapshot for undo/redo
@@ -40,6 +41,15 @@ interface EditorState {
   undoStack: EditorSnapshot[];
   redoStack: EditorSnapshot[];
 
+  // Multicam state
+  layoutMode: LayoutMode;
+  pipEnabled: boolean;
+  pipScale: number;
+  pipPositions: PipPosition[];
+  transitionStyle: "cut" | "crossfade";
+  transitionDurationFrames: number;
+  soloSourceId: string | null;
+
   // Dragging state
   isDragging: boolean;
   dragTarget: { type: "clip" | "handle"; clipId: string; handle?: "start" | "end" } | null;
@@ -77,6 +87,15 @@ interface EditorState {
   redo: () => EditorSnapshot | null;
   clearHistory: () => void;
 
+  // Multicam actions
+  setLayoutMode: (mode: LayoutMode) => void;
+  setPipEnabled: (enabled: boolean) => void;
+  setPipScale: (scale: number) => void;
+  setPipPositions: (positions: PipPosition[]) => void;
+  setTransitionStyle: (style: "cut" | "crossfade") => void;
+  setTransitionDurationFrames: (frames: number) => void;
+  setSoloSourceId: (sourceId: string | null) => void;
+
   // Drag actions
   startDrag: (target: {
     type: "clip" | "handle";
@@ -107,6 +126,13 @@ const INITIAL_STATE = {
   redoStack: [],
   isDragging: false,
   dragTarget: null,
+  layoutMode: "active-speaker" as LayoutMode,
+  pipEnabled: false,
+  pipScale: 0.2,
+  pipPositions: [],
+  transitionStyle: "cut" as const,
+  transitionDurationFrames: 3,
+  soloSourceId: null,
 };
 
 const MAX_UNDO_STACK = 50;
@@ -260,6 +286,16 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
     set({ undoStack: [], redoStack: [] });
   },
 
+  // Multicam
+  setLayoutMode: (mode) => set({ layoutMode: mode }),
+  setPipEnabled: (enabled) => set({ pipEnabled: enabled }),
+  setPipScale: (scale) => set({ pipScale: Math.max(0.1, Math.min(0.4, scale)) }),
+  setPipPositions: (positions) => set({ pipPositions: positions }),
+  setTransitionStyle: (style) => set({ transitionStyle: style }),
+  setTransitionDurationFrames: (frames) =>
+    set({ transitionDurationFrames: Math.max(0, Math.min(15, frames)) }),
+  setSoloSourceId: (sourceId) => set({ soloSourceId: sourceId }),
+
   // Drag state
   startDrag: (target) => {
     set({ isDragging: true, dragTarget: target });
@@ -315,8 +351,8 @@ export function createDefaultTracks(clipStartTime: number, clipEndTime: number):
     },
     {
       id: generateId(),
-      type: "video-overlay",
-      name: "Video",
+      type: "background",
+      name: "Background",
       order: 2,
       locked: false,
       muted: false,

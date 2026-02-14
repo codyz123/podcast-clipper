@@ -32,6 +32,14 @@ export interface Project {
   // Stage and sub-step status tracking
   stageStatus?: StageStatusWithSubSteps;
 
+  // Video support
+  mediaType?: "audio" | "video";
+  defaultVideoSourceId?: string;
+  primaryAudioSourceId?: string;
+  mixedAudioBlobUrl?: string;
+  videoSyncStatus?: "pending" | "syncing" | "synced" | "failed";
+  videoSources?: VideoSource[];
+
   // Legacy: single transcript (for backward compatibility)
   transcript?: Transcript;
   // New: multiple transcripts per file
@@ -113,6 +121,9 @@ export interface Clip {
   subtitle?: SubtitleConfig;
   generatedAssets?: GeneratedAsset[];
   hookAnalysis?: HookAnalysis;
+
+  // Multicam layout (video podcasts)
+  multicamLayout?: MulticamLayout;
 }
 
 export interface ClippabilityScore {
@@ -324,6 +335,57 @@ export interface TwitterApiKeys {
   accessTokenSecret: string;
 }
 
+// ============ Video Source Types ============
+
+export type VideoSourceType = "speaker" | "wide" | "broll";
+
+export interface VideoSource {
+  id: string;
+  projectId: string;
+  label: string;
+  personId?: string;
+  sourceType: VideoSourceType;
+  videoBlobUrl: string;
+  proxyBlobUrl?: string;
+  audioBlobUrl?: string;
+  thumbnailStripUrl?: string;
+  fileName: string;
+  contentType?: string;
+  sizeBytes?: number;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  syncOffsetMs: number;
+  syncMethod?: "duration-match" | "audio-correlation" | "manual";
+  syncConfidence?: number;
+  cropOffsetX: number;
+  cropOffsetY: number;
+  audioFingerprint?: string;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MulticamLayout {
+  mode: "active-speaker" | "side-by-side" | "grid" | "solo";
+  pipEnabled: boolean;
+  pipScale: number; // 0.15-0.3
+  pipPositions: Array<{
+    videoSourceId: string;
+    positionX: number;
+    positionY: number;
+  }>;
+  overrides: Array<{
+    startTime: number;
+    endTime: number;
+    activeVideoSourceId: string;
+  }>;
+  transitionStyle: "cut" | "crossfade";
+  transitionDurationFrames: number; // default 3 for crossfade
+  soloSourceId?: string; // which source to lock to in 'solo' mode
+}
+
 // ============ Multi-Track Editor Types ============
 
 export type TrackType =
@@ -332,7 +394,12 @@ export type TrackType =
   | "sfx" // Sound effects
   | "video-overlay" // B-roll, animations, AI-generated visuals
   | "text-graphics" // Lower thirds, titles, callouts
-  | "captions"; // Auto-generated animated captions
+  | "captions" // Auto-generated animated captions
+  | "multicam" // Multicam switching track (video podcasts)
+  | "speaker" // Speaker diarization track (who's talking when)
+  | "background"; // Background color/visual layer
+
+export type SpeakerNameFormat = "off" | "first-name" | "full-name";
 
 export interface Track {
   id: string;
@@ -346,6 +413,10 @@ export interface Track {
   clips: TrackClip[];
   // For caption tracks
   captionStyle?: CaptionStyle;
+  // For speaker tracks
+  speakerDisplayMode?: "fill" | "circle"; // How the speaker is rendered
+  showSpeakerName?: boolean; // Whether to show the name label (legacy, use speakerNameFormat)
+  speakerNameFormat?: SpeakerNameFormat;
   // Fade settings (applied to entire track)
   fadeIn?: number; // Duration in seconds
   fadeOut?: number; // Duration in seconds
@@ -363,7 +434,14 @@ export interface TrackClip {
   type: "audio" | "video" | "image" | "animation" | "text" | "caption";
   assetId?: string; // Reference to asset in IndexedDB
   assetUrl?: string; // URL for external assets (b-roll, etc.)
-  assetSource?: "lottie" | "giphy" | "tenor"; // Source of animation asset
+  assetSource?:
+    | "lottie"
+    | "giphy"
+    | "tenor"
+    | "waveform"
+    | "youtube-cta"
+    | "apple-podcasts-cta"
+    | "override";
   animationConfig?: AnimationConfig;
   textConfig?: TextOverlayConfig;
 

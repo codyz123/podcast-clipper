@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { PlusIcon } from "@radix-ui/react-icons";
 import {
   type PublishDestinationType,
@@ -6,6 +6,7 @@ import {
   DEFAULT_DESTINATIONS,
 } from "../../lib/publish";
 import { usePublishStore } from "../../stores/publishStore";
+import { useProjectStore } from "../../stores/projectStore";
 import { useDropdown } from "../../hooks/useDropdown";
 import { PlatformIcon } from "./PlatformIcon";
 import { cn } from "../../lib/utils";
@@ -17,9 +18,32 @@ interface AddPostButtonProps {
 export const AddPostButton: React.FC<AddPostButtonProps> = ({ disabled = false }) => {
   const { isOpen, close, containerRef, triggerProps, menuProps, getItemProps } = useDropdown();
   const createPost = usePublishStore((s) => s.createPost);
+  const setPostDescription = usePublishStore((s) => s.setPostDescription);
+  const currentProject = useProjectStore((s) => s.currentProject);
+
+  // Build speaker attribution line for video episodes
+  const speakerAttribution = useMemo(() => {
+    if (currentProject?.mediaType !== "video" || !currentProject.videoSources?.length) return null;
+    const speakerNames = [
+      ...new Set(
+        currentProject.videoSources
+          .filter((s) => s.sourceType === "speaker" && s.label)
+          .map((s) => s.label)
+      ),
+    ];
+    if (speakerNames.length === 0) return null;
+    return `Featuring: ${speakerNames.join(", ")}`;
+  }, [currentProject?.mediaType, currentProject?.videoSources]);
 
   const handleSelect = (destination: PublishDestinationType) => {
-    createPost(destination);
+    const post = createPost(destination);
+    // Auto-populate description with speaker names for video episodes (YouTube)
+    if (speakerAttribution && !post.description) {
+      const config = PLATFORM_CONFIGS[destination];
+      if (config.descriptionMaxLength) {
+        setPostDescription(post.id, speakerAttribution);
+      }
+    }
     close();
   };
 

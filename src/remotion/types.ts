@@ -7,7 +7,7 @@ export interface TrackClipData {
   startFrame: number;
   durationFrames: number;
   assetUrl?: string;
-  assetSource?: "lottie" | "giphy" | "tenor";
+  assetSource?: "lottie" | "giphy" | "tenor" | "waveform" | "youtube-cta" | "apple-podcasts-cta";
   positionX?: number; // 0-100, default 50
   positionY?: number; // 0-100, default 50
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -32,6 +32,7 @@ export interface ClipVideoProps {
   durationInFrames: number;
   fps: number;
   tracks?: TrackData[]; // Animation and overlay tracks
+  podcast?: { name: string; coverImageUrl?: string; author?: string; category?: string };
 }
 
 export interface WordTiming {
@@ -46,4 +47,39 @@ export interface SubtitleGroupProps {
   words: WordTiming[];
   config: SubtitleConfig;
   currentFrame: number;
+}
+
+// ============ Multicam Types ============
+
+export interface MulticamVideoSource {
+  id: string;
+  label: string;
+  videoUrl: string;
+  syncOffsetMs: number;
+  sourceType: string;
+  cropOffsetX: number;
+  cropOffsetY: number;
+  width: number;
+  height: number;
+}
+
+export interface MulticamClipVideoProps extends ClipVideoProps {
+  videoSources: MulticamVideoSource[];
+  switchingTimeline: Array<{
+    startFrame: number;
+    endFrame: number;
+    videoSourceId: string;
+  }>;
+  layoutMode: "active-speaker" | "side-by-side" | "grid" | "solo";
+  pipEnabled: boolean;
+  pipPositions: Array<{
+    videoSourceId: string;
+    positionX: number;
+    positionY: number;
+  }>;
+  pipScale: number;
+  soloSourceId?: string;
+  clipStartTimeSeconds: number;
+  transitionStyle: "cut" | "crossfade";
+  transitionDurationFrames: number;
 }

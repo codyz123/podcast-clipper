@@ -6,12 +6,29 @@ import {
   LockOpen1Icon,
   VideoIcon,
   TextIcon,
+  PersonIcon,
   ChevronDownIcon,
   ChevronRightIcon,
 } from "@radix-ui/react-icons";
-import { Track, TrackType, Word } from "../../../lib/types";
+import { Track, TrackType, Word, PodcastPerson } from "../../../lib/types";
 import { cn } from "../../../lib/utils";
 import { formatTimestamp } from "../../../lib/formats";
+import { getMediaUrl } from "../../../lib/api";
+
+// Speaker color palette for multicam track segments
+const SPEAKER_COLORS = [
+  { bg: "hsl(200 80% 50%/0.3)", border: "hsl(200 80% 50%)", text: "hsl(200 80% 70%)" },
+  { bg: "hsl(340 80% 50%/0.3)", border: "hsl(340 80% 50%)", text: "hsl(340 80% 70%)" },
+  { bg: "hsl(130 60% 45%/0.3)", border: "hsl(130 60% 45%)", text: "hsl(130 60% 65%)" },
+  { bg: "hsl(40 90% 50%/0.3)", border: "hsl(40 90% 50%)", text: "hsl(40 90% 70%)" },
+  { bg: "hsl(270 70% 55%/0.3)", border: "hsl(270 70% 55%)", text: "hsl(270 70% 70%)" },
+  { bg: "hsl(15 80% 55%/0.3)", border: "hsl(15 80% 55%)", text: "hsl(15 80% 70%)" },
+];
+
+interface VideoSourceInfo {
+  id: string;
+  label: string;
+}
 
 interface MultiTrackTimelineProps {
   tracks: Track[];
@@ -26,6 +43,9 @@ interface MultiTrackTimelineProps {
   onSelectClip: (clipId: string | null) => void;
   words?: Word[]; // Words for caption visualization
   clipStartTime?: number; // Start time of the clip in the full audio
+  videoSources?: VideoSourceInfo[]; // Video sources for multicam track labels
+  speakerPeople?: PodcastPerson[]; // Podcast people for speaker track avatars
+  onDoubleClickTrack?: (trackId: string, timeInClip: number) => void;
 }
 
 // Track type icons and colors
@@ -69,6 +89,24 @@ const TRACK_CONFIG: Record<
     bgColor: "hsl(var(--text)/0.15)",
     fadeColor: "hsl(var(--text)/0.3)",
   },
+  multicam: {
+    icon: VideoIcon,
+    color: "hsl(280 100% 65%)",
+    bgColor: "hsl(280 100% 65%/0.2)",
+    fadeColor: "hsl(280 100% 65%/0.4)",
+  },
+  speaker: {
+    icon: PersonIcon,
+    color: "hsl(185 60% 50%)",
+    bgColor: "hsl(185 60% 50%/0.2)",
+    fadeColor: "hsl(185 60% 50%/0.4)",
+  },
+  background: {
+    icon: VideoIcon,
+    color: "hsl(var(--text-muted))",
+    bgColor: "hsl(var(--text-muted)/0.15)",
+    fadeColor: "hsl(var(--text-muted)/0.3)",
+  },
 };
 
 const TRACK_HEIGHT_COLLAPSED = 40;
@@ -92,6 +130,9 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
   onSelectClip,
   words = [],
   clipStartTime = 0,
+  videoSources,
+  speakerPeople,
+  onDoubleClickTrack,
 }) => {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [draggingFade, setDraggingFade] = useState<{
@@ -109,11 +150,77 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
     originalStartTime: number;
   } | null>(null);
 
+  // Ref for tracking edge resize (speaker track)
+  const resizingEdgeRef = useRef(false);
+
   // Get words that fall within the clip duration (for caption visualization)
   const clipWords = useMemo(() => {
     const clipEndTime = clipStartTime + clipDuration;
     return words.filter((w) => w.start >= clipStartTime && w.end <= clipEndTime);
   }, [words, clipStartTime, clipDuration]);
+
+  // Build a color map for multicam source IDs and speaker labels
+  const sourceColorMap = useMemo(() => {
+    const map = new Map<string, (typeof SPEAKER_COLORS)[0]>();
+    if (videoSources) {
+      videoSources.forEach((s, i) => {
+        map.set(s.id, SPEAKER_COLORS[i % SPEAKER_COLORS.length]);
+      });
+    }
+    // Also assign colors to unique speaker labels from speaker tracks
+    const speakerLabels = new Set<string>();
+    for (const track of tracks) {
+      if (track.type === "speaker") {
+        for (const clip of track.clips) {
+          if (clip.assetId && !map.has(clip.assetId)) {
+            speakerLabels.add(clip.assetId);
+          }
+        }
+      }
+    }
+    let colorIdx = videoSources?.length ?? 0;
+    for (const label of speakerLabels) {
+      map.set(label, SPEAKER_COLORS[colorIdx % SPEAKER_COLORS.length]);
+      colorIdx++;
+    }
+    return map;
+  }, [videoSources, tracks]);
+
+  const sourceLabelMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (videoSources) {
+      videoSources.forEach((s) => map.set(s.id, s.label));
+    }
+    // Add speaker labels (assetId is the speaker label itself for speaker tracks)
+    for (const track of tracks) {
+      if (track.type === "speaker") {
+        for (const clip of track.clips) {
+          if (clip.assetId && !map.has(clip.assetId)) {
+            map.set(clip.assetId, clip.assetId);
+          }
+        }
+      }
+    }
+    return map;
+  }, [videoSources, tracks]);
+
+  // Build a map from speaker clip IDs to their PodcastPerson (for photos)
+  // Uses the speakerId stored in assetUrl for direct lookup
+  const speakerPersonMap = useMemo(() => {
+    const map = new Map<string, PodcastPerson>();
+    if (!speakerPeople?.length) return map;
+
+    for (const track of tracks) {
+      if (track.type !== "speaker") continue;
+      for (const clip of track.clips) {
+        if (clip.assetUrl && clip.assetId && !map.has(clip.assetId)) {
+          const person = speakerPeople.find((p) => p.id === clip.assetUrl);
+          if (person) map.set(clip.assetId, person);
+        }
+      }
+    }
+    return map;
+  }, [tracks, speakerPeople]);
 
   // Calculate timeline width based on duration and zoom
   const timelineWidth = Math.max(clipDuration * zoomLevel, 400);
@@ -321,6 +428,71 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
     [tracks, zoomLevel, clipDuration, onTracksChange]
   );
 
+  // Handle edge resize for speaker/multicam clips
+  const handleEdgeResizeStart = useCallback(
+    (e: React.MouseEvent, trackId: string, clipId: string, edge: "start" | "end") => {
+      e.stopPropagation();
+      e.preventDefault();
+
+      const track = tracks.find((t) => t.id === trackId);
+      if (!track || track.locked) return;
+
+      const clip = track.clips.find((c) => c.id === clipId);
+      if (!clip) return;
+
+      const startX = e.clientX;
+
+      resizingEdgeRef.current = true;
+
+      const handleMouseMove = (e: MouseEvent) => {
+        const deltaX = e.clientX - startX;
+        const deltaTime = deltaX / zoomLevel;
+
+        let newStartTime = clip.startTime;
+        let newDuration = clip.duration;
+
+        if (edge === "start") {
+          // Left edge: move start, adjust duration to keep end fixed
+          newStartTime = Math.max(0, clip.startTime + deltaTime);
+          newDuration = clip.duration - (newStartTime - clip.startTime);
+          // Enforce minimum duration
+          if (newDuration < 0.1) {
+            newDuration = 0.1;
+            newStartTime = clip.startTime + clip.duration - 0.1;
+          }
+        } else {
+          // Right edge: adjust duration only
+          newDuration = Math.max(0.1, clip.duration + deltaTime);
+          // Don't exceed clip timeline bounds
+          if (newStartTime + newDuration > clipDuration) {
+            newDuration = clipDuration - newStartTime;
+          }
+        }
+
+        const updatedTracks = tracks.map((t) => {
+          if (t.id !== trackId) return t;
+          return {
+            ...t,
+            clips: t.clips.map((c) =>
+              c.id === clipId ? { ...c, startTime: newStartTime, duration: newDuration } : c
+            ),
+          };
+        });
+        onTracksChange(updatedTracks);
+      };
+
+      const handleMouseUp = () => {
+        resizingEdgeRef.current = false;
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+    },
+    [tracks, zoomLevel, clipDuration, onTracksChange]
+  );
+
   // Sort tracks by order (lower = bottom, higher = top)
   const sortedTracks = [...tracks].sort((a, b) => b.order - a.order);
 
@@ -491,7 +663,17 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
               </div>
 
               {/* Track content */}
-              <div className="relative flex-1 bg-[hsl(var(--bg-base))]">
+              <div
+                className="relative flex-1 bg-[hsl(var(--bg-base))]"
+                onDoubleClick={(e) => {
+                  if (track.type !== "multicam" || !onDoubleClickTrack) return;
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const time =
+                    (e.clientX - rect.left + (e.currentTarget.parentElement?.scrollLeft || 0)) /
+                    zoomLevel;
+                  onDoubleClickTrack(track.id, time);
+                }}
+              >
                 {/* Caption word visualization for captions track */}
                 {track.type === "captions" && clipWords.length > 0 && (
                   <div className="absolute inset-x-0 top-1 bottom-1 overflow-hidden">
@@ -527,9 +709,24 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                   const clipLeft = clip.startTime * zoomLevel;
                   const clipWidth = Math.max(clip.duration * zoomLevel, 4);
                   const isDraggable =
-                    !track.locked && track.type !== "podcast-audio" && track.type !== "captions";
+                    !track.locked &&
+                    track.type !== "podcast-audio" &&
+                    track.type !== "captions" &&
+                    track.type !== "multicam" &&
+                    track.type !== "speaker";
                   const isDraggingThis = draggingClip?.clipId === clip.id;
                   const isClipSelected = selectedClipId === clip.id;
+
+                  // Use source-specific colors for multicam and speaker clips
+                  const isMulticamClip = track.type === "multicam" && clip.assetId;
+                  const isSpeakerClip = track.type === "speaker" && clip.assetId;
+                  const isOverrideClip = isMulticamClip && clip.assetSource === "override";
+                  const sourceColor =
+                    isMulticamClip || isSpeakerClip ? sourceColorMap.get(clip.assetId!) : undefined;
+                  const clipBgColor = isOverrideClip
+                    ? sourceColor?.bg.replace("0.3", "0.45") || config.bgColor
+                    : sourceColor?.bg || config.bgColor;
+                  const clipBorderColor = sourceColor?.border || config.color;
 
                   return (
                     <div
@@ -544,13 +741,14 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                       style={{
                         left: clipLeft,
                         width: clipWidth,
-                        backgroundColor: config.bgColor,
-                        borderLeft: `2px solid ${config.color}`,
+                        backgroundColor: clipBgColor,
+                        borderLeft: `2px solid ${clipBorderColor}`,
+                        ...(isOverrideClip ? { borderTop: `2px dashed ${clipBorderColor}` } : {}),
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Only allow selecting clips on video-overlay tracks (animations)
-                        if (track.type === "video-overlay") {
+                        // Allow selecting clips on video-overlay tracks and override clips
+                        if (track.type === "video-overlay" || isOverrideClip) {
                           onSelectClip(isClipSelected ? null : clip.id);
                         }
                       }}
@@ -615,17 +813,68 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                       )}
 
                       {/* Clip label */}
-                      {clip.duration * zoomLevel > 60 && (
-                        <span
-                          className="absolute top-1/2 left-2 -translate-y-1/2 truncate text-[9px] font-medium"
-                          style={{
-                            color: config.color,
-                            maxWidth: clip.duration * zoomLevel - 16,
-                          }}
-                        >
-                          {clip.type === "audio" ? "Audio" : clip.type}
-                        </span>
-                      )}
+                      {isSpeakerClip && clip.assetId
+                        ? (() => {
+                            const person = speakerPersonMap.get(clip.assetId);
+                            const label =
+                              person?.name || sourceLabelMap.get(clip.assetId) || "Speaker";
+                            const clipPx = clip.duration * zoomLevel;
+                            return (
+                              <div className="absolute inset-0 flex items-center gap-1 overflow-hidden px-1">
+                                {clipPx > 28 && (
+                                  <div
+                                    className="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded-full"
+                                    style={{
+                                      backgroundColor: person?.photoUrl
+                                        ? undefined
+                                        : `${sourceColor?.border || config.color}40`,
+                                    }}
+                                  >
+                                    {person?.photoUrl ? (
+                                      <img
+                                        src={getMediaUrl(person.photoUrl)}
+                                        alt={label}
+                                        className="h-full w-full object-cover"
+                                      />
+                                    ) : (
+                                      <span
+                                        className="text-[7px] font-bold"
+                                        style={{ color: sourceColor?.text || config.color }}
+                                      >
+                                        {label.slice(0, 2).toUpperCase()}
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                                {clipPx > 70 && (
+                                  <span
+                                    className="truncate text-[9px] font-medium"
+                                    style={{
+                                      color: sourceColor?.text || config.color,
+                                      maxWidth: clipPx - 32,
+                                    }}
+                                  >
+                                    {label}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()
+                        : clip.duration * zoomLevel > 60 && (
+                            <span
+                              className="absolute top-1/2 left-2 -translate-y-1/2 truncate text-[9px] font-medium"
+                              style={{
+                                color: sourceColor?.text || config.color,
+                                maxWidth: clip.duration * zoomLevel - 16,
+                              }}
+                            >
+                              {isMulticamClip
+                                ? sourceLabelMap.get(clip.assetId!) || "Camera"
+                                : clip.type === "audio"
+                                  ? "Audio"
+                                  : clip.type}
+                            </span>
+                          )}
 
                       {/* Fade handles (only when selected) */}
                       {isSelected && isAudio && (
@@ -661,6 +910,48 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                           </div>
                         </>
                       )}
+
+                      {/* Override badge */}
+                      {isOverrideClip && clipWidth > 20 && (
+                        <div
+                          className="absolute top-0.5 right-0.5 flex h-3 w-3 items-center justify-center rounded-sm"
+                          style={{ backgroundColor: `${clipBorderColor}40` }}
+                        >
+                          <span className="text-[7px] font-bold" style={{ color: clipBorderColor }}>
+                            M
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Edge resize handles for speaker and override clips */}
+                      {(isSpeakerClip || isOverrideClip) && !track.locked && (
+                        <>
+                          {/* Left edge handle */}
+                          <div
+                            className="group absolute top-0 bottom-0 left-0 z-10 cursor-ew-resize"
+                            style={{ width: 6 }}
+                            onMouseDown={(e) =>
+                              handleEdgeResizeStart(e, track.id, clip.id, "start")
+                            }
+                          >
+                            <div
+                              className="absolute top-1/2 left-0 h-4 w-1 -translate-y-1/2 rounded-r-full opacity-0 transition-opacity group-hover:opacity-100"
+                              style={{ backgroundColor: clipBorderColor }}
+                            />
+                          </div>
+                          {/* Right edge handle */}
+                          <div
+                            className="group absolute top-0 right-0 bottom-0 z-10 cursor-ew-resize"
+                            style={{ width: 6 }}
+                            onMouseDown={(e) => handleEdgeResizeStart(e, track.id, clip.id, "end")}
+                          >
+                            <div
+                              className="absolute top-1/2 right-0 h-4 w-1 -translate-y-1/2 rounded-l-full opacity-0 transition-opacity group-hover:opacity-100"
+                              style={{ backgroundColor: clipBorderColor }}
+                            />
+                          </div>
+                        </>
+                      )}
                     </div>
                   );
                 })}
@@ -681,7 +972,11 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                 {track.clips.length === 0 && (
                   <div className="absolute inset-0 flex items-center justify-center">
                     <span className="text-[9px] text-[hsl(var(--text-ghost))]">
-                      {track.type === "captions" ? "Captions auto-generated" : "Drop media here"}
+                      {track.type === "captions"
+                        ? "Captions auto-generated"
+                        : track.type === "background"
+                          ? "Background color"
+                          : "Drop media here"}
                     </span>
                   </div>
                 )}

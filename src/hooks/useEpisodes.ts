@@ -41,6 +41,11 @@ export interface Episode {
     twitter?: string;
   }>;
   stageStatus?: StageStatusWithSubSteps;
+  mediaType?: "audio" | "video";
+  defaultVideoSourceId?: string;
+  primaryAudioSourceId?: string;
+  mixedAudioBlobUrl?: string;
+  videoSyncStatus?: "pending" | "syncing" | "synced" | "failed";
   createdAt: string;
   updatedAt: string;
 }
@@ -107,6 +112,9 @@ export interface Clip {
   templateId?: string;
   background?: unknown;
   subtitle?: unknown;
+  multicamLayout?: unknown;
+  generatedAssets?: unknown;
+  hookAnalysis?: unknown;
   createdAt: string;
   updatedAt: string;
 }
@@ -114,6 +122,34 @@ export interface Clip {
 export interface EpisodeWithDetails extends Episode {
   transcripts: Transcript[];
   clips: Clip[];
+  videoSources?: VideoSource[];
+}
+
+export interface VideoSource {
+  id: string;
+  projectId: string;
+  label: string;
+  personId?: string;
+  sourceType: "speaker" | "wide" | "broll";
+  videoBlobUrl: string;
+  proxyBlobUrl?: string;
+  audioBlobUrl?: string;
+  thumbnailStripUrl?: string;
+  fileName: string;
+  contentType?: string;
+  sizeBytes?: number;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  syncOffsetMs: number;
+  syncMethod?: "duration-match" | "audio-correlation" | "manual";
+  syncConfidence?: number;
+  cropOffsetX: number;
+  cropOffsetY: number;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export function useEpisodes() {
@@ -351,13 +387,16 @@ export function useEpisodes() {
 
       try {
         await updateTranscriptApi(currentPodcastId, episodeId, transcriptId, data);
+        queryClient.invalidateQueries({
+          queryKey: episodeKeys.detail(currentPodcastId, episodeId),
+        });
         return true;
       } catch (err) {
         console.error("[useEpisodes] updateTranscript failed:", err);
         return false;
       }
     },
-    [currentPodcastId]
+    [currentPodcastId, queryClient]
   );
 
   // Save clips (bulk)

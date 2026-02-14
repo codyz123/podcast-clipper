@@ -28,6 +28,8 @@ import { Transcript, Word, SpeakerSegment, PodcastPerson } from "../../lib/types
 import { generateId, cn } from "../../lib/utils";
 import { formatTimestamp, formatRelativeTime } from "../../lib/formats";
 import { authFetch, getMediaUrl } from "../../lib/api";
+import { findActiveWord as findActiveWordShared } from "../../lib/findActiveWord";
+import { mixVideoAudioApi } from "../../lib/queries";
 
 interface ProgressState {
   stage: string;
@@ -329,6 +331,7 @@ export const TranscriptEditor: React.FC = () => {
   } = useProjectStore();
   const { settings, updateSettings } = useSettingsStore();
   const accessToken = useAuthStore((state) => state.accessToken);
+  const currentPodcastId = useAuthStore((state) => state.currentPodcastId);
   const { saveTranscript, saveTranscriptSegments, updateTranscript } = useEpisodes();
   const { people: podcastPeople, createPerson } = usePodcastPeople();
 
@@ -406,6 +409,20 @@ export const TranscriptEditor: React.FC = () => {
     const loadAudio = async () => {
       if (!currentProject?.id) return;
 
+      // For video episodes, use the mixed audio URL or fall back to a video source's audio
+      if (currentProject.mediaType === "video") {
+        if (currentProject.mixedAudioBlobUrl) {
+          setAudioUrl(currentProject.mixedAudioBlobUrl);
+        } else {
+          // Fall back to first video source with audio
+          const fallbackSource = currentProject.videoSources?.find((s) => s.audioBlobUrl);
+          if (fallbackSource?.audioBlobUrl) {
+            setAudioUrl(fallbackSource.audioBlobUrl);
+          }
+        }
+        return;
+      }
+
       // Try to get blob from IndexedDB first
       const blob = await getAudioBlob(currentProject.id);
       if (blob) {
@@ -421,7 +438,12 @@ export const TranscriptEditor: React.FC = () => {
     };
 
     loadAudio();
-  }, [currentProject?.id, currentProject?.audioPath]);
+  }, [
+    currentProject?.id,
+    currentProject?.audioPath,
+    currentProject?.mixedAudioBlobUrl,
+    currentProject?.mediaType,
+  ]);
 
   // Click-outside handler for speaker popover
   useEffect(() => {
@@ -447,82 +469,9 @@ export const TranscriptEditor: React.FC = () => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [confirmDeleteSegIdx]);
 
-  // Find active word based on current playback time using binary search
-  // Returns the active word, accounting for duplicate start times and missing end timestamps.
+  // Find active word based on current playback time (delegates to shared utility)
   const findActiveWord = useCallback(
-    (time: number) => {
-      if (!timedWords || timedWords.length === 0) return -1;
-
-      const words = timedWords;
-
-      // If before first word, no highlight
-      if (time < words[0].start) return -1;
-
-      // Binary search for the last word that starts at or before current time
-      let left = 0;
-      let right = words.length - 1;
-      let result = -1;
-
-      while (left <= right) {
-        const mid = Math.floor((left + right) / 2);
-        if (words[mid].start <= time) {
-          result = mid;
-          left = mid + 1;
-        } else {
-          right = mid - 1;
-        }
-      }
-
-      if (result === -1) return -1;
-
-      const getEffectiveEnd = (index: number) => {
-        const word = words[index];
-        if (Number.isFinite(word.end) && word.end > word.start) {
-          return word.end;
-        }
-
-        const next = words[index + 1];
-        if (next && Number.isFinite(next.start) && next.start > word.start) {
-          return next.start;
-        }
-
-        return word.start + 0.12;
-      };
-
-      // Handle identical start times by selecting the earliest word whose end still includes the time.
-      const targetStart = words[result].start;
-      let first = result;
-      while (first > 0 && words[first - 1].start === targetStart) {
-        first--;
-      }
-
-      for (let i = first; i <= result; i++) {
-        if (time <= getEffectiveEnd(i) + 0.001) {
-          return i;
-        }
-      }
-
-      // Gap handling: for short gaps between words, use midpoint advancement
-      // (smooth handoff). For long silences (>1s), drop the highlight entirely.
-      const currentEnd = getEffectiveEnd(result);
-      if (time > currentEnd) {
-        if (result + 1 < words.length) {
-          const nextStart = words[result + 1].start;
-          const gap = nextStart - currentEnd;
-          if (gap > 1) {
-            // Long silence — no highlight until the next word starts
-            return -1;
-          }
-          // Short gap — midpoint advancement for smooth feel
-          const midpoint = (currentEnd + nextStart) / 2;
-          return time >= midpoint ? result + 1 : result;
-        }
-        // Past the last word's end — no highlight
-        return -1;
-      }
-
-      return result;
-    },
+    (time: number) => findActiveWordShared(timedWords, time),
     [timedWords]
   );
 
@@ -862,15 +811,152 @@ export const TranscriptEditor: React.FC = () => {
     // Create AbortController for this request
     abortControllerRef.current = new AbortController();
 
+    const isVideo = currentProject.mediaType === "video";
+
     setProgressState({
       stage: "preparing",
       progress: 2,
-      message: "Preparing audio",
-      detail: "Loading from storage...",
+      message: isVideo ? "Preparing video transcription" : "Preparing audio",
+      detail: isVideo ? "Using video source audio tracks..." : "Loading from storage...",
     });
 
     try {
-      // Try to get the audio blob from IndexedDB
+      // Video episodes use multicam transcription (server fetches audio from video sources)
+      if (isVideo && useBackend) {
+        const response = await authFetch(`${settings.backendUrl}/api/transcribe-multicam`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ episodeId: currentProject.id }),
+          signal: abortControllerRef.current?.signal,
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            errorData.error?.message || errorData.error || `API error: ${response.status}`
+          );
+        }
+
+        // Read SSE stream (same format as /api/transcribe)
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let transcriptResponse: any = null;
+
+        if (reader) {
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (line.startsWith("data: ")) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+
+                  if (data.stage === "error") {
+                    throw new Error(data.error);
+                  }
+
+                  if (data.stage === "result") {
+                    transcriptResponse = data;
+                  } else {
+                    setProgressState({
+                      stage: data.stage,
+                      progress: data.progress,
+                      message: data.message,
+                      detail: data.detail,
+                    });
+                  }
+                } catch (e) {
+                  if (e instanceof SyntaxError) {
+                    console.warn("Failed to parse SSE data:", line);
+                  } else {
+                    throw e;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        if (!transcriptResponse) {
+          throw new Error("No transcription result received");
+        }
+
+        // Process the response (same as audio transcription)
+        const rawWords = transcriptResponse.words || [];
+        const { words, indexMap } = buildTranscriptWords(rawWords, transcriptResponse.text);
+        const hadFiltering = Array.isArray(rawWords) && words.length < rawWords.length;
+        const transcriptText =
+          hadFiltering || !transcriptResponse.text
+            ? words.map((w) => w.text).join(" ")
+            : transcriptResponse.text;
+
+        const rawSegments: SpeakerSegment[] = transcriptResponse.segments || [];
+        const segments = hadFiltering
+          ? remapSegments(rawSegments, indexMap, words.length)
+          : rawSegments;
+
+        const transcript: Transcript = {
+          id: generateId(),
+          projectId: currentProject.id,
+          audioFingerprint: currentProject.audioFingerprint,
+          text: transcriptText,
+          words,
+          segments: segments.length > 0 ? segments : undefined,
+          language: transcriptResponse.language || "en",
+          createdAt: new Date().toISOString(),
+          service: transcriptResponse.service || "assemblyai",
+        };
+
+        addTranscript(transcript);
+
+        saveTranscript(currentProject.id, {
+          text: transcript.text,
+          words: transcript.words,
+          segments: transcript.segments,
+          language: transcript.language,
+          name: transcript.name,
+          audioFingerprint: transcript.audioFingerprint,
+          service: transcript.service,
+        }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
+
+        // Mix all speaker audio tracks into a single file for playback
+        setProgressState({
+          stage: "mixing",
+          progress: 96,
+          message: "Mixing audio tracks",
+          detail: "Combining all speaker audio for playback...",
+        });
+
+        if (currentPodcastId) {
+          try {
+            const { mixedAudioBlobUrl } = await mixVideoAudioApi(
+              currentPodcastId,
+              currentProject.id
+            );
+            setAudioUrl(mixedAudioBlobUrl);
+          } catch (mixErr) {
+            console.warn("[TranscriptEditor] Audio mixing failed:", mixErr);
+          }
+        }
+
+        setProgressState({
+          stage: "complete",
+          progress: 100,
+          message: "Transcription complete",
+          detail: `${words.length.toLocaleString()} words${segments.length > 0 ? `, ${new Set(segments.map((s: SpeakerSegment) => s.speakerLabel)).size} speakers` : ""}`,
+        });
+
+        return;
+      }
+
+      // Audio episode flow — load audio blob and send to /api/transcribe
       let audioBlob = currentProject.id ? await getAudioBlob(currentProject.id) : undefined;
 
       if (!audioBlob) {
@@ -1600,9 +1686,11 @@ export const TranscriptEditor: React.FC = () => {
                   Ready to transcribe
                 </h3>
                 <p className="mx-auto mb-5 max-w-xs text-sm text-[hsl(var(--text-subtle))]">
-                  {settings.assemblyaiApiKey || process.env.ASSEMBLYAI_API_KEY
-                    ? "Using AssemblyAI with speaker diarization"
-                    : "Using OpenAI Whisper for accurate word-level timestamps"}
+                  {currentProject?.mediaType === "video"
+                    ? "Using video source audio tracks with speaker diarization"
+                    : settings.assemblyaiApiKey || process.env.ASSEMBLYAI_API_KEY
+                      ? "Using AssemblyAI with speaker diarization"
+                      : "Using OpenAI Whisper for accurate word-level timestamps"}
                 </p>
                 <Button glow>Start Transcription</Button>
 

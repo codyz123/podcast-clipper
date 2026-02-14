@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Layout, ViewType } from "./components/Layout";
@@ -8,14 +8,17 @@ import { WorkspaceSection } from "./components/WorkspaceNav/WorkspaceNav";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { ProjectsView } from "./components/ProjectsView";
 import { ImportButton } from "./components/ImportButton";
+import { VideoImport } from "./components/VideoImport/VideoImport";
 import { PlaceholderPage } from "./components/PlaceholderPage";
 import { OAuthCallback } from "./pages/OAuthCallback";
 import { VideoTestPage } from "./pages/VideoTestPage";
 import { AuthScreen, LoadingScreen, CreatePodcastScreen } from "./components/Auth";
 import { ContentSkeleton } from "./components/ui/ContentSkeleton";
-import { useProjectStore } from "./stores/projectStore";
+import { useProjectStore, getPersistedTranscriptId } from "./stores/projectStore";
 import { useWorkspaceStore } from "./stores/workspaceStore";
 import { useAuthStore } from "./stores/authStore";
+import { useEditorStore } from "./stores/editorStore";
+import { usePublishStore } from "./stores/publishStore";
 import { usePodcast } from "./hooks/usePodcast";
 import { useEpisodes } from "./hooks/useEpisodes";
 import { episodeToProject } from "./lib/episodeToProject";
@@ -129,7 +132,7 @@ const subStageToRouteSegment: Record<string, string> = {
   guests: "guests",
   topics: "topics",
   notes: "notes",
-  record: "record",
+  record: "media",
   transcript: "transcribe",
   clips: "clips",
   editor: "editor",
@@ -142,7 +145,8 @@ const routeSegmentToSubStage: Record<string, string> = {
   topics: "topics",
   notes: "notes",
   import: "record", // Redirect old import URLs to record
-  record: "record",
+  record: "record", // Backwards compat
+  media: "record",
   transcript: "transcript",
   transcribe: "transcript",
   clips: "clips",
@@ -229,6 +233,69 @@ const parseRoute = (pathname: string): RouteInfo => {
   }
 };
 
+// Media page with Audio/Video toggle
+function MediaPage({
+  goToEpisodeStage,
+}: {
+  goToEpisodeStage: (episodeId: string, stage: EpisodeStage, subStep?: string) => void;
+}) {
+  const { currentProject } = useProjectStore();
+  const [mode, setMode] = useState<"audio" | "video">("audio");
+
+  // Auto-detect mode from episode data when it loads
+  useEffect(() => {
+    if (currentProject?.mediaType === "video") setMode("video");
+  }, [currentProject?.mediaType]);
+
+  return (
+    <div className="mx-auto max-w-2xl">
+      <div className="mb-8 sm:mb-10">
+        <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
+          Media
+        </h1>
+        <div className="mt-4 inline-flex rounded-lg bg-[hsl(var(--surface-2))] p-1">
+          <button
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              mode === "audio"
+                ? "bg-[hsl(var(--surface-3))] text-[hsl(var(--text))] shadow-sm"
+                : "text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text))]"
+            }`}
+            onClick={() => setMode("audio")}
+          >
+            Audio
+          </button>
+          <button
+            className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${
+              mode === "video"
+                ? "bg-[hsl(var(--surface-3))] text-[hsl(var(--text))] shadow-sm"
+                : "text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text))]"
+            }`}
+            onClick={() => setMode("video")}
+          >
+            Video
+          </button>
+        </div>
+      </div>
+      {mode === "audio" ? (
+        <ImportButton
+          variant="expanded"
+          onImportComplete={() =>
+            currentProject?.id &&
+            goToEpisodeStage(currentProject.id, "post-production", "transcript")
+          }
+        />
+      ) : (
+        <VideoImport
+          onImportComplete={() =>
+            currentProject?.id &&
+            goToEpisodeStage(currentProject.id, "post-production", "transcript")
+          }
+        />
+      )}
+    </div>
+  );
+}
+
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -239,6 +306,8 @@ function App() {
   const [lastSection, setLastSection] = useState<WorkspaceSection>("episodes");
 
   const { currentProject, setCurrentProject } = useProjectStore();
+  const resetEditor = useEditorStore((s) => s.resetEditor);
+  const resetPublishState = usePublishStore((s) => s.resetPublishState);
   const { brandColors, setBrandColors } = useWorkspaceStore();
   const {
     isAuthenticated,
@@ -448,6 +517,22 @@ function App() {
     }
   }, [authLoading, isAuthenticated, podcasts.length, showCreatePodcast, route.kind, navigate]);
 
+  // Reset all episode-scoped state when podcast changes
+  const prevPodcastIdRef = useRef(currentPodcastId);
+  useEffect(() => {
+    if (
+      prevPodcastIdRef.current !== null &&
+      currentPodcastId !== null &&
+      prevPodcastIdRef.current !== currentPodcastId
+    ) {
+      setCurrentProject(null);
+      resetEditor();
+      resetPublishState();
+      navigate("/podcast-info", { replace: true });
+    }
+    prevPodcastIdRef.current = currentPodcastId;
+  }, [currentPodcastId, setCurrentProject, resetEditor, resetPublishState, navigate]);
+
   // Canonicalize episode routes (slug + stage + sub-stage)
   useEffect(() => {
     if (route.kind !== "episode-route") return;
@@ -523,7 +608,8 @@ function App() {
     const storeState = useProjectStore.getState();
     const currentActiveId =
       storeState.currentProject?.activeTranscriptId ??
-      storeState.projects.find((p) => p.id === episodeDetail.id)?.activeTranscriptId;
+      storeState.projects.find((p) => p.id === episodeDetail.id)?.activeTranscriptId ??
+      getPersistedTranscriptId(episodeDetail.id);
     setCurrentProject(episodeToProject(episodeDetail, currentActiveId));
   }, [episodeDetail, currentProject?.id, setCurrentProject]);
 
@@ -721,22 +807,7 @@ function App() {
       case "projects":
         return <ProjectsView onProjectLoad={handleProjectLoad} />;
       case "record":
-        return (
-          <div className="mx-auto max-w-2xl">
-            <div className="mb-8 sm:mb-10">
-              <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-[hsl(var(--text))] sm:text-3xl">
-                Record & Import
-              </h1>
-            </div>
-            <ImportButton
-              variant="expanded"
-              onImportComplete={() =>
-                currentProject?.id &&
-                goToEpisodeStage(currentProject.id, "post-production", "transcript")
-              }
-            />
-          </div>
-        );
+        return <MediaPage goToEpisodeStage={goToEpisodeStage} />;
       case "transcript":
         return <TranscriptEditor />;
       case "clips":
@@ -830,8 +901,8 @@ function App() {
         isDisabled: false,
       },
       notes: {
-        label: "Record",
-        stage: "production",
+        label: "Media",
+        stage: "post-production",
         subStage: "record",
         isDisabled: false,
       },
@@ -849,7 +920,7 @@ function App() {
         isDisabled: !currentProject?.transcript,
       },
       clips: {
-        label: "Editor",
+        label: "Clips Editor",
         stage: "marketing",
         subStage: "editor",
         isDisabled: !currentProject?.clips?.length,

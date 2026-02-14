@@ -1,8 +1,8 @@
 import { Router, Request, Response } from "express";
 import multer from "multer";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { projects, transcripts, clips } from "../db/schema.js";
+import { projects, transcripts, clips, videoSources } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
 import { getParam, verifyPodcastAccess } from "../middleware/podcast-access.js";
 import { uploadMediaFromPath, deleteMedia } from "../lib/media-storage.js";
@@ -47,6 +47,10 @@ router.get("/:podcastId/episodes", verifyPodcastAccess, async (req: Request, res
         explicit: projects.explicit,
         guests: projects.guests,
         stageStatus: projects.stageStatus,
+        mediaType: projects.mediaType,
+        defaultVideoSourceId: projects.defaultVideoSourceId,
+        primaryAudioSourceId: projects.primaryAudioSourceId,
+        videoSyncStatus: projects.videoSyncStatus,
         createdAt: projects.createdAt,
         updatedAt: projects.updatedAt,
       })
@@ -70,15 +74,21 @@ router.get(
       const podcastId = getParam(req.params.podcastId);
       const episodeId = getParam(req.params.episodeId);
 
-      // Run all three queries in parallel to minimize Neon serverless round-trips
-      const [episodeResult, episodeTranscripts, episodeClips] = await Promise.all([
-        db
-          .select()
-          .from(projects)
-          .where(and(eq(projects.id, episodeId), eq(projects.podcastId, podcastId))),
-        db.select().from(transcripts).where(eq(transcripts.projectId, episodeId)),
-        db.select().from(clips).where(eq(clips.projectId, episodeId)),
-      ]);
+      // Run all queries in parallel to minimize Neon serverless round-trips
+      const [episodeResult, episodeTranscripts, episodeClips, episodeVideoSources] =
+        await Promise.all([
+          db
+            .select()
+            .from(projects)
+            .where(and(eq(projects.id, episodeId), eq(projects.podcastId, podcastId))),
+          db.select().from(transcripts).where(eq(transcripts.projectId, episodeId)),
+          db.select().from(clips).where(eq(clips.projectId, episodeId)),
+          db
+            .select()
+            .from(videoSources)
+            .where(eq(videoSources.projectId, episodeId))
+            .orderBy(asc(videoSources.displayOrder)),
+        ]);
 
       const episode = episodeResult[0];
 
@@ -91,6 +101,7 @@ router.get(
         episode,
         transcripts: episodeTranscripts,
         clips: episodeClips,
+        videoSources: episodeVideoSources,
       });
     } catch (error) {
       console.error("Error getting episode:", error);
@@ -275,6 +286,7 @@ router.put(
         "transcription",
         "rss",
         "youtube-dist",
+        "clips",
         "x",
         "instagram-reel",
         "instagram-post",
@@ -685,6 +697,9 @@ router.put(
               captionStyle: clipData.captionStyle,
               segments: clipData.segments,
               format: clipData.format as string | undefined,
+              multicamLayout: clipData.multicamLayout,
+              generatedAssets: clipData.generatedAssets,
+              hookAnalysis: clipData.hookAnalysis,
               createdById: userId,
             }))
           )
@@ -711,6 +726,9 @@ router.put(
             templateId: clipData.templateId,
             background: clipData.background,
             subtitle: clipData.subtitle,
+            multicamLayout: clipData.multicamLayout,
+            generatedAssets: clipData.generatedAssets,
+            hookAnalysis: clipData.hookAnalysis,
             updatedAt: new Date(),
           })
           .where(eq(clips.id, clipData.id))
