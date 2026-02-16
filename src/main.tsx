@@ -25,6 +25,18 @@ const queryClient = new QueryClient({
   },
 });
 
+// Auto-reload on chunk load failures from stale deployments.
+// Vite fires this event when any dynamic import fails to load.
+window.addEventListener("vite:preloadError", () => {
+  const key = "chunk-reload";
+  const last = sessionStorage.getItem(key);
+  const now = Date.now();
+  if (!last || now - parseInt(last) > 30_000) {
+    sessionStorage.setItem(key, now.toString());
+    window.location.reload();
+  }
+});
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
     <ErrorBoundary>
