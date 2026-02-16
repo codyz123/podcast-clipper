@@ -54,7 +54,7 @@ app.use("/api/local-media", express.static(path.join(process.cwd(), ".context", 
 // Media proxy - serves R2-stored files through the server to avoid CORS issues
 app.get("/api/media/*", async (req, res) => {
   try {
-    const key = req.path.replace(/^\/api\/media\//, "");
+    const key = decodeURIComponent(req.path.replace(/^\/api\/media\//, ""));
     if (!key) {
       res.status(400).json({ error: "Missing media key" });
       return;
