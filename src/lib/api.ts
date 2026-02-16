@@ -42,9 +42,11 @@ export async function authFetch(url: string, options: RequestInit = {}): Promise
 }
 
 /**
- * Convert a media URL to go through our server proxy.
- * Handles direct R2 URLs (existing data) by routing them through /api/media/.
- * In development, returns R2 public URLs directly (no proxy needed for media tags).
+ * Convert a media URL to a loadable URL.
+ * - Rewrites stale localhost URLs to use the current backend.
+ * - In development, returns all URLs directly.
+ * - In production, proxies R2 URLs through /api/media/ to avoid CORS issues.
+ *   Other public CDN URLs (Vercel Blob, etc.) are returned as-is.
  */
 export function getMediaUrl(url: string | undefined | null): string | undefined {
   if (!url) return undefined;
@@ -59,13 +61,16 @@ export function getMediaUrl(url: string | undefined | null): string | undefined 
   if (mediaIdx !== -1) {
     return `${apiBase}${url.slice(mediaIdx)}`;
   }
-  // In dev, use R2 public URLs directly — avoids needing R2 credentials locally
+  // In dev, use all URLs directly — avoids needing R2 credentials locally
   if (import.meta.env.DEV) return url;
-  // Production: proxy through our server to avoid CORS issues
+  // Production: only proxy R2 URLs through our server to avoid CORS issues.
+  // Other public CDN URLs (Vercel Blob, etc.) are accessible directly.
   try {
     const parsed = new URL(url);
-    const key = parsed.pathname.slice(1); // Remove leading "/"
-    if (key) return `${apiBase}/api/media/${key}`;
+    if (parsed.hostname.endsWith(".r2.dev")) {
+      const key = parsed.pathname.slice(1); // Remove leading "/"
+      if (key) return `${apiBase}/api/media/${key}`;
+    }
   } catch {
     // Not a valid URL, return as-is
   }
