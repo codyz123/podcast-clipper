@@ -8,6 +8,7 @@ import {
   ReloadIcon,
   GearIcon,
   PlusIcon,
+  ImageIcon,
 } from "@radix-ui/react-icons";
 import { cn } from "../../../lib/utils";
 import { useSettingsStore } from "../../../stores/settingsStore";
@@ -16,8 +17,10 @@ import {
   getBestVideoFile,
   PexelsVideo,
 } from "../../../services/assets/pexelsService";
+import { useBrandingAssets } from "../../../hooks/useBrandingAssets";
+import { getMediaUrl } from "../../../lib/api";
 
-type AssetTab = "b-roll" | "music" | "animations";
+type AssetTab = "b-roll" | "music" | "animations" | "branding";
 
 interface AssetsPanelProps {
   onAddBRoll?: (videoUrl: string, duration: number) => void;
@@ -28,6 +31,7 @@ interface AssetsPanelProps {
     duration: number,
     source: "lottie" | "giphy" | "tenor" | "waveform" | "youtube-cta" | "apple-podcasts-cta"
   ) => void;
+  onAddBrandingAsset?: (assetUrl: string, name: string) => void;
 }
 
 const OVERLAY_ITEMS = [
@@ -91,6 +95,7 @@ export const AssetsPanel: React.FC<AssetsPanelProps> = ({
   onAddBRoll,
   onAddMusic: _onAddMusic,
   onAddAnimation,
+  onAddBrandingAsset,
 }) => {
   const { settings } = useSettingsStore();
   const [activeTab, setActiveTab] = useState<AssetTab>("b-roll");
@@ -145,6 +150,7 @@ export const AssetsPanel: React.FC<AssetsPanelProps> = ({
     { id: "b-roll" as const, label: "Video", icon: VideoIcon },
     { id: "music" as const, label: "Music", icon: SpeakerLoudIcon },
     { id: "animations" as const, label: "Graphics", icon: MagicWandIcon },
+    { id: "branding" as const, label: "Brand", icon: ImageIcon },
   ];
 
   return (
@@ -371,7 +377,65 @@ export const AssetsPanel: React.FC<AssetsPanelProps> = ({
             </div>
           </div>
         )}
+
+        {activeTab === "branding" && <BrandingTabContent onAddBrandingAsset={onAddBrandingAsset} />}
       </div>
+    </div>
+  );
+};
+
+// Separate component to avoid calling hook conditionally
+const BrandingTabContent: React.FC<{
+  onAddBrandingAsset?: (assetUrl: string, name: string) => void;
+}> = ({ onAddBrandingAsset }) => {
+  const { assets, isLoading } = useBrandingAssets();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <ReloadIcon className="h-4 w-4 animate-spin text-[hsl(var(--text-muted))]" />
+      </div>
+    );
+  }
+
+  if (assets.length === 0) {
+    return (
+      <div className="rounded-lg border border-dashed border-[hsl(var(--border-subtle))] p-4 text-center">
+        <ImageIcon className="mx-auto mb-2 h-6 w-6 text-[hsl(var(--text-ghost))]" />
+        <p className="text-xs text-[hsl(var(--text-muted))]">No branding assets</p>
+        <p className="mt-1 text-[10px] text-[hsl(var(--text-ghost))]">
+          Upload logos and graphics in Podcast Info.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {assets.map((asset) => (
+        <button
+          key={asset.id}
+          onClick={() => onAddBrandingAsset?.(asset.blobUrl, asset.name)}
+          className="group relative rounded-lg border border-[hsl(var(--border-subtle))] p-2 text-left transition-all hover:border-[hsl(var(--cyan))] hover:bg-[hsl(var(--surface))]"
+        >
+          <div className="mb-1.5 flex h-14 items-center justify-center overflow-hidden rounded-md bg-[hsl(var(--bg-base))]">
+            <img
+              src={getMediaUrl(asset.blobUrl)}
+              alt={asset.name}
+              className="max-h-full max-w-full object-contain"
+            />
+          </div>
+          <p className="truncate text-[10px] font-medium text-[hsl(var(--text))]">{asset.name}</p>
+          <span className="mt-0.5 inline-block text-[9px] text-[hsl(var(--text-ghost))]">
+            {asset.category}
+          </span>
+          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="flex items-center gap-1 text-[10px] font-medium text-white">
+              <PlusIcon className="h-3 w-3" /> Add
+            </span>
+          </div>
+        </button>
+      ))}
     </div>
   );
 };

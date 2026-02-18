@@ -13,15 +13,16 @@ interface AnimationOverlayProps {
 }
 
 export const AnimationOverlay: React.FC<AnimationOverlayProps> = ({ clip, podcast, words }) => {
-  const { assetUrl, assetSource, lottieData, positionX, positionY } = clip;
+  const { assetUrl, assetSource, lottieData, positionX, positionY, scale } = clip;
+  const resolvedScale = scale ?? 1;
 
   const containerStyle: React.CSSProperties = {
     position: "absolute",
     left: `${positionX ?? 50}%`,
     top: `${positionY ?? 50}%`,
     transform: "translate(-50%, -50%)",
-    width: 200,
-    height: 200,
+    width: 200 * resolvedScale,
+    height: 200 * resolvedScale,
     pointerEvents: "none",
   };
 
@@ -46,6 +47,15 @@ export const AnimationOverlay: React.FC<AnimationOverlayProps> = ({ clip, podcas
     return (
       <div style={containerStyle}>
         <ApplePodcastsCtaOverlay podcast={podcast} />
+      </div>
+    );
+  }
+
+  // Branding assets (logos, icons, etc.)
+  if (assetSource === "branding" && assetUrl) {
+    return (
+      <div style={containerStyle}>
+        <Img src={assetUrl} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
       </div>
     );
   }

@@ -5,5 +5,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #1101 | 8:21 PM | 🔵 | Database schema includes caption and transcript data structures | ~350 |
+| #1106 | 8:22 PM | 🔵 | AssetsPanel provides B-roll video search and overlay graphics library | ~447 |
 </claude-mem-context>

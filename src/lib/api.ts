@@ -73,6 +73,28 @@ export function getMediaUrl(url: string | undefined | null): string | undefined 
 }
 
 /**
+ * Convert a media URL to always go through our server proxy.
+ * Unlike getMediaUrl, this does NOT bypass the proxy in dev mode,
+ * so it's safe for fetch() calls which are subject to CORS.
+ */
+export function getProxiedMediaUrl(url: string | undefined | null): string | undefined {
+  if (!url) return undefined;
+  const apiBase = getApiBase();
+  const localMediaIdx = url.indexOf("/api/local-media/");
+  if (localMediaIdx !== -1) return `${apiBase}${url.slice(localMediaIdx)}`;
+  const mediaIdx = url.indexOf("/api/media/");
+  if (mediaIdx !== -1) return `${apiBase}${url.slice(mediaIdx)}`;
+  try {
+    const parsed = new URL(url);
+    const key = parsed.pathname.slice(1);
+    if (key) return `${apiBase}/api/media/${key}`;
+  } catch {
+    // Not a valid URL, return as-is
+  }
+  return url;
+}
+
+/**
  * Standard API error type
  */
 export interface ApiError {

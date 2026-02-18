@@ -1,11 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { EditorPreview } from "../components/VideoEditor/Preview/EditorPreview";
-import {
-  VIDEO_TEST_CASES,
-  VideoTestCase,
-  buildVideoTestClip,
-  buildVideoTestTemplate,
-} from "../lib/videoTestFixtures";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { PlayerRef } from "@remotion/player";
+import { PlayerPreview } from "../components/VideoEditor/Preview/PlayerPreview";
+import { VIDEO_TEST_CASES, VideoTestCase, buildVideoTestClip } from "../lib/videoTestFixtures";
 
 declare global {
   interface Window {
@@ -21,6 +17,7 @@ export const VideoTestPage: React.FC = () => {
   const [testCase, setTestCase] = useState<VideoTestCase>(
     () => window.__VIDEO_TEST_CONFIG__ || fallbackCase
   );
+  const playerRef = useRef<PlayerRef>(null);
 
   useEffect(() => {
     window.__VIDEO_TEST_SET__ = (config) => setTestCase(config);
@@ -32,7 +29,7 @@ export const VideoTestPage: React.FC = () => {
   }, []);
 
   const clip = useMemo(() => buildVideoTestClip(testCase), [testCase]);
-  const template = useMemo(() => buildVideoTestTemplate(testCase), [testCase]);
+  const initialFrame = Math.floor((testCase.frames[0] ?? 0) * 30);
 
   return (
     <div
@@ -46,15 +43,16 @@ export const VideoTestPage: React.FC = () => {
       }}
     >
       <div data-video-test="preview">
-        <EditorPreview
+        <PlayerPreview
           clip={clip}
           currentTime={testCase.frames[0] ?? 0}
           format={testCase.format}
-          template={template}
+          audioUrl=""
+          playerRef={playerRef}
+          initialFrame={initialFrame}
           onFormatChange={() => {}}
           isCaptionsTrackSelected={false}
           isVideoTrackSelected={false}
-          previewScale={1}
           showUiOverlays={false}
           showFormatControls={false}
           showFormatInfo={false}

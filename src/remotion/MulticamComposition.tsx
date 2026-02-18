@@ -88,7 +88,11 @@ export const MulticamClipVideo = (props: MulticamClipVideoProps) => {
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .filter((track) => track.type === "video-overlay")
     .flatMap((track) => track.clips)
-    .filter((clip) => clip.type === "animation" && clip.durationFrames > 0);
+    .filter(
+      (clip) =>
+        (clip.type === "animation" || (clip.type === "image" && clip.assetSource === "branding")) &&
+        clip.durationFrames > 0
+    );
 
   const targetAspect = formatConfig.width / formatConfig.height;
 
@@ -171,7 +175,11 @@ export const MulticamClipVideo = (props: MulticamClipVideoProps) => {
 
       {/* Subtitle layer */}
       <Sequence from={0} durationInFrames={durationInFrames}>
-        <SubtitleAnimation words={words} config={subtitle} />
+        <SubtitleAnimation
+          words={words}
+          config={subtitle}
+          groupBoundaries={props.groupBoundaries}
+        />
       </Sequence>
     </AbsoluteFill>
   );

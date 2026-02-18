@@ -257,7 +257,7 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
       if (!timelineRef.current || draggingFade) return;
 
       const rect = timelineRef.current.getBoundingClientRect();
-      const x = e.clientX - rect.left - HEADER_WIDTH;
+      const x = e.clientX - rect.left - HEADER_WIDTH + timelineRef.current.scrollLeft;
       const time = Math.max(0, Math.min(clipDuration, x / zoomLevel));
       onSeek(time);
     },
@@ -274,7 +274,7 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
       const handleMouseMove = (e: MouseEvent) => {
         if (!timelineRef.current) return;
         const rect = timelineRef.current.getBoundingClientRect();
-        const x = e.clientX - rect.left - HEADER_WIDTH;
+        const x = e.clientX - rect.left - HEADER_WIDTH + timelineRef.current.scrollLeft;
         const time = Math.max(0, Math.min(clipDuration, x / zoomLevel));
         onSeek(time);
       };
@@ -747,15 +747,18 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
-                        // Allow selecting clips on video-overlay tracks and override clips
-                        if (track.type === "video-overlay" || isOverrideClip) {
+                        if (
+                          track.type === "video-overlay" ||
+                          track.type === "speaker" ||
+                          isOverrideClip
+                        ) {
                           onSelectClip(isClipSelected ? null : clip.id);
                         }
                       }}
                       onMouseDown={
                         isDraggable
                           ? (e) => handleClipDragStart(e, track.id, clip.id, clip.startTime)
-                          : undefined
+                          : (e) => e.stopPropagation()
                       }
                     >
                       {/* Fade In overlay - triangle from bottom-left to top of handle */}
@@ -924,34 +927,37 @@ export const MultiTrackTimeline: React.FC<MultiTrackTimelineProps> = ({
                       )}
 
                       {/* Edge resize handles for speaker and override clips */}
-                      {(isSpeakerClip || isOverrideClip) && !track.locked && (
-                        <>
-                          {/* Left edge handle */}
-                          <div
-                            className="group absolute top-0 bottom-0 left-0 z-10 cursor-ew-resize"
-                            style={{ width: 6 }}
-                            onMouseDown={(e) =>
-                              handleEdgeResizeStart(e, track.id, clip.id, "start")
-                            }
-                          >
+                      {(isSpeakerClip || isOverrideClip || track.type === "video-overlay") &&
+                        !track.locked && (
+                          <>
+                            {/* Left edge handle */}
                             <div
-                              className="absolute top-1/2 left-0 h-4 w-1 -translate-y-1/2 rounded-r-full opacity-0 transition-opacity group-hover:opacity-100"
-                              style={{ backgroundColor: clipBorderColor }}
-                            />
-                          </div>
-                          {/* Right edge handle */}
-                          <div
-                            className="group absolute top-0 right-0 bottom-0 z-10 cursor-ew-resize"
-                            style={{ width: 6 }}
-                            onMouseDown={(e) => handleEdgeResizeStart(e, track.id, clip.id, "end")}
-                          >
+                              className="group absolute top-0 bottom-0 left-0 z-10 cursor-ew-resize"
+                              style={{ width: 6 }}
+                              onMouseDown={(e) =>
+                                handleEdgeResizeStart(e, track.id, clip.id, "start")
+                              }
+                            >
+                              <div
+                                className="absolute top-1/2 left-0 h-4 w-1 -translate-y-1/2 rounded-r-full opacity-0 transition-opacity group-hover:opacity-100"
+                                style={{ backgroundColor: clipBorderColor }}
+                              />
+                            </div>
+                            {/* Right edge handle */}
                             <div
-                              className="absolute top-1/2 right-0 h-4 w-1 -translate-y-1/2 rounded-l-full opacity-0 transition-opacity group-hover:opacity-100"
-                              style={{ backgroundColor: clipBorderColor }}
-                            />
-                          </div>
-                        </>
-                      )}
+                              className="group absolute top-0 right-0 bottom-0 z-10 cursor-ew-resize"
+                              style={{ width: 6 }}
+                              onMouseDown={(e) =>
+                                handleEdgeResizeStart(e, track.id, clip.id, "end")
+                              }
+                            >
+                              <div
+                                className="absolute top-1/2 right-0 h-4 w-1 -translate-y-1/2 rounded-l-full opacity-0 transition-opacity group-hover:opacity-100"
+                                style={{ backgroundColor: clipBorderColor }}
+                              />
+                            </div>
+                          </>
+                        )}
                     </div>
                   );
                 })}

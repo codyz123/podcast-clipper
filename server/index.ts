@@ -10,6 +10,7 @@ import { authRouter } from "./routes/auth.js";
 import { podcastsRouter } from "./routes/podcasts.js";
 import { episodesRouter } from "./routes/episodes.js";
 import { podcastPeopleRouter } from "./routes/podcast-people.js";
+import { podcastBrandingAssetsRouter } from "./routes/podcast-branding-assets.js";
 import { textSnippetsRouter } from "./routes/text-snippets.js";
 import { generateSnippetRouter } from "./routes/generate-snippet.js";
 import { uploadsRouter } from "./routes/uploads.js";
@@ -92,6 +93,9 @@ app.use("/api/podcasts", episodesRouter);
 
 // Podcast people routes - recurring hosts & guests (JWT auth handled internally)
 app.use("/api/podcasts", podcastPeopleRouter);
+
+// Podcast branding assets routes (JWT auth handled internally)
+app.use("/api/podcasts", podcastBrandingAssetsRouter);
 
 // Multipart upload routes for large files (JWT auth handled internally)
 app.use("/api/podcasts", uploadsRouter);
