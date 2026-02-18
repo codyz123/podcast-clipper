@@ -1,5 +1,6 @@
 import React, { useRef, useMemo, useCallback } from "react";
 import { Cross2Icon, DragHandleDots2Icon } from "@radix-ui/react-icons";
+import { getProxiedMediaUrl } from "../../lib/api";
 import type { Clip, TextSnippet, VideoFormat } from "../../lib/types";
 import { VIDEO_FORMATS } from "../../lib/types";
 import {
@@ -179,10 +180,26 @@ export const PostCard: React.FC<PostCardProps> = ({
     return "";
   }, [post.statusData]);
 
-  const handleOpenOutput = useCallback(() => {
+  const handleOpenOutput = useCallback(async () => {
     if (post.statusData.status !== "completed" || !post.statusData.outputPath) return;
-    window.open(post.statusData.outputPath, "_blank");
-  }, [post.statusData]);
+    try {
+      const downloadUrl =
+        getProxiedMediaUrl(post.statusData.outputPath) || post.statusData.outputPath;
+      const res = await fetch(downloadUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `${clip?.name || "clip"}.mp4`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      // Fallback to opening in new tab
+      window.open(post.statusData.outputPath, "_blank");
+    }
+  }, [post.statusData, clip?.name]);
 
   const handleOpenUpload = useCallback(() => {
     if (post.statusData.status !== "completed") return;

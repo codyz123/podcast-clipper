@@ -68,6 +68,7 @@ const makeWordsFromText = (
 };
 
 export const VIDEO_TEST_CASES: VideoTestCase[] = [
+  // === Format: 9:16 (vertical) ===
   {
     id: "hormozi-center",
     description: "Center captions with highlight and background box.",
@@ -105,6 +106,8 @@ export const VIDEO_TEST_CASES: VideoTestCase[] = [
       },
     },
   },
+
+  // === Format: 16:9 (landscape) ===
   {
     id: "typewriter-top",
     description: "Top captions with typewriter animation and tighter width.",
@@ -125,6 +128,65 @@ export const VIDEO_TEST_CASES: VideoTestCase[] = [
       background: {
         type: "solid",
         color: "#1B1B1B",
+      },
+    },
+  },
+  {
+    id: "mrbeast-landscape",
+    description: "MrBeast bounce animation in 16:9 with no background box.",
+    format: "16:9",
+    frames: [0.3, 1.0, 2.0],
+    clip: {
+      startTime: 30,
+      endTime: 40,
+      words: makeWordsFromText("This is going to be absolutely insane you guys", 30, 0.3),
+      captionStyle: { ...CAPTION_PRESETS.mrBeast, preset: "mrBeast" },
+      background: {
+        type: "gradient",
+        gradientColors: ["#0F0F0F", "#1A1A2E"],
+        gradientDirection: 135,
+      },
+    },
+  },
+
+  // === Format: 1:1 (square) ===
+  {
+    id: "square-custom-pos",
+    description: "Square format with custom caption position (off-center).",
+    format: "1:1",
+    frames: [0.5, 1.5],
+    clip: {
+      startTime: 0,
+      endTime: 6,
+      words: makeWordsFromText("Custom position captions placed off center for variety", 0, 0.35),
+      captionStyle: {
+        ...CAPTION_PRESETS.hormozi,
+        positionX: 50,
+        positionY: 80,
+        wordsPerLine: 3,
+        preset: "hormozi",
+      },
+      background: {
+        type: "solid",
+        color: "#1A1A2E",
+      },
+    },
+  },
+
+  // === Format: 4:5 (portrait) ===
+  {
+    id: "portrait-minimal",
+    description: "4:5 portrait with clean-minimal preset at default bottom position.",
+    format: "4:5",
+    frames: [0.4, 1.2],
+    clip: {
+      startTime: 15,
+      endTime: 22,
+      words: makeWordsFromText("Minimal captions in portrait format for Instagram feed", 15, 0.4),
+      captionStyle: { ...CAPTION_PRESETS["clean-minimal"], preset: "clean-minimal" },
+      background: {
+        type: "solid",
+        color: "#0A0A0A",
       },
     },
   },

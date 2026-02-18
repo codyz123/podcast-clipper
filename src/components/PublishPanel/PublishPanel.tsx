@@ -20,6 +20,7 @@ import { PostCard } from "./PostCard";
 import { AddPostButton } from "./AddPostButton";
 import { startOAuthFlow, getOAuthStatus, type OAuthPlatform } from "../../services/oauth";
 import { ensureRenderedClip } from "../../services/rendering/renderClip";
+import { getProxiedMediaUrl } from "../../lib/api";
 import { initializeYouTubeUpload, pollUploadProgress } from "../../services/youtube/uploadProgress";
 import {
   initializeInstagramUpload,
@@ -30,12 +31,20 @@ import {
   pollTikTokUploadProgress,
 } from "../../services/tiktok/uploadProgress";
 import { initializeXUpload, pollXUploadProgress } from "../../services/x/uploadProgress";
+import { useRenderedClips } from "../../hooks/useRenderedClips";
+import { RenderedClipsList } from "./RenderedClipsList";
 
 export const PublishPanel: React.FC = () => {
   const currentProject = useProjectStore((s) => s.currentProject);
   const connections = useWorkspaceStore((s) => s.connections);
   const connectAccount = useWorkspaceStore((s) => s.connectAccount);
   const { snippets, fetchSnippets } = useTextSnippets();
+  const {
+    renderedClips,
+    isLoading: renderedClipsLoading,
+    refetch: refetchRenderedClips,
+    deleteRenderedClip,
+  } = useRenderedClips(currentProject?.id);
 
   // Publish store state
   const {
@@ -162,7 +171,6 @@ export const PublishPanel: React.FC = () => {
           const renderOverrides = clip
             ? {
                 background: clip.background,
-                subtitle: clip.subtitle,
                 captionStyle: clip.captionStyle,
                 tracks: clip.tracks,
                 startTime: clip.startTime,
@@ -365,6 +373,25 @@ export const PublishPanel: React.FC = () => {
         }
       }
 
+      // For local destination, trigger a browser download
+      if (post.destination === "local" && renderedClipUrl) {
+        try {
+          const downloadUrl = getProxiedMediaUrl(renderedClipUrl) || renderedClipUrl;
+          const res = await fetch(downloadUrl);
+          const blob = await res.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = blobUrl;
+          a.download = `${clip?.name || "clip"}.mp4`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(blobUrl);
+        } catch {
+          // Download failed but render succeeded — user can still use the "Download clip" link
+        }
+      }
+
       markPostComplete(post.id, renderedClipUrl, uploadedUrl);
     }
   };
@@ -464,8 +491,9 @@ export const PublishPanel: React.FC = () => {
   useEffect(() => {
     if (!isPublishing && allComplete && publishTriggeredRef.current) {
       setShowCompletionSummary(true);
+      refetchRenderedClips();
     }
-  }, [isPublishing, allComplete]);
+  }, [isPublishing, allComplete, refetchRenderedClips]);
 
   return (
     <div className="min-h-full">
@@ -577,6 +605,13 @@ export const PublishPanel: React.FC = () => {
             </CardContent>
           </Card>
         )}
+
+        {/* Rendered Clips */}
+        <RenderedClipsList
+          renderedClips={renderedClips}
+          isLoading={renderedClipsLoading}
+          onDelete={deleteRenderedClip}
+        />
 
         {/* Add Post Button */}
         <div className="mb-4">

@@ -3,35 +3,57 @@ import { useCurrentFrame, interpolate, spring, useVideoConfig } from "remotion";
 import { SubtitleConfig } from "../lib/types";
 import { WordTiming } from "./types";
 import { resolveFontFamily } from "../lib/fonts";
+import { findActiveWord } from "../lib/findActiveWord";
+import { findGroupForWord } from "../lib/computeWordGroups";
+import type { WordGroup } from "../lib/computeWordGroups";
 
 interface SubtitleAnimationProps {
   words: WordTiming[];
   config: SubtitleConfig;
+  groupBoundaries?: WordGroup[];
 }
 
-export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({ words, config }) => {
+export const SubtitleAnimation: React.FC<SubtitleAnimationProps> = ({
+  words,
+  config,
+  groupBoundaries,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const currentTimeSeconds = frame / fps;
 
   const wordsPerGroup = Math.max(1, config.wordsPerGroup);
-  const isWithinWord = (word: WordTiming) => {
-    if (typeof word.startTime === "number" && typeof word.endTime === "number") {
-      return currentTimeSeconds >= word.startTime && currentTimeSeconds <= word.endTime;
-    }
-    return frame >= word.startFrame && frame <= word.endFrame;
-  };
-  const activeWordIndex = words.findIndex((word) => isWithinWord(word));
 
-  // No word is active — hide captions entirely during gaps
+  // Use the same active-word algorithm as the editor preview (binary search
+  // with gap bridging) so that subtitles don't flicker during short gaps
+  // between words and the highlighted word stays in sync.
+  const wordsAsSearchable = words.map((w) => ({
+    text: w.text,
+    start: w.startTime ?? w.startFrame / fps,
+    end: w.endTime ?? w.endFrame / fps,
+    confidence: 1,
+  }));
+  const activeWordIndex = findActiveWord(wordsAsSearchable, currentTimeSeconds);
+
+  // No word is active (long silence or before/after speech)
   if (activeWordIndex === -1) {
     return null;
   }
 
   const currentWordIndex = activeWordIndex;
 
-  const groupStartIndex = Math.floor(currentWordIndex / wordsPerGroup) * wordsPerGroup;
-  const currentGroup = words.slice(groupStartIndex, groupStartIndex + wordsPerGroup);
+  let groupStartIndex: number;
+  let currentGroup: WordTiming[];
+
+  if (groupBoundaries && groupBoundaries.length > 0) {
+    const group = findGroupForWord(groupBoundaries, currentWordIndex);
+    if (!group) return null;
+    groupStartIndex = group.start;
+    currentGroup = words.slice(group.start, group.end);
+  } else {
+    groupStartIndex = Math.floor(currentWordIndex / wordsPerGroup) * wordsPerGroup;
+    currentGroup = words.slice(groupStartIndex, groupStartIndex + wordsPerGroup);
+  }
 
   if (!currentGroup || currentGroup.length === 0) {
     return null;

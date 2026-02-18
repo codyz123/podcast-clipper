@@ -7,9 +7,17 @@ export interface TrackClipData {
   startFrame: number;
   durationFrames: number;
   assetUrl?: string;
-  assetSource?: "lottie" | "giphy" | "tenor" | "waveform" | "youtube-cta" | "apple-podcasts-cta";
+  assetSource?:
+    | "lottie"
+    | "giphy"
+    | "tenor"
+    | "waveform"
+    | "youtube-cta"
+    | "apple-podcasts-cta"
+    | "branding";
   positionX?: number; // 0-100, default 50
   positionY?: number; // 0-100, default 50
+  scale?: number; // Uniform scale multiplier, default 1.0
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   lottieData?: Record<string, any>; // Pre-fetched Lottie JSON data
 }
@@ -33,6 +41,8 @@ export interface ClipVideoProps {
   fps: number;
   tracks?: TrackData[]; // Animation and overlay tracks
   podcast?: { name: string; coverImageUrl?: string; author?: string; category?: string };
+  groupBoundaries?: Array<{ start: number; end: number }>;
+  speaker?: SpeakerOverlayConfig;
 }
 
 export interface WordTiming {
@@ -47,6 +57,29 @@ export interface SubtitleGroupProps {
   words: WordTiming[];
   config: SubtitleConfig;
   currentFrame: number;
+}
+
+// ============ Speaker Overlay Types ============
+
+export interface SpeakerPerson {
+  id: string;
+  name: string;
+  photoUrl?: string; // pre-fetched data URI or full URL
+}
+
+export interface SpeakerClipData {
+  startFrame: number;
+  endFrame: number;
+  speakerLabel: string;
+  personId?: string;
+  colorIndex: number; // pre-computed index into SPEAKER_COLORS palette
+}
+
+export interface SpeakerOverlayConfig {
+  displayMode: "fill" | "circle";
+  nameFormat: "off" | "first-name" | "full-name";
+  clips: SpeakerClipData[];
+  people: SpeakerPerson[];
 }
 
 // ============ Multicam Types ============

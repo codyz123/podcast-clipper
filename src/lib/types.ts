@@ -79,6 +79,23 @@ export interface PodcastPerson {
   updatedAt: string;
 }
 
+export type BrandingAssetCategory = "logo" | "icon" | "watermark" | "banner" | "graphic";
+
+export interface PodcastBrandingAsset {
+  id: string;
+  podcastId: string;
+  name: string;
+  category: BrandingAssetCategory;
+  blobUrl: string;
+  contentType?: string;
+  sizeBytes?: number;
+  width?: number;
+  height?: number;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Transcript {
   id: string;
   projectId: string;
@@ -441,6 +458,7 @@ export interface TrackClip {
     | "waveform"
     | "youtube-cta"
     | "apple-podcasts-cta"
+    | "branding"
     | "override";
   animationConfig?: AnimationConfig;
   textConfig?: TextOverlayConfig;
@@ -448,6 +466,7 @@ export interface TrackClip {
   // Position on screen (percentage 0-100)
   positionX?: number; // Default 50 (center)
   positionY?: number; // Default 50 (center)
+  scale?: number; // Uniform scale multiplier, default 1.0
 
   // Fade settings (per-clip)
   fadeIn?: number; // Duration in seconds
@@ -477,6 +496,7 @@ export interface CaptionStyle {
   positionY?: number; // Vertical position as percentage (0-100), 50 = center
   wordsPerLine: number;
   preset?: CaptionPreset;
+  breakOnSpeakerChange?: boolean;
 }
 
 // Built-in caption presets

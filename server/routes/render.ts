@@ -7,7 +7,14 @@ import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { desc, eq, asc } from "drizzle-orm";
 import { db } from "../db/index.js";
-import { clips, projects, renderedClips, videoSources, transcripts } from "../db/schema.js";
+import {
+  clips,
+  projects,
+  renderedClips,
+  videoSources,
+  transcripts,
+  podcastPeople,
+} from "../db/schema.js";
 import { uploadMediaFromPath } from "../lib/media-storage.js";
 import {
   resolveCaptionStyle,
@@ -16,6 +23,7 @@ import {
   type SubtitleConfig,
   type CaptionStyle,
 } from "../../shared/clipTransform.js";
+import { computeWordGroups, speakerBreakIndicesFromTimes } from "../../shared/computeWordGroups.js";
 import {
   computeSwitchingTimeline,
   applyPreRoll,
@@ -127,9 +135,17 @@ type TrackClipInput = {
   startTime?: number;
   duration?: number;
   assetUrl?: string;
-  assetSource?: "lottie" | "giphy" | "tenor";
+  assetSource?:
+    | "lottie"
+    | "giphy"
+    | "tenor"
+    | "waveform"
+    | "youtube-cta"
+    | "apple-podcasts-cta"
+    | "branding";
   positionX?: number;
   positionY?: number;
+  scale?: number;
 };
 
 type TrackInput = {
@@ -188,6 +204,17 @@ async function fetchLottieData(url: string): Promise<object | null> {
     console.error(`Failed to fetch Lottie from ${url}:`, error);
     return null;
   }
+}
+
+async function prefetchImageAsDataUri(url: string): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const response = await fetch(url, { signal: controller.signal });
+  clearTimeout(timeoutId);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const buffer = Buffer.from(await response.arrayBuffer());
+  const contentType = response.headers.get("content-type") || "image/png";
+  return `data:${contentType};base64,${buffer.toString("base64")}`;
 }
 
 let bundlePromise: Promise<string> | null = null;
@@ -268,6 +295,40 @@ async function runRenderJob(jobId: string): Promise<void> {
     const subtitleOverride = overrides?.subtitle as SubtitleConfig | undefined;
     const subtitleConfig = subtitleOverride || toSubtitleConfig(captionStyle);
 
+    // Compute speaker-aware group boundaries when breakOnSpeakerChange is enabled.
+    // Mirror the editor's fallback: if clip segments are empty or lack speakerIds,
+    // fall back to transcript-level segments (which always have speaker data).
+    let effectiveSegments = Array.isArray(clip.segments)
+      ? (clip.segments as Array<{ startTime: number; endTime: number; speakerId?: string }>)
+      : [];
+    if (
+      captionStyle.breakOnSpeakerChange &&
+      (!effectiveSegments.length || !effectiveSegments.some((s) => s.speakerId))
+    ) {
+      const [transcript] = await db
+        .select()
+        .from(transcripts)
+        .where(eq(transcripts.projectId, clip.projectId))
+        .limit(1);
+      if (transcript?.segments && Array.isArray(transcript.segments)) {
+        effectiveSegments = transcript.segments as typeof effectiveSegments;
+      }
+    }
+    let groupBoundaries: Array<{ start: number; end: number }> | undefined;
+
+    if (
+      captionStyle.breakOnSpeakerChange &&
+      effectiveSegments.length > 0 &&
+      wordTimings.length > 0
+    ) {
+      const breakIndices = speakerBreakIndicesFromTimes(effectiveSegments, wordTimings, clipStart);
+      groupBoundaries = computeWordGroups(
+        wordTimings.length,
+        subtitleConfig.wordsPerGroup,
+        breakIndices
+      );
+    }
+
     const renderScale =
       typeof overrides?.renderScale === "number" && Number.isFinite(overrides.renderScale)
         ? Math.min(2, Math.max(0.25, overrides.renderScale))
@@ -283,7 +344,11 @@ async function runRenderJob(jobId: string): Promise<void> {
         const rawClips = Array.isArray(track.clips) ? track.clips : [];
         const preparedClips = await Promise.all(
           rawClips
-            .filter((clip) => clip.type === "animation" && clip.assetUrl)
+            .filter(
+              (clip) =>
+                (clip.type === "animation" && clip.assetUrl) ||
+                (clip.type === "image" && clip.assetSource === "branding" && clip.assetUrl)
+            )
             .map(async (clip) => {
               const startSeconds = Math.max(0, clip.startTime ?? 0);
               const durationSeconds = Math.max(0, clip.duration ?? 0);
@@ -300,15 +365,27 @@ async function runRenderJob(jobId: string): Promise<void> {
                 return null;
               }
 
+              // Pre-fetch branding asset images as data URIs so Remotion's
+              // headless Chromium can always access them (avoids CORS / localhost issues).
+              let resolvedAssetUrl = clip.assetUrl;
+              if (clip.assetSource === "branding" && clip.assetUrl) {
+                try {
+                  resolvedAssetUrl = await prefetchImageAsDataUri(clip.assetUrl);
+                } catch (e) {
+                  console.warn("Failed to pre-fetch branding asset, using original URL:", e);
+                }
+              }
+
               return {
                 id: clip.id || crypto.randomUUID(),
-                type: "animation" as const,
+                type: clip.type as "animation" | "image",
                 startFrame,
                 durationFrames: Math.min(durationFrames, availableFrames),
-                assetUrl: clip.assetUrl,
+                assetUrl: resolvedAssetUrl,
                 assetSource: clip.assetSource,
                 positionX: clip.positionX,
                 positionY: clip.positionY,
+                scale: clip.scale,
                 lottieData,
               };
             })
@@ -330,6 +407,89 @@ async function runRenderJob(jobId: string): Promise<void> {
       (track): track is NonNullable<typeof track> => !!track
     );
 
+    // Build speaker overlay data from the speaker track
+    const speakerTrack = resolvedTracks.find((t) => t.type === "speaker");
+    let speakerConfig:
+      | {
+          displayMode: "fill" | "circle";
+          nameFormat: "off" | "first-name" | "full-name";
+          clips: Array<{
+            startFrame: number;
+            endFrame: number;
+            speakerLabel: string;
+            personId?: string;
+            colorIndex: number;
+          }>;
+          people: Array<{ id: string; name: string; photoUrl?: string }>;
+        }
+      | undefined;
+
+    if (speakerTrack && Array.isArray(speakerTrack.clips) && speakerTrack.clips.length > 0) {
+      // Query podcast people for this project's podcast
+      const people = project?.podcastId
+        ? await db
+            .select()
+            .from(podcastPeople)
+            .where(eq(podcastPeople.podcastId, project.podcastId))
+        : [];
+
+      // Deduplicate speaker labels in order of first appearance (matches editor)
+      const orderedLabels: string[] = [];
+      for (const c of speakerTrack.clips as TrackClipInput[]) {
+        const label = (c as Record<string, unknown>).assetId as string | undefined;
+        if (label && !orderedLabels.includes(label)) {
+          orderedLabels.push(label);
+        }
+      }
+
+      // Build frame-based speaker clips
+      const speakerClips = (speakerTrack.clips as Array<TrackClipInput & { assetId?: string }>)
+        .filter((c) => c.assetId)
+        .map((c) => {
+          const startSeconds = Math.max(0, c.startTime ?? 0);
+          const durationSec = Math.max(0, c.duration ?? 0);
+          return {
+            startFrame: Math.floor(startSeconds * FPS),
+            endFrame: Math.floor(startSeconds * FPS) + Math.ceil(durationSec * FPS),
+            speakerLabel: c.assetId!,
+            personId: c.assetUrl || undefined,
+            colorIndex: orderedLabels.indexOf(c.assetId!),
+          };
+        });
+
+      // Collect referenced person IDs
+      const referencedPersonIds = new Set(speakerClips.map((c) => c.personId).filter(Boolean));
+
+      // Pre-fetch speaker photos as data URIs for reliable Remotion access
+      const speakerPeople = await Promise.all(
+        people
+          .filter((p) => referencedPersonIds.has(p.id))
+          .map(async (p) => {
+            let photoUrl = p.photoUrl || undefined;
+            if (photoUrl) {
+              try {
+                photoUrl = await prefetchImageAsDataUri(photoUrl);
+              } catch (e) {
+                console.warn(`Failed to pre-fetch speaker photo for ${p.name}:`, e);
+              }
+            }
+            return { id: p.id, name: p.name, photoUrl };
+          })
+      );
+
+      const displayMode =
+        ((speakerTrack as Record<string, unknown>).speakerDisplayMode as string) || "fill";
+      const nameFormat =
+        ((speakerTrack as Record<string, unknown>).speakerNameFormat as string) || "full-name";
+
+      speakerConfig = {
+        displayMode: displayMode as "fill" | "circle",
+        nameFormat: nameFormat as "off" | "first-name" | "full-name",
+        clips: speakerClips,
+        people: speakerPeople,
+      };
+    }
+
     // Build base props (shared between audio and multicam)
     const baseProps = {
       audioStartFrame: Math.floor(clipStart * FPS),
@@ -341,6 +501,8 @@ async function runRenderJob(jobId: string): Promise<void> {
       durationInFrames,
       fps: FPS,
       tracks: renderTracks.length > 0 ? renderTracks : undefined,
+      groupBoundaries,
+      speaker: speakerConfig,
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -628,6 +790,54 @@ router.get("/render/clip/:jobId/status", async (req: Request, res: Response) => 
   }
 
   res.json(job);
+});
+
+// List rendered clips for a project
+router.get("/render/clips/:projectId", async (req: Request, res: Response) => {
+  try {
+    const projectId = req.params.projectId as string;
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    const results = await db
+      .select({
+        id: renderedClips.id,
+        clipId: renderedClips.clipId,
+        clipName: clips.name,
+        format: renderedClips.format,
+        blobUrl: renderedClips.blobUrl,
+        sizeBytes: renderedClips.sizeBytes,
+        renderedAt: renderedClips.renderedAt,
+      })
+      .from(renderedClips)
+      .innerJoin(clips, eq(renderedClips.clipId, clips.id))
+      .where(eq(clips.projectId, projectId))
+      .orderBy(desc(renderedClips.renderedAt));
+
+    res.json({ renderedClips: results });
+  } catch (error) {
+    console.error("Failed to list rendered clips:", error);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+// Delete a rendered clip
+router.delete("/render/clips/:id", async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    if (!id) {
+      res.status(400).json({ error: "id is required" });
+      return;
+    }
+
+    await db.delete(renderedClips).where(eq(renderedClips.id, id));
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Failed to delete rendered clip:", error);
+    res.status(500).json({ error: (error as Error).message });
+  }
 });
 
 export const renderRouter = router;

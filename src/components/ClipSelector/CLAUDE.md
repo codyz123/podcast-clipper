@@ -5,5 +5,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #1101 | 8:21 PM | 🔵 | Database schema includes caption and transcript data structures | ~350 |
+| #1102 | 8:21 PM | 🔵 | ClipEditor component provides comprehensive word-level caption editing | ~485 |
 </claude-mem-context>
