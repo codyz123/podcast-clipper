@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { withSmartRetry } from "../retry.js";
 
 // YouTube/Google OAuth configuration
 const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -80,28 +81,29 @@ export function getAuthorizationUrl(state: string): string {
 export async function exchangeCodeForTokens(
   code: string
 ): Promise<{ accessToken: string; refreshToken: string; expiresAt: Date }> {
-  const config = getConfig();
+  return withSmartRetry(async () => {
+    const config = getConfig();
 
-  const response = await fetch(GOOGLE_TOKEN_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams({
-      client_id: config.clientId,
-      client_secret: config.clientSecret,
-      code,
-      grant_type: "authorization_code",
-      redirect_uri: config.redirectUri,
-    }),
-  });
+    const response = await fetch(GOOGLE_TOKEN_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        client_id: config.clientId,
+        client_secret: config.clientSecret,
+        code,
+        grant_type: "authorization_code",
+        redirect_uri: config.redirectUri,
+      }),
+    });
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Failed to exchange code for tokens: ${error}`);
-  }
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`Failed to exchange code for tokens (${response.status}): ${error}`);
+    }
 
-  const data: GoogleTokenResponse = await response.json();
+    const data: GoogleTokenResponse = await response.json();
 
   if (!data.refresh_token) {
     throw new Error("No refresh token received. User may need to revoke access and reconnect.");
@@ -109,20 +111,22 @@ export async function exchangeCodeForTokens(
 
   const expiresAt = new Date(Date.now() + data.expires_in * 1000);
 
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt,
-  };
+    return {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt,
+    };
+  }, { maxAttempts: 3, baseDelayMs: 1000 });
 }
 
 // Refresh an expired access token
 export async function refreshAccessToken(
   refreshToken: string
 ): Promise<{ accessToken: string; expiresAt: Date }> {
-  const config = getConfig();
+  return withSmartRetry(async () => {
+    const config = getConfig();
 
-  const response = await fetch(GOOGLE_TOKEN_URL, {
+    const response = await fetch(GOOGLE_TOKEN_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -143,10 +147,11 @@ export async function refreshAccessToken(
   const data: GoogleTokenResponse = await response.json();
   const expiresAt = new Date(Date.now() + data.expires_in * 1000);
 
-  return {
-    accessToken: data.access_token,
-    expiresAt,
-  };
+    return {
+      accessToken: data.access_token,
+      expiresAt,
+    };
+  }, { maxAttempts: 3, baseDelayMs: 1000 });
 }
 
 // Get user info from Google

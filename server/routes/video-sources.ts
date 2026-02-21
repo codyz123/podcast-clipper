@@ -480,7 +480,7 @@ async function processVideoSource(
   videoBlobUrl: string,
   fileName: string
 ): Promise<void> {
-  console.log(`Processing video source ${sourceId}: ${fileName}`);
+  console.info(`Processing video source ${sourceId}: ${fileName}`);
 
   // Download the video to a temp file
   const response = await fetch(videoBlobUrl);
@@ -492,7 +492,7 @@ async function processVideoSource(
 
   try {
     // Step 1: Extract metadata
-    console.log(`  [${sourceId}] Extracting metadata...`);
+    console.info(`[${sourceId}] Extracting metadata...`);
     const metadata = await extractVideoMetadata(tempVideoPath);
 
     await db
@@ -508,12 +508,12 @@ async function processVideoSource(
 
     // Step 2: Extract and normalize audio (if video has audio)
     if (metadata.hasAudio) {
-      console.log(`  [${sourceId}] Extracting audio...`);
+      console.info(`[${sourceId}] Extracting audio...`);
       const audioBuffer = await extractAudioFromVideo(tempVideoPath);
       const audioTempPath = await bufferToTempFile(audioBuffer, "wav");
 
       try {
-        console.log(`  [${sourceId}] Normalizing audio...`);
+        console.info(`[${sourceId}] Normalizing audio...`);
         const normalizedBuffer = await normalizeAudio(audioTempPath);
         const audioKey = `video-audio/${sourceId}/${Date.now()}-audio.wav`;
         const { url: audioBlobUrl } = await uploadToR2(audioKey, normalizedBuffer, "audio/wav");
@@ -528,7 +528,7 @@ async function processVideoSource(
     }
 
     // Step 3: Generate proxy video
-    console.log(`  [${sourceId}] Generating proxy video...`);
+    console.info(`[${sourceId}] Generating proxy video...`);
     const proxyBuffer = await generateProxyVideo(tempVideoPath);
     const proxyKey = `video-proxies/${sourceId}/${Date.now()}-proxy.mp4`;
     const { url: proxyBlobUrl } = await uploadToR2(proxyKey, proxyBuffer, "video/mp4");
@@ -539,14 +539,14 @@ async function processVideoSource(
       .where(eq(videoSources.id, sourceId));
 
     // Step 4: Generate thumbnail
-    console.log(`  [${sourceId}] Generating thumbnail...`);
+    console.info(`[${sourceId}] Generating thumbnail...`);
     const thumbBuffer = await generateThumbnail(tempVideoPath, Math.min(1, metadata.duration / 2));
     const thumbKey = `video-thumbnails/${sourceId}/${Date.now()}-thumb.jpg`;
     await uploadToR2(thumbKey, thumbBuffer, "image/jpeg");
 
     // Step 5: Generate thumbnail strip for timeline scrubbing
     if (metadata.duration > 5) {
-      console.log(`  [${sourceId}] Generating thumbnail strip...`);
+      console.info(`[${sourceId}] Generating thumbnail strip...`);
       try {
         const stripBuffer = await generateThumbnailStrip(tempVideoPath, metadata.duration, 5);
         const stripKey = `video-strips/${sourceId}/${Date.now()}-strip.jpg`;
@@ -562,7 +562,7 @@ async function processVideoSource(
       }
     }
 
-    console.log(`  [${sourceId}] Processing complete`);
+    console.info(`[${sourceId}] Processing complete`);
   } finally {
     await cleanupTempFiles(tempVideoPath);
   }

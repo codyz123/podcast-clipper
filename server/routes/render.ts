@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execSync } from "node:child_process";
+import { runFFprobe } from "../lib/process-manager.js";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { desc, eq, asc } from "drizzle-orm";
@@ -16,6 +16,7 @@ import {
   podcastPeople,
 } from "../db/schema.js";
 import { uploadMediaFromPath } from "../lib/media-storage.js";
+import { logAndSanitizeError } from "../lib/error-sanitizer.js";
 import {
   resolveCaptionStyle,
   toSubtitleConfig,
@@ -39,14 +40,54 @@ type VideoMetadata = {
   fps: number;
 };
 
-const getVideoMetadata = (filePath: string): VideoMetadata | null => {
+/**
+ * Cleanup old render files to prevent storage bloat
+ */
+function cleanupOldRenderFiles(): void {
   try {
-    const result = execSync(
-      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration,r_frame_rate -of json "${filePath}"`,
-      { encoding: "utf-8" }
-    );
+    const renderDir = path.join(process.cwd(), ".context", "renders");
+    if (!fs.existsSync(renderDir)) return;
 
-    const data = JSON.parse(result) as { streams?: Array<Record<string, string>> };
+    const files = fs.readdirSync(renderDir);
+    const now = Date.now();
+    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+
+    files.forEach(file => {
+      const filePath = path.join(renderDir, file);
+      try {
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtime.getTime() > maxAge) {
+          fs.unlinkSync(filePath);
+          console.info(`Cleaned up old render file: ${file}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to process render file ${file}:`, error);
+      }
+    });
+  } catch (error) {
+    console.error('Failed to cleanup old render files:', error);
+  }
+}
+
+// Run cleanup every hour
+setInterval(cleanupOldRenderFiles, 60 * 60 * 1000);
+// Run initial cleanup
+setTimeout(cleanupOldRenderFiles, 10000);
+
+const getVideoMetadata = async (filePath: string): Promise<VideoMetadata | null> => {
+  try {
+    const result = await runFFprobe([
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height,duration,r_frame_rate',
+      '-of', 'json',
+      filePath
+    ], {
+      timeoutMs: 30000,
+      id: `metadata-${path.basename(filePath)}`
+    });
+
+    const data = JSON.parse(result.stdout) as { streams?: Array<Record<string, string>> };
     const stream = data.streams?.[0];
     if (!stream) {
       throw new Error("No video stream found");
@@ -70,11 +111,11 @@ const getVideoMetadata = (filePath: string): VideoMetadata | null => {
   }
 };
 
-const verifyRender = (
+const verifyRender = async (
   outputPath: string,
   expected: { duration: number; width: number; height: number }
 ) => {
-  const actual = getVideoMetadata(outputPath);
+  const actual = await getVideoMetadata(outputPath);
   if (!actual) return;
 
   if (Math.abs(actual.duration - expected.duration) > 0.5) {
@@ -247,6 +288,9 @@ function setJob(jobId: string, updates: Partial<RenderJob>): RenderJob {
 async function runRenderJob(jobId: string): Promise<void> {
   const job = renderJobs.get(jobId);
   if (!job) return;
+
+  let outputPath: string | null = null;
+  const tempFilesToCleanup: string[] = [];
 
   try {
     setJob(jobId, { status: "rendering", progress: 0, errorMessage: undefined });
@@ -623,10 +667,11 @@ async function runRenderJob(jobId: string): Promise<void> {
     const renderDir = path.join(process.cwd(), ".context", "renders");
     fs.mkdirSync(renderDir, { recursive: true });
 
-    const outputPath = path.join(
+    outputPath = path.join(
       renderDir,
       `${job.clipId}-${job.format.replace(":", "-")}-${Date.now()}-${crypto.randomUUID()}.mp4`
     );
+    tempFilesToCleanup.push(outputPath);
 
     const serveUrl = await getBundle();
     const compositionId = getCompositionId(job.format, isMulticam);
@@ -650,7 +695,7 @@ async function runRenderJob(jobId: string): Promise<void> {
       },
     });
 
-    verifyRender(outputPath, {
+    await verifyRender(outputPath, {
       duration: durationSeconds,
       width: composition.width,
       height: composition.height,
@@ -679,9 +724,22 @@ async function runRenderJob(jobId: string): Promise<void> {
       sizeBytes: size,
     });
   } catch (error) {
+    const sanitizedError = logAndSanitizeError(error as Error, 'Render Job', process.env.NODE_ENV === 'development');
     setJob(jobId, {
       status: "failed",
-      errorMessage: (error as Error).message,
+      errorMessage: typeof sanitizedError.error === 'string' ? sanitizedError.error : 'Render failed',
+    });
+  } finally {
+    // Cleanup temporary files
+    tempFilesToCleanup.forEach(filePath => {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.info(`Cleaned up temporary file: ${filePath}`);
+        }
+      } catch (cleanupError) {
+        console.warn(`Failed to cleanup temporary file ${filePath}:`, cleanupError);
+      }
     });
   }
 }
@@ -776,8 +834,8 @@ router.post("/render/clip", async (req: Request, res: Response) => {
 
     res.json({ jobId, status: job.status, progress: job.progress, reused: false });
   } catch (error) {
-    console.error("Failed to render clip:", error);
-    res.status(500).json({ error: (error as Error).message });
+    const errorResponse = logAndSanitizeError(error as Error, 'Render Clip', process.env.NODE_ENV === 'development');
+    res.status(500).json(errorResponse);
   }
 });
 

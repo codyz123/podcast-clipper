@@ -1,6 +1,6 @@
 import React from "react";
 import { Img } from "remotion";
-import { Lottie } from "@remotion/lottie";
+// import { Lottie } from "@remotion/lottie"; // Temporarily disabled due to version conflict
 import type { TrackClipData, WordTiming } from "./types";
 import { WaveformOverlay } from "./overlays/WaveformOverlay";
 import { YouTubeCtaOverlay } from "./overlays/YouTubeCtaOverlay";
@@ -69,20 +69,22 @@ export const AnimationOverlay: React.FC<AnimationOverlayProps> = ({ clip, podcas
     );
   }
 
-  // Legacy: Lottie animations
+  // Legacy: Lottie animations - Temporarily disabled due to version conflict
   if (lottieData) {
-    return (
-      <div style={containerStyle}>
-        <Lottie
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          animationData={lottieData as any}
-          loop={true}
-          playbackRate={1}
-          renderer="svg"
-          style={{ width: "100%", height: "100%" }}
-        />
-      </div>
-    );
+    console.warn('Lottie animations temporarily disabled due to version conflict');
+    return null;
+    // return (
+    //   <div style={containerStyle}>
+    //     <Lottie
+    //       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    //       animationData={lottieData as any}
+    //       loop={true}
+    //       playbackRate={1}
+    //       renderer="svg"
+    //       style={{ width: "100%", height: "100%" }}
+    //     />
+    //   </div>
+    // );
   }
 
   return null;
