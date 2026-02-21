@@ -51,31 +51,35 @@ export const sessions = pgTable(
 
 // ============ Podcasts ============
 
-export const podcasts = pgTable("podcasts", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  name: varchar("name", { length: 255 }).notNull(),
-  description: text("description"),
-  createdById: uuid("created_by_id")
-    .references(() => users.id)
-    .notNull(),
-  coverImageUrl: text("cover_image_url"),
-  podcastMetadata: jsonb("podcast_metadata").$type<{
-    showName?: string;
-    author?: string;
-    category?: string;
-    language?: string;
-    explicit?: boolean;
-    email?: string;
-    website?: string;
-  }>(),
-  brandColors: jsonb("brand_colors").$type<{
-    primary?: string;
-    secondary?: string;
-    accent?: string;
-  }>(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const podcasts = pgTable(
+  "podcasts", 
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    createdById: uuid("created_by_id")
+      .references(() => users.id)
+      .notNull(),
+    coverImageUrl: text("cover_image_url"),
+    podcastMetadata: jsonb("podcast_metadata").$type<{
+      showName?: string;
+      author?: string;
+      category?: string;
+      language?: string;
+      explicit?: boolean;
+      email?: string;
+      website?: string;
+    }>(),
+    brandColors: jsonb("brand_colors").$type<{
+      primary?: string;
+      secondary?: string;
+      accent?: string;
+    }>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("podcasts_created_by_id_idx").on(table.createdById)]
+);
 
 export const podcastMembers = pgTable(
   "podcast_members",
@@ -202,7 +206,10 @@ export const projects = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("projects_v2_podcast_id_idx").on(table.podcastId)]
+  (table) => [
+    index("projects_v2_podcast_id_idx").on(table.podcastId),
+    index("projects_v2_created_by_id_idx").on(table.createdById)
+  ]
 );
 
 // ============ Upload Sessions (Multipart) ============
@@ -395,7 +402,10 @@ export const transcripts = pgTable(
     createdById: uuid("created_by_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("transcripts_project_id_idx").on(table.projectId)]
+  (table) => [
+    index("transcripts_project_id_idx").on(table.projectId),
+    index("transcripts_audio_fingerprint_idx").on(table.audioFingerprint)
+  ]
 );
 
 // ============ Clips ============

@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execSync } from "node:child_process";
+import { runFFprobe } from "../lib/process-manager.js";
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { desc, eq, asc } from "drizzle-orm";
@@ -74,14 +74,20 @@ setInterval(cleanupOldRenderFiles, 60 * 60 * 1000);
 // Run initial cleanup
 setTimeout(cleanupOldRenderFiles, 10000);
 
-const getVideoMetadata = (filePath: string): VideoMetadata | null => {
+const getVideoMetadata = async (filePath: string): Promise<VideoMetadata | null> => {
   try {
-    const result = execSync(
-      `ffprobe -v error -select_streams v:0 -show_entries stream=width,height,duration,r_frame_rate -of json "${filePath}"`,
-      { encoding: "utf-8" }
-    );
+    const result = await runFFprobe([
+      '-v', 'error',
+      '-select_streams', 'v:0',
+      '-show_entries', 'stream=width,height,duration,r_frame_rate',
+      '-of', 'json',
+      filePath
+    ], {
+      timeoutMs: 30000,
+      id: `metadata-${path.basename(filePath)}`
+    });
 
-    const data = JSON.parse(result) as { streams?: Array<Record<string, string>> };
+    const data = JSON.parse(result.stdout) as { streams?: Array<Record<string, string>> };
     const stream = data.streams?.[0];
     if (!stream) {
       throw new Error("No video stream found");
@@ -105,11 +111,11 @@ const getVideoMetadata = (filePath: string): VideoMetadata | null => {
   }
 };
 
-const verifyRender = (
+const verifyRender = async (
   outputPath: string,
   expected: { duration: number; width: number; height: number }
 ) => {
-  const actual = getVideoMetadata(outputPath);
+  const actual = await getVideoMetadata(outputPath);
   if (!actual) return;
 
   if (Math.abs(actual.duration - expected.duration) > 0.5) {
@@ -689,7 +695,7 @@ async function runRenderJob(jobId: string): Promise<void> {
       },
     });
 
-    verifyRender(outputPath, {
+    await verifyRender(outputPath, {
       duration: durationSeconds,
       width: composition.width,
       height: composition.height,
