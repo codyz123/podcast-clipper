@@ -14,14 +14,14 @@ test.describe("Authentication Flow", () => {
     // Start at root, should redirect to login for unauthenticated users
     await page.goto("/");
     await page.waitForLoadState("networkidle");
-    
+
     // Should be redirected to login (may take a moment due to auth check)
     await expect(page).toHaveURL("/login", { timeout: 10000 });
 
     // Should show login form elements
     await expect(page.locator('input[name="email"]')).toBeVisible();
     await expect(page.locator('input[name="password"]')).toBeVisible();
-    
+
     // Try to register a new user (use timestamp to ensure unique email)
     const timestamp = Date.now();
     const newUser = {
@@ -31,7 +31,9 @@ test.describe("Authentication Flow", () => {
     };
 
     // Find and click register toggle button
-    const registerToggle = page.locator("text=Create one, text=Create account, text=Sign up").first();
+    const registerToggle = page
+      .locator("text=Create one, text=Create account, text=Sign up")
+      .first();
     if (await registerToggle.isVisible()) {
       await registerToggle.click();
     }
@@ -40,7 +42,7 @@ test.describe("Authentication Flow", () => {
     await page.locator('input[name="name"]').fill(newUser.name);
     await page.locator('input[name="email"]').fill(newUser.email);
     await page.locator('input[name="password"]').fill(newUser.password);
-    
+
     // Handle confirm password if it exists
     const confirmPasswordField = page.locator('input[name="confirmPassword"]');
     if (await confirmPasswordField.isVisible()) {
@@ -48,7 +50,11 @@ test.describe("Authentication Flow", () => {
     }
 
     // Submit registration
-    const submitButton = page.locator('button:has-text("Create account"), button:has-text("Sign up"), button[type="submit"]').first();
+    const submitButton = page
+      .locator(
+        'button:has-text("Create account"), button:has-text("Sign up"), button[type="submit"]'
+      )
+      .first();
     await submitButton.click();
 
     // Should redirect to create podcast or episodes after successful registration
@@ -58,13 +64,17 @@ test.describe("Authentication Flow", () => {
     if (page.url().includes("create-podcast")) {
       await page.locator('input[name="name"]').fill("Test Podcast");
       await page.locator('button[type="submit"]').click();
-      
+
       // Should redirect to episodes after podcast creation
       await expect(page).toHaveURL("/episodes", { timeout: 10000 });
     }
 
     // Verify we're authenticated and can see the main interface
-    await expect(page.locator('[data-testid="episode-list"], .workspace-nav, [data-testid="app-shell"]').first()).toBeVisible({ timeout: 10000 });
+    await expect(
+      page
+        .locator('[data-testid="episode-list"], .workspace-nav, [data-testid="app-shell"]')
+        .first()
+    ).toBeVisible({ timeout: 10000 });
   });
 
   test("should login existing user and logout", async ({ page }) => {
@@ -80,7 +90,9 @@ test.describe("Authentication Flow", () => {
     await page.locator('input[name="password"]').fill(TEST_USER.password);
 
     // Submit login
-    const signInButton = page.locator('button:has-text("Sign in"), button:has-text("Login"), button[type="submit"]').first();
+    const signInButton = page
+      .locator('button:has-text("Sign in"), button:has-text("Login"), button[type="submit"]')
+      .first();
     await signInButton.click();
 
     // Should redirect to main app
@@ -94,21 +106,29 @@ test.describe("Authentication Flow", () => {
     }
 
     // Verify authenticated interface is visible
-    await expect(page.locator('[data-testid="app-shell"], .workspace-nav').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('[data-testid="app-shell"], .workspace-nav').first()).toBeVisible({
+      timeout: 10000,
+    });
 
     // Test logout functionality
-    const userMenu = page.locator('[data-testid="user-menu"], .user-menu, button:has-text("Sign out")').first();
-    
+    const userMenu = page
+      .locator('[data-testid="user-menu"], .user-menu, button:has-text("Sign out")')
+      .first();
+
     // If user menu button exists, click it to open dropdown
     if (await userMenu.isVisible()) {
       await userMenu.click();
     }
-    
+
     // Find and click logout button
-    const logoutButton = page.locator('button:has-text("Sign out"), button:has-text("Logout"), [data-testid="logout-button"]').first();
+    const logoutButton = page
+      .locator(
+        'button:has-text("Sign out"), button:has-text("Logout"), [data-testid="logout-button"]'
+      )
+      .first();
     if (await logoutButton.isVisible()) {
       await logoutButton.click();
-      
+
       // Should redirect back to login
       await expect(page).toHaveURL("/login", { timeout: 10000 });
     }
@@ -120,7 +140,7 @@ test.describe("Authentication Flow", () => {
 
     // Test empty form submission
     const signInButton = page.locator('button:has-text("Sign in"), button[type="submit"]').first();
-    
+
     // Button should be disabled for empty form or show validation on click
     const isDisabled = await signInButton.isDisabled();
     if (!isDisabled) {
@@ -135,10 +155,10 @@ test.describe("Authentication Flow", () => {
     // Test invalid email format
     await page.locator('input[name="email"]').fill("invalid-email");
     await page.locator('input[name="password"]').fill("somepassword");
-    
+
     if (!(await signInButton.isDisabled())) {
       await signInButton.click();
-      
+
       // Should show some kind of error or stay on login page
       await expect(page).toHaveURL("/login");
     }
@@ -152,7 +172,7 @@ test.describe("Authentication Flow", () => {
     await page.waitForLoadState("networkidle");
 
     // Intercept login request to simulate network error
-    await page.route("**/api/auth/login", route => {
+    await page.route("**/api/auth/login", (route) => {
       route.fulfill({
         status: 500,
         contentType: "application/json",
@@ -170,7 +190,7 @@ test.describe("Authentication Flow", () => {
 
     // Should show error message or stay on login page
     await expect(page).toHaveURL("/login");
-    
+
     // Look for error indication (could be toast, inline error, etc.)
     const errorIndicator = page.locator('.error, .text-red, [role="alert"], .bg-red').first();
     if (await errorIndicator.isVisible({ timeout: 5000 })) {
@@ -181,17 +201,17 @@ test.describe("Authentication Flow", () => {
   test("should redirect authenticated users away from login", async ({ page }) => {
     // Login first through API
     await ensureTestUser(page);
-    
+
     const response = await page.request.post("http://localhost:3002/api/auth/login", {
       data: {
         email: TEST_USER.email,
         password: TEST_USER.password,
       },
     });
-    
+
     if (response.ok()) {
       const { user, accessToken, refreshToken } = await response.json();
-      
+
       // Set auth state in localStorage
       await page.addInitScript(
         ({ user, accessToken, refreshToken }) => {
@@ -216,7 +236,7 @@ test.describe("Authentication Flow", () => {
 
       // Now try to visit login page
       await page.goto("/login");
-      
+
       // Should be redirected away from login
       await expect(page).not.toHaveURL("/login", { timeout: 10000 });
       await expect(page).toHaveURL(/\/(episodes|create-podcast)/, { timeout: 10000 });

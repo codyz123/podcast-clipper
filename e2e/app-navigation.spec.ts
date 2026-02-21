@@ -84,7 +84,9 @@ test.describe("Episode Creation Flow", () => {
 
     // Look for the "New Episode" button or "+" button
     const newEpisodeButton = page
-      .locator('button:has-text("New Episode"), button:has-text("New"), button[aria-label*="new" i]')
+      .locator(
+        'button:has-text("New Episode"), button:has-text("New"), button[aria-label*="new" i]'
+      )
       .first();
 
     if (await newEpisodeButton.isVisible({ timeout: 5000 }).catch(() => false)) {
