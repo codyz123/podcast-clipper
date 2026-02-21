@@ -19,6 +19,7 @@ import { bufferToTempFile } from "../lib/video-processing.js";
 import { db } from "../db/index.js";
 import { videoSources, podcastPeople } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
+import { validateFile, sanitizeFilename } from "../lib/file-security.js";
 
 const router = Router();
 
@@ -33,6 +34,15 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10GB limit
+  fileFilter: (req, file, cb) => {
+    // Basic validation at upload time
+    const validation = validateFile(file.originalname, file.mimetype, 0, 'audio');
+    if (!validation.valid) {
+      cb(new Error(validation.error || 'Invalid file'));
+    } else {
+      cb(null, true);
+    }
+  }
 });
 
 // OpenAI Whisper file size limit
@@ -502,6 +512,19 @@ router.post("/transcribe", upload.single("file"), async (req: Request, res: Resp
     const originalName = req.file.originalname || "audio";
     const fileSizeMB = req.file.size / 1024 / 1024;
 
+    // Validate file security
+    const fileValidation = validateFile(originalName, mimetype, req.file.size, 'audio');
+    if (!fileValidation.valid) {
+      progress({
+        stage: "error",
+        progress: 0,
+        message: "File validation failed",
+        detail: fileValidation.error,
+      });
+      res.status(400).json({ error: fileValidation.error });
+      return;
+    }
+
     progress({
       stage: "received",
       progress: 5,
@@ -852,7 +875,7 @@ router.post("/transcribe-multicam", jwtAuthMiddleware, async (req: Request, res:
   res.flushHeaders();
 
   const progress = (event: ProgressEvent) => {
-    console.log(
+    console.info(
       `[multicam-transcribe] [${event.stage}] ${event.progress}% - ${event.message}${event.detail ? ` (${event.detail})` : ""}`
     );
     sendProgress(res, event);

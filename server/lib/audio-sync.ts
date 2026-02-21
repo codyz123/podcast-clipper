@@ -195,7 +195,7 @@ async function correlateAudioPair(
     const confidence =
       normFactor > 0 ? Math.min(1, Math.max(0, Math.round((maxVal / normFactor) * 100) / 100)) : 0;
 
-    console.log(
+    console.info(
       `[audio-sync] Source ${srcId}: offset=${totalOffsetMs}ms, confidence=${confidence}, lag=${lagSamples} samples`
     );
 

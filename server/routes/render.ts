@@ -16,6 +16,7 @@ import {
   podcastPeople,
 } from "../db/schema.js";
 import { uploadMediaFromPath } from "../lib/media-storage.js";
+import { logAndSanitizeError } from "../lib/error-sanitizer.js";
 import {
   resolveCaptionStyle,
   toSubtitleConfig,
@@ -38,6 +39,40 @@ type VideoMetadata = {
   height: number;
   fps: number;
 };
+
+/**
+ * Cleanup old render files to prevent storage bloat
+ */
+function cleanupOldRenderFiles(): void {
+  try {
+    const renderDir = path.join(process.cwd(), ".context", "renders");
+    if (!fs.existsSync(renderDir)) return;
+
+    const files = fs.readdirSync(renderDir);
+    const now = Date.now();
+    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+
+    files.forEach(file => {
+      const filePath = path.join(renderDir, file);
+      try {
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtime.getTime() > maxAge) {
+          fs.unlinkSync(filePath);
+          console.info(`Cleaned up old render file: ${file}`);
+        }
+      } catch (error) {
+        console.warn(`Failed to process render file ${file}:`, error);
+      }
+    });
+  } catch (error) {
+    console.error('Failed to cleanup old render files:', error);
+  }
+}
+
+// Run cleanup every hour
+setInterval(cleanupOldRenderFiles, 60 * 60 * 1000);
+// Run initial cleanup
+setTimeout(cleanupOldRenderFiles, 10000);
 
 const getVideoMetadata = (filePath: string): VideoMetadata | null => {
   try {
@@ -247,6 +282,9 @@ function setJob(jobId: string, updates: Partial<RenderJob>): RenderJob {
 async function runRenderJob(jobId: string): Promise<void> {
   const job = renderJobs.get(jobId);
   if (!job) return;
+
+  let outputPath: string | null = null;
+  const tempFilesToCleanup: string[] = [];
 
   try {
     setJob(jobId, { status: "rendering", progress: 0, errorMessage: undefined });
@@ -623,10 +661,11 @@ async function runRenderJob(jobId: string): Promise<void> {
     const renderDir = path.join(process.cwd(), ".context", "renders");
     fs.mkdirSync(renderDir, { recursive: true });
 
-    const outputPath = path.join(
+    outputPath = path.join(
       renderDir,
       `${job.clipId}-${job.format.replace(":", "-")}-${Date.now()}-${crypto.randomUUID()}.mp4`
     );
+    tempFilesToCleanup.push(outputPath);
 
     const serveUrl = await getBundle();
     const compositionId = getCompositionId(job.format, isMulticam);
@@ -679,9 +718,22 @@ async function runRenderJob(jobId: string): Promise<void> {
       sizeBytes: size,
     });
   } catch (error) {
+    const sanitizedError = logAndSanitizeError(error as Error, 'Render Job', process.env.NODE_ENV === 'development');
     setJob(jobId, {
       status: "failed",
-      errorMessage: (error as Error).message,
+      errorMessage: typeof sanitizedError.error === 'string' ? sanitizedError.error : 'Render failed',
+    });
+  } finally {
+    // Cleanup temporary files
+    tempFilesToCleanup.forEach(filePath => {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          console.info(`Cleaned up temporary file: ${filePath}`);
+        }
+      } catch (cleanupError) {
+        console.warn(`Failed to cleanup temporary file ${filePath}:`, cleanupError);
+      }
     });
   }
 }
@@ -776,8 +828,8 @@ router.post("/render/clip", async (req: Request, res: Response) => {
 
     res.json({ jobId, status: job.status, progress: job.progress, reused: false });
   } catch (error) {
-    console.error("Failed to render clip:", error);
-    res.status(500).json({ error: (error as Error).message });
+    const errorResponse = logAndSanitizeError(error as Error, 'Render Clip', process.env.NODE_ENV === 'development');
+    res.status(500).json(errorResponse);
   }
 });
 

@@ -4,6 +4,8 @@ import { db } from "../db/index.js";
 import { uploadSessions, projects, podcastMembers } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
 import { createMultipartUpload, uploadPart, completeMultipartUpload } from "../lib/r2-storage.js";
+import { validateFile, validateContentType, createSafeStoragePath, MAX_FILE_SIZES } from "../lib/file-security.js";
+import { logAndSanitizeError } from "../lib/error-sanitizer.js";
 
 const router = Router();
 
@@ -45,11 +47,21 @@ router.post(
         return;
       }
 
-      // Validate size (50GB max)
-      if (totalBytes > 50 * 1024 * 1024 * 1024) {
-        res.status(400).json({ error: "File exceeds 50GB limit" });
+      // Validate filename, content type, and size
+      const fileValidation = validateFile(filename, contentType, totalBytes, 'audio');
+      if (!fileValidation.valid) {
+        res.status(400).json({ error: fileValidation.error });
         return;
       }
+
+      // Additional content type validation
+      if (!validateContentType(contentType)) {
+        res.status(400).json({ error: "Invalid content type" });
+        return;
+      }
+
+      // Use sanitized filename
+      const sanitizedFilename = fileValidation.sanitizedFilename!;
 
       // Verify episode exists
       const [episode] = await db
@@ -63,7 +75,8 @@ router.post(
 
       const chunkSize = calculateChunkSize(totalBytes);
       const totalParts = Math.ceil(totalBytes / chunkSize);
-      const pathname = `podcasts/${podcastId}/episodes/${episodeId}/${Date.now()}-${filename}`;
+      const timestamp = Date.now();
+      const pathname = createSafeStoragePath('podcasts', podcastId, 'episodes', episodeId, `${timestamp}-${sanitizedFilename}`);
 
       // Initialize R2 multipart upload
       const { key, uploadId } = await createMultipartUpload(pathname, contentType);
@@ -78,7 +91,7 @@ router.post(
           uploadId,
           blobKey: key,
           pathname,
-          filename,
+          filename: sanitizedFilename,
           contentType,
           totalBytes,
           chunkSize,
@@ -96,8 +109,8 @@ router.post(
         expiresAt: expiresAt.toISOString(),
       });
     } catch (error) {
-      console.error("Upload init error:", error);
-      res.status(500).json({ error: "Failed to initialize upload" });
+      const errorResponse = logAndSanitizeError(error as Error, 'Upload Init', process.env.NODE_ENV === 'development');
+      res.status(500).json(errorResponse);
     }
   }
 );
@@ -180,8 +193,8 @@ router.post(
         progress: Math.round((updatedParts.length / session.totalParts) * 100),
       });
     } catch (error) {
-      console.error("Part upload error:", error);
-      res.status(500).json({ error: "Failed to upload chunk" });
+      const errorResponse = logAndSanitizeError(error as Error, 'Part Upload', process.env.NODE_ENV === 'development');
+      res.status(500).json(errorResponse);
     }
   }
 );
@@ -255,19 +268,19 @@ router.post(
         size: session.totalBytes,
       });
     } catch (error) {
-      console.error("Complete upload error:", error);
+      const errorResponse = logAndSanitizeError(error as Error, 'Complete Upload', process.env.NODE_ENV === 'development');
 
-      // Mark as failed
+      // Mark as failed (store sanitized error message)
       await db
         .update(uploadSessions)
         .set({
           status: "failed",
-          errorMessage: String(error),
+          errorMessage: typeof errorResponse.error === 'string' ? errorResponse.error : 'Upload failed',
           updatedAt: new Date(),
         })
         .where(eq(uploadSessions.id, sessionId));
 
-      res.status(500).json({ error: "Failed to complete upload" });
+      res.status(500).json(errorResponse);
     }
   }
 );

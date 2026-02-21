@@ -23,6 +23,7 @@ import {
   isTokenExpired,
 } from "../lib/token-storage.js";
 import { authMiddleware } from "../middleware/auth.js";
+import { logAndSanitizeError } from "../lib/error-sanitizer.js";
 
 const router = Router();
 
@@ -124,9 +125,9 @@ router.get("/youtube/callback", async (req: Request, res: Response) => {
       `${frontendUrl}/oauth/callback?success=true&platform=youtube&accountName=${encodeURIComponent(accountName)}`
     );
   } catch (error) {
-    console.error("Error exchanging code for tokens:", error);
+    const sanitizedError = logAndSanitizeError(error as Error, 'YouTube OAuth', false);
     res.redirect(
-      `${frontendUrl}/oauth/callback?error=${encodeURIComponent((error as Error).message)}&platform=youtube`
+      `${frontendUrl}/oauth/callback?error=${encodeURIComponent(typeof sanitizedError.error === 'string' ? sanitizedError.error : 'Authentication failed')}&platform=youtube`
     );
   }
 });
@@ -228,9 +229,9 @@ router.get("/instagram/callback", async (req: Request, res: Response) => {
       `${frontendUrl}/oauth/callback?success=true&platform=instagram&accountName=${encodeURIComponent(tokens.accountName)}`
     );
   } catch (error) {
-    console.error("Error exchanging Instagram code for tokens:", error);
+    const sanitizedError = logAndSanitizeError(error as Error, 'Instagram OAuth', false);
     res.redirect(
-      `${frontendUrl}/oauth/callback?error=${encodeURIComponent((error as Error).message)}&platform=instagram`
+      `${frontendUrl}/oauth/callback?error=${encodeURIComponent(typeof sanitizedError.error === 'string' ? sanitizedError.error : 'Authentication failed')}&platform=instagram`
     );
   }
 });
@@ -335,9 +336,9 @@ router.get("/tiktok/callback", async (req: Request, res: Response) => {
       `${frontendUrl}/oauth/callback?success=true&platform=tiktok&accountName=${encodeURIComponent(tokens.accountName)}`
     );
   } catch (error) {
-    console.error("Error exchanging TikTok code for tokens:", error);
+    const sanitizedError = logAndSanitizeError(error as Error, 'TikTok OAuth', false);
     res.redirect(
-      `${frontendUrl}/oauth/callback?error=${encodeURIComponent((error as Error).message)}&platform=tiktok`
+      `${frontendUrl}/oauth/callback?error=${encodeURIComponent(typeof sanitizedError.error === 'string' ? sanitizedError.error : 'Authentication failed')}&platform=tiktok`
     );
   }
 });
@@ -453,9 +454,9 @@ router.get("/x/callback", async (req: Request, res: Response) => {
       `${frontendUrl}/oauth/callback?success=true&platform=x&accountName=${encodeURIComponent(tokens.accountName)}`
     );
   } catch (error) {
-    console.error("Error exchanging X tokens:", error);
+    const sanitizedError = logAndSanitizeError(error as Error, 'X OAuth', false);
     res.redirect(
-      `${frontendUrl}/oauth/callback?error=${encodeURIComponent((error as Error).message)}&platform=x`
+      `${frontendUrl}/oauth/callback?error=${encodeURIComponent(typeof sanitizedError.error === 'string' ? sanitizedError.error : 'Authentication failed')}&platform=x`
     );
   }
 });
