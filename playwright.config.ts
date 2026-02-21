@@ -21,20 +21,12 @@ export default defineConfig({
     },
   ],
 
-  webServer: [
-    {
-      command: "npm run dev:server",
-      url: "http://localhost:3002",
-      reuseExistingServer: !process.env.CI,
-      timeout: 120 * 1000,
-    },
-    {
-      command: "npm run dev",
-      url: "http://localhost:1420",
-      reuseExistingServer: !process.env.CI,
-      timeout: 120 * 1000,
-    },
-  ],
+  webServer: {
+    command: 'npm run dev:all',
+    url: 'http://localhost:1420',
+    reuseExistingServer: !process.env.CI,
+    timeout: 120 * 1000,
+  },
 
   timeout: 30 * 1000,
   expect: { timeout: 5 * 1000 },
