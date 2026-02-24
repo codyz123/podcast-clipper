@@ -1,5 +1,11 @@
 # Podcastomatic - AI Instructions
 
+## GitHub
+
+This project uses the **codyz123** GitHub account. Always use this account for PRs, issues, and `gh` CLI operations.
+
+---
+
 ## Environment Setup
 
 This project uses automatic environment setup. When starting work:
