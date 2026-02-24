@@ -36,11 +36,11 @@ import { generateColorPalette } from "../../lib/colorExtractor";
 import { generateId } from "../../lib/utils";
 import { cn } from "../../lib/utils";
 import { MultiTrackTimeline } from "./Timeline/MultiTrackTimeline";
-import { EditorPreview } from "./Preview/EditorPreview";
+import { PlayerPreview } from "./Preview/PlayerPreview";
 import { TransportControls } from "./Controls/TransportControls";
 import { AssetsPanel } from "./Panels/AssetsPanel";
-import { useAudioFade } from "../../hooks/useAudioFade";
 import { useMulticamOverrides } from "../../hooks/useMulticamOverrides";
+import { PlayerRef } from "@remotion/player";
 import { formatTimestamp } from "../../lib/formats";
 
 interface VideoEditorProps {
@@ -107,8 +107,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
   const [customGradEnd, setCustomGradEnd] = useState("#333333");
   const [bgPickerPosition, setBgPickerPosition] = useState({ top: 0, left: 0 });
 
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const animationRef = useRef<number | null>(null);
+  const playerRef = useRef<PlayerRef>(null);
   const colorPickerButtonRef = useRef<HTMLButtonElement>(null);
   const bgColorPickerRef = useRef<HTMLButtonElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -161,6 +160,15 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       currentProject.transcripts[currentProject.transcripts.length - 1]
     );
   }, [currentProject?.transcripts, currentProject?.activeTranscriptId]);
+
+  // Effective speaker segments for caption grouping — uses the same fallback as the speaker track:
+  // if clip.segments don't have speakerIds, fall back to transcript-level segments.
+  const captionSpeakerSegments = useMemo(() => {
+    if (!activeClip?.segments?.length) return undefined;
+    const clipHasSpeakerIds = activeClip.segments.some((s) => s.speakerId);
+    if (clipHasSpeakerIds || !activeTranscript?.segments?.length) return activeClip.segments;
+    return activeTranscript.segments;
+  }, [activeClip?.segments, activeTranscript?.segments]);
 
   // Build VideoSourceLike array for multicam hook and auto-gen effect
   const sourcesForTimeline: VideoSourceLike[] = useMemo(() => {
@@ -292,20 +300,11 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     updateClip,
   ]);
 
-  // Get the podcast audio track for fade settings
+  // Get the podcast audio track for mute/volume settings
   const podcastTrack = useMemo(
     () => activeClip?.tracks?.find((t) => t.type === "podcast-audio"),
     [activeClip?.tracks]
   );
-
-  // Apply audio fade-in/fade-out using Web Audio API
-  useAudioFade({
-    audioElement: audioRef.current,
-    track: podcastTrack,
-    clipDuration,
-    currentTime,
-    isPlaying,
-  });
 
   // Initialize tracks if not present
   useEffect(() => {
@@ -535,54 +534,17 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     loadAudio();
   }, [currentProject?.id]);
 
-  // Smooth playhead animation
+  // Sync mute/volume state with Player
   useEffect(() => {
-    if (!audioRef.current || !activeClip || !isPlaying) return;
-
-    const audio = audioRef.current;
-    const clipDuration = activeClip.endTime - activeClip.startTime;
-
-    const updatePlayhead = () => {
-      const elapsed = audio.currentTime - activeClip.startTime;
-
-      if (elapsed >= clipDuration) {
-        audio.pause();
-        setIsPlaying(false);
-        setCurrentTime(0);
-        return;
-      }
-
-      setCurrentTime(elapsed);
-      animationRef.current = requestAnimationFrame(updatePlayhead);
-    };
-
-    animationRef.current = requestAnimationFrame(updatePlayhead);
-
-    return () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-      }
-    };
-  }, [isPlaying, activeClip, setCurrentTime, setIsPlaying]);
-
-  // Update playback speed when it changes during playback
-  useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackSpeed;
+    if (!playerRef.current) return;
+    const shouldMute = isMuted || podcastTrack?.muted;
+    if (shouldMute) {
+      playerRef.current.mute();
+    } else {
+      playerRef.current.unmute();
+      playerRef.current.setVolume(podcastTrack?.volume ?? 1);
     }
-  }, [playbackSpeed]);
-
-  // Sync track mute state with audio element
-  // The podcast-audio track controls whether the main audio is muted
-  useEffect(() => {
-    if (!audioRef.current || !activeClip?.tracks) return;
-
-    const podcastTrack = activeClip.tracks.find((t) => t.type === "podcast-audio");
-    if (podcastTrack) {
-      // Mute if either global mute OR track mute is enabled
-      audioRef.current.muted = isMuted || podcastTrack.muted;
-    }
-  }, [activeClip?.tracks, isMuted]);
+  }, [activeClip?.tracks, isMuted, podcastTrack?.muted, podcastTrack?.volume]);
 
   // Delete selected timeline clip
   const handleDeleteTimelineClip = useCallback(() => {
@@ -612,15 +574,11 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
 
       if (e.code === "Space") {
         e.preventDefault();
-        if (audioRef.current && activeClip) {
+        if (playerRef.current && activeClip) {
           if (isPlaying) {
-            audioRef.current.pause();
-            setIsPlaying(false);
+            playerRef.current.pause();
           } else {
-            audioRef.current.currentTime = activeClip.startTime + currentTime;
-            audioRef.current.playbackRate = playbackSpeed;
-            audioRef.current.play();
-            setIsPlaying(true);
+            playerRef.current.play();
           }
         }
       }
@@ -672,27 +630,24 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
 
   // Handle play/pause
   const handlePlayPause = useCallback(() => {
-    if (!audioRef.current || !activeClip) return;
+    if (!playerRef.current || !activeClip) return;
 
     if (isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
+      playerRef.current.pause();
     } else {
-      audioRef.current.currentTime = activeClip.startTime + currentTime;
-      audioRef.current.playbackRate = playbackSpeed;
-      audioRef.current.play();
-      setIsPlaying(true);
+      playerRef.current.play();
     }
-  }, [isPlaying, activeClip, currentTime, playbackSpeed, setIsPlaying]);
+  }, [isPlaying, activeClip]);
 
   // Handle seek
   const handleSeek = useCallback(
     (time: number) => {
-      if (!audioRef.current || !activeClip) return;
+      if (!playerRef.current || !activeClip) return;
 
       const clampedTime = Math.max(0, Math.min(time, activeClip.endTime - activeClip.startTime));
-      setCurrentTime(clampedTime);
-      audioRef.current.currentTime = activeClip.startTime + clampedTime;
+      const frame = Math.floor(clampedTime * 30);
+      playerRef.current.seekTo(frame);
+      setCurrentTime(clampedTime); // Update immediately for responsive UI
     },
     [activeClip, setCurrentTime]
   );
@@ -701,15 +656,15 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
   const goToClip = useCallback(
     (index: number) => {
       if (index >= 0 && index < clips.length) {
+        if (playerRef.current && isPlaying) {
+          playerRef.current.pause();
+        }
         setActiveClip(clips[index].id);
         setCurrentTime(0);
-        if (audioRef.current && isPlaying) {
-          audioRef.current.pause();
-          setIsPlaying(false);
-        }
+        // Player remounts via key={clip.id}-{format}, starting at frame 0
       }
     },
-    [clips, setActiveClip, setCurrentTime, isPlaying, setIsPlaying]
+    [clips, setActiveClip, setCurrentTime, isPlaying]
   );
 
   // Handle clip deletion
@@ -717,9 +672,8 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     if (!activeClip) return;
 
     // Stop playback
-    if (audioRef.current && isPlaying) {
-      audioRef.current.pause();
-      setIsPlaying(false);
+    if (playerRef.current && isPlaying) {
+      playerRef.current.pause();
     }
 
     // Navigate to previous or next clip before deleting
@@ -960,6 +914,21 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
     [activeClip, updateClip, pushSnapshot]
   );
 
+  // Handle animation scale change from preview resize
+  const handleAnimationScaleChange = useCallback(
+    (clipId: string, scale: number) => {
+      if (!activeClip) return;
+      const currentTracks = activeClip.tracks || [];
+      pushSnapshot(currentTracks, activeClip.captionStyle);
+      const updatedTracks = currentTracks.map((track) => ({
+        ...track,
+        clips: track.clips.map((c) => (c.id === clipId ? { ...c, scale } : c)),
+      }));
+      updateClip(activeClip.id, { tracks: updatedTracks });
+    },
+    [activeClip, updateClip, pushSnapshot]
+  );
+
   // Handle adding an animation from the assets panel
   const handleAddAnimation = useCallback(
     (
@@ -985,11 +954,15 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
         clips: [...t.clips],
       }));
 
-      // Find or create a video-overlay track
-      let overlayTrack = tracksCopy.find((t) => t.type === "video-overlay");
+      // Use the selected track if it's a video-overlay, otherwise find or create one
+      let overlayTrack = selectedTrackId
+        ? tracksCopy.find((t) => t.id === selectedTrackId && t.type === "video-overlay")
+        : undefined;
+      if (!overlayTrack) {
+        overlayTrack = tracksCopy.find((t) => t.type === "video-overlay");
+      }
 
       if (!overlayTrack) {
-        // Create a new video-overlay track
         const maxOrder = tracksCopy.reduce((max, t) => Math.max(max, t.order), -1);
         overlayTrack = {
           id: generateId(),
@@ -1009,39 +982,72 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
       const newClip: TrackClip = {
         id: generateId(),
         trackId: overlayTrack.id,
-        startTime: currentTime, // Place at current playhead position
+        startTime: currentTime,
         duration: duration,
         type: "animation",
         assetUrl: animationUrl,
         assetSource: source,
       };
 
-      // Add the clip to the track
       overlayTrack.clips = [...overlayTrack.clips, newClip];
 
       updateClip(activeClip.id, { tracks: tracksCopy });
     },
-    [activeClip, currentTime, updateClip, pushSnapshot]
+    [activeClip, currentTime, updateClip, pushSnapshot, selectedTrackId]
   );
 
-  const selectedTemplate = useMemo<VideoTemplate>(() => {
-    const fallback = templates.find((t) => t.id === selectedTemplateId) ?? templates[0];
-    if (activeClip?.background || activeClip?.subtitle) {
-      return {
-        ...fallback,
-        id: activeClip.templateId || fallback.id,
-        background: activeClip.background || fallback.background,
-        subtitle: activeClip.subtitle || fallback.subtitle,
+  // Handle adding a branding asset from the assets panel
+  const handleAddBrandingAsset = useCallback(
+    (assetUrl: string, _name: string) => {
+      if (!activeClip) return;
+
+      const currentTracks = activeClip.tracks || [];
+      pushSnapshot(currentTracks, activeClip.captionStyle);
+
+      const tracksCopy = currentTracks.map((t) => ({
+        ...t,
+        clips: [...t.clips],
+      }));
+
+      // Use the selected track if it's a video-overlay, otherwise find or create one
+      let overlayTrack = selectedTrackId
+        ? tracksCopy.find((t) => t.id === selectedTrackId && t.type === "video-overlay")
+        : undefined;
+      if (!overlayTrack) {
+        overlayTrack = tracksCopy.find((t) => t.type === "video-overlay");
+      }
+
+      if (!overlayTrack) {
+        const maxOrder = tracksCopy.reduce((max, t) => Math.max(max, t.order), -1);
+        overlayTrack = {
+          id: generateId(),
+          type: "video-overlay" as TrackType,
+          name: "Video",
+          order: maxOrder + 1,
+          locked: false,
+          muted: false,
+          volume: 1,
+          opacity: 1,
+          clips: [],
+        };
+        tracksCopy.push(overlayTrack);
+      }
+
+      const newClip: TrackClip = {
+        id: generateId(),
+        trackId: overlayTrack.id,
+        startTime: currentTime,
+        duration: 5,
+        type: "image",
+        assetUrl,
+        assetSource: "branding",
       };
-    }
-    return fallback;
-  }, [
-    activeClip?.background,
-    activeClip?.subtitle,
-    activeClip?.templateId,
-    selectedTemplateId,
-    templates,
-  ]);
+
+      overlayTrack.clips = [...overlayTrack.clips, newClip];
+      updateClip(activeClip.id, { tracks: tracksCopy });
+    },
+    [activeClip, currentTime, updateClip, pushSnapshot, selectedTrackId]
+  );
 
   // Sync background mode to clip
   useEffect(() => {
@@ -1079,11 +1085,6 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
 
   return (
     <div className="flex h-full flex-col bg-[hsl(var(--bg-base))]">
-      {/* Hidden audio element */}
-      {audioUrl && (
-        <audio ref={audioRef} src={audioUrl} preload="auto" muted={isMuted} className="hidden" />
-      )}
-
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[hsl(var(--border-subtle))] px-4 py-2">
         {/* Left: Undo/Redo */}
@@ -1218,21 +1219,31 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
               )}
             </button>
           </div>
-          {!isPanelCollapsed.assets && <AssetsPanel onAddAnimation={handleAddAnimation} />}
+          {!isPanelCollapsed.assets && (
+            <AssetsPanel
+              onAddAnimation={handleAddAnimation}
+              onAddBrandingAsset={handleAddBrandingAsset}
+            />
+          )}
         </div>
 
         {/* Center - Preview */}
         <div className="flex flex-1 flex-col">
-          <EditorPreview
+          <PlayerPreview
             clip={activeClip}
             currentTime={currentTime}
             format={selectedFormat}
-            template={selectedTemplate}
+            audioUrl={audioUrl || ""}
+            playerRef={playerRef}
+            playbackSpeed={playbackSpeed}
+            onTimeUpdate={setCurrentTime}
+            onPlayStateChange={setIsPlaying}
             onFormatChange={setSelectedFormat}
             isCaptionsTrackSelected={isCaptionsTrackSelected}
             isVideoTrackSelected={isVideoTrackSelected}
             onCaptionPositionChange={handleCaptionPositionChange}
             onAnimationPositionChange={handleAnimationPositionChange}
+            onAnimationScaleChange={handleAnimationScaleChange}
             selectedClipId={selectedTimelineClipId}
             onSelectClip={setSelectedTimelineClipId}
             // Multicam props
@@ -1245,6 +1256,7 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
             defaultVideoSourceId={currentProject?.defaultVideoSourceId}
             multicamOverrides={multicamOverrides}
             transitionStyle={transitionStyle}
+            captionSpeakerSegments={captionSpeakerSegments}
             speakerPeople={speakerPeople}
             speakerDisplayMode={speakerTrackSettings?.displayMode}
             speakerNameFormat={speakerTrackSettings?.nameFormat || "full-name"}
@@ -1856,6 +1868,37 @@ export const VideoEditor: React.FC<VideoEditorProps> = () => {
                           />
                         </button>
                       </div>
+
+                      {/* Break on speaker change toggle */}
+                      {(activeClip?.segments?.length ?? 0) > 0 && (
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] text-[hsl(var(--text-muted))]">
+                            Break on speaker change
+                          </label>
+                          <button
+                            onClick={() =>
+                              handleCaptionStyleChange({
+                                breakOnSpeakerChange: !currentCaptionStyle.breakOnSpeakerChange,
+                              })
+                            }
+                            className={cn(
+                              "relative h-5 w-9 rounded-full transition-colors",
+                              currentCaptionStyle.breakOnSpeakerChange
+                                ? "bg-[hsl(var(--cyan))]"
+                                : "bg-[hsl(var(--surface))]"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                                currentCaptionStyle.breakOnSpeakerChange
+                                  ? "translate-x-4"
+                                  : "translate-x-0.5"
+                              )}
+                            />
+                          </button>
+                        </div>
+                      )}
 
                       {/* Highlight color (only shown when highlight is enabled) */}
                       {isHighlightEnabled && (

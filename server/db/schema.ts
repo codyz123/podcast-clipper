@@ -334,6 +334,32 @@ export const podcastPeople = pgTable(
   (table) => [index("podcast_people_podcast_id_idx").on(table.podcastId)]
 );
 
+// ============ Podcast Branding Assets ============
+
+export const podcastBrandingAssets = pgTable(
+  "podcast_branding_assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    podcastId: uuid("podcast_id")
+      .references(() => podcasts.id, { onDelete: "cascade" })
+      .notNull(),
+    name: varchar("name", { length: 255 }).notNull(),
+    category: varchar("category", { length: 50 }).notNull().default("logo"),
+    blobUrl: text("blob_url").notNull(),
+    contentType: varchar("content_type", { length: 100 }),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    width: integer("width"),
+    height: integer("height"),
+    displayOrder: integer("display_order").default(0).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("podcast_branding_assets_podcast_id_idx").on(table.podcastId)]
+);
+
+export type PodcastBrandingAsset = typeof podcastBrandingAssets.$inferSelect;
+export type NewPodcastBrandingAsset = typeof podcastBrandingAssets.$inferInsert;
+
 // ============ Transcripts ============
 
 export const transcripts = pgTable(
@@ -729,6 +755,7 @@ export const podcastsRelations = relations(podcasts, ({ one, many }) => ({
   invitations: many(podcastInvitations),
   oauthTokens: many(oauthTokens),
   people: many(podcastPeople),
+  brandingAssets: many(podcastBrandingAssets),
 }));
 
 export const podcastPeopleRelations = relations(podcastPeople, ({ one, many }) => ({
@@ -737,6 +764,13 @@ export const podcastPeopleRelations = relations(podcastPeople, ({ one, many }) =
     references: [podcasts.id],
   }),
   videoSources: many(videoSources),
+}));
+
+export const podcastBrandingAssetsRelations = relations(podcastBrandingAssets, ({ one }) => ({
+  podcast: one(podcasts, {
+    fields: [podcastBrandingAssets.podcastId],
+    references: [podcasts.id],
+  }),
 }));
 
 export const podcastMembersRelations = relations(podcastMembers, ({ one }) => ({

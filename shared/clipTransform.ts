@@ -13,6 +13,7 @@ export type CaptionStyle = {
   positionY?: number;
   wordsPerLine?: number;
   preset?: string;
+  breakOnSpeakerChange?: boolean;
 };
 
 export type ClipWithCaption = {
@@ -40,6 +41,7 @@ export type SubtitleConfig = {
   positionY?: number;
   animation: "fade" | "pop" | "karaoke" | "typewriter";
   wordsPerGroup: number;
+  breakOnSpeakerChange: boolean;
 };
 
 export type WordTiming = {
@@ -122,6 +124,7 @@ export function toSubtitleConfig(style: CaptionStyle): SubtitleConfig {
       typeof style.wordsPerLine === "number"
         ? style.wordsPerLine
         : CANONICAL_DEFAULTS.wordsPerGroup,
+    breakOnSpeakerChange: style.breakOnSpeakerChange ?? false,
   };
 }
 

@@ -14,10 +14,11 @@ import { useWorkspaceStore, PodcastMetadata } from "../../stores/workspaceStore"
 import { extractBrandColors, parseBrandColorsFromStorage } from "../../lib/colorExtractor";
 import { usePodcast } from "../../hooks/usePodcast";
 import { usePodcastPeople } from "../../hooks/usePodcastPeople";
+import { useBrandingAssets } from "../../hooks/useBrandingAssets";
 import { useAuthStore } from "../../stores/authStore";
 import { getApiBase, getMediaUrl } from "../../lib/api";
 import { ConfirmationDialog } from "../ui/ConfirmationDialog";
-import type { PodcastPerson } from "../../lib/types";
+import type { PodcastPerson, BrandingAssetCategory } from "../../lib/types";
 
 // Categories based on Apple Podcasts categories
 const PODCAST_CATEGORIES = [
@@ -72,6 +73,20 @@ export const PodcastInfoPage: React.FC = () => {
   const [newPersonName, setNewPersonName] = useState("");
   const [newPersonRole, setNewPersonRole] = useState<"host" | "guest">("guest");
   const [deletingPersonId, setDeletingPersonId] = useState<string | null>(null);
+
+  // Branding assets
+  const {
+    assets: brandingAssets,
+    uploadAsset,
+    deleteAsset: deleteBrandingAsset,
+  } = useBrandingAssets();
+  const [isAddingAsset, setIsAddingAsset] = useState(false);
+  const [newAssetName, setNewAssetName] = useState("");
+  const [newAssetCategory, setNewAssetCategory] = useState<BrandingAssetCategory>("logo");
+  const [selectedAssetFile, setSelectedAssetFile] = useState<File | null>(null);
+  const [isUploadingAsset, setIsUploadingAsset] = useState(false);
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
+  const assetFileInputRef = useRef<HTMLInputElement>(null);
 
   // Danger zone state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -241,6 +256,20 @@ export const PodcastInfoPage: React.FC = () => {
     const file = e.target.files?.[0];
     if (!file) return;
     await uploadPhoto(personId, file);
+  };
+
+  const handleUploadAsset = async () => {
+    if (!selectedAssetFile || !newAssetName.trim()) return;
+    setIsUploadingAsset(true);
+    try {
+      await uploadAsset(selectedAssetFile, newAssetName.trim(), newAssetCategory);
+      setSelectedAssetFile(null);
+      setNewAssetName("");
+      setNewAssetCategory("logo");
+      setIsAddingAsset(false);
+    } finally {
+      setIsUploadingAsset(false);
+    }
   };
 
   return (
@@ -691,6 +720,174 @@ export const PodcastInfoPage: React.FC = () => {
             title="Remove Person?"
             description="This will remove this person from your podcast's recurring people list. Speaker labels in existing transcripts will be preserved."
             confirmText="Remove"
+            variant="danger"
+          />
+
+          {/* Branding Assets Section */}
+          <section>
+            <h2 className="mb-4 flex items-center gap-2 text-sm font-medium tracking-wider text-[hsl(var(--text-muted))] uppercase">
+              <ImageIcon className="h-4 w-4" />
+              Branding Assets
+            </h2>
+            <div className="rounded-xl border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface)/0.5)] p-5">
+              <p className="mb-4 text-sm text-[hsl(var(--text-muted))]">
+                Upload logos, icons, and graphics for use as overlays in the clip editor.
+              </p>
+
+              {/* Asset grid */}
+              {brandingAssets.length > 0 && (
+                <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {brandingAssets.map((asset) => (
+                    <div
+                      key={asset.id}
+                      className="group relative rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--bg-base))] p-3"
+                    >
+                      <div className="mb-2 flex h-16 items-center justify-center overflow-hidden rounded-md bg-[hsl(var(--surface))]">
+                        <img
+                          src={getMediaUrl(asset.blobUrl)}
+                          alt={asset.name}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
+                      <p className="truncate text-xs font-medium text-[hsl(var(--text))]">
+                        {asset.name}
+                      </p>
+                      <span className="mt-1 inline-block rounded-full bg-[hsl(var(--surface))] px-2 py-0.5 text-[10px] text-[hsl(var(--text-muted))]">
+                        {asset.category}
+                      </span>
+                      <button
+                        onClick={() => setDeletingAssetId(asset.id)}
+                        className="absolute top-2 right-2 rounded p-1 text-[hsl(var(--text-ghost))] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[hsl(var(--error))]"
+                      >
+                        <Cross2Icon className="h-3 w-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Upload form */}
+              {isAddingAsset && selectedAssetFile ? (
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[hsl(var(--surface))]">
+                    <img
+                      src={URL.createObjectURL(selectedAssetFile)}
+                      alt="Preview"
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    value={newAssetName}
+                    onChange={(e) => setNewAssetName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newAssetName.trim()) {
+                        handleUploadAsset();
+                      }
+                      if (e.key === "Escape") {
+                        setIsAddingAsset(false);
+                        setSelectedAssetFile(null);
+                        setNewAssetName("");
+                      }
+                    }}
+                    placeholder="Asset name..."
+                    autoFocus
+                    className={cn(
+                      "flex-1 rounded-lg px-3 py-2",
+                      "bg-[hsl(var(--bg-base))]",
+                      "border border-[hsl(var(--border-subtle))]",
+                      "text-sm text-[hsl(var(--text))] placeholder:text-[hsl(var(--text-ghost))]",
+                      "focus:border-[hsl(var(--cyan))] focus:ring-1 focus:ring-[hsl(var(--cyan)/0.3)] focus:outline-none"
+                    )}
+                  />
+                  <select
+                    value={newAssetCategory}
+                    onChange={(e) => setNewAssetCategory(e.target.value as BrandingAssetCategory)}
+                    className={cn(
+                      "rounded-lg px-3 py-2",
+                      "bg-[hsl(var(--bg-base))]",
+                      "border border-[hsl(var(--border-subtle))]",
+                      "text-sm text-[hsl(var(--text))]"
+                    )}
+                  >
+                    <option value="logo">Logo</option>
+                    <option value="icon">Icon</option>
+                    <option value="watermark">Watermark</option>
+                    <option value="banner">Banner</option>
+                    <option value="graphic">Graphic</option>
+                  </select>
+                  <button
+                    onClick={handleUploadAsset}
+                    disabled={!newAssetName.trim() || isUploadingAsset}
+                    className={cn(
+                      "rounded-lg px-4 py-2 text-sm font-medium",
+                      "bg-[hsl(var(--cyan))] text-white",
+                      "hover:bg-[hsl(var(--cyan)/0.9)]",
+                      "disabled:cursor-not-allowed disabled:opacity-50",
+                      "transition-colors"
+                    )}
+                  >
+                    {isUploadingAsset ? "Uploading..." : "Upload"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsAddingAsset(false);
+                      setSelectedAssetFile(null);
+                      setNewAssetName("");
+                    }}
+                    className="rounded-lg p-2 text-[hsl(var(--text-muted))] transition-colors hover:text-[hsl(var(--text))]"
+                  >
+                    <Cross2Icon className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <input
+                    ref={assetFileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) {
+                        setSelectedAssetFile(file);
+                        setNewAssetName(file.name.replace(/\.[^.]+$/, ""));
+                        setIsAddingAsset(true);
+                      }
+                      e.target.value = "";
+                    }}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => assetFileInputRef.current?.click()}
+                    className={cn(
+                      "inline-flex items-center gap-2 rounded-lg px-4 py-2",
+                      "bg-[hsl(var(--surface))] text-sm text-[hsl(var(--text))]",
+                      "border border-[hsl(var(--border-subtle))]",
+                      "hover:bg-[hsl(var(--surface-hover))]",
+                      "transition-colors"
+                    )}
+                  >
+                    <ImageIcon className="h-4 w-4" />
+                    Add Asset
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Delete branding asset confirmation */}
+          <ConfirmationDialog
+            isOpen={!!deletingAssetId}
+            onClose={() => setDeletingAssetId(null)}
+            onConfirm={async () => {
+              if (deletingAssetId) {
+                await deleteBrandingAsset(deletingAssetId);
+                setDeletingAssetId(null);
+              }
+            }}
+            title="Delete Asset?"
+            description="This will permanently delete this branding asset. Clips that use it will lose the overlay."
+            confirmText="Delete"
             variant="danger"
           />
 
