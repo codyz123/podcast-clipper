@@ -74,6 +74,7 @@ const productionSubStages: SubStageOption[] = [];
 const postProductionSubStages: SubStageOption[] = [
   { id: "record", label: "Media", icon: SpeakerLoudIcon },
   { id: "transcript", label: "Transcribe", icon: TextIcon },
+  { id: "nle-editor", label: "Edit", icon: VideoIcon },
 ];
 
 const marketingSubStages: SubStageOption[] = [

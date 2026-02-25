@@ -193,6 +193,7 @@ export const ROUTE_TO_SUB_STEP: Record<string, SubStepId> = {
   notes: "logistics",
   record: "recording",
   transcript: "transcription",
+  "nle-editor": "editing",
   editor: "clips",
 };
 

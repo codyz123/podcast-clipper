@@ -323,3 +323,96 @@ export function mixVideoAudioApi(
     { method: "POST" }
   );
 }
+
+// ============ Episode Timelines ============
+
+export const timelineKeys = {
+  detail: (podcastId: string, episodeId: string) => ["timeline", podcastId, episodeId] as const,
+};
+
+export function fetchTimeline(
+  podcastId: string,
+  episodeId: string
+): Promise<import("./nleTypes").EpisodeTimeline | null> {
+  return apiCall<{ timeline: import("./nleTypes").EpisodeTimeline | null }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/timeline`
+  ).then((d) => d.timeline);
+}
+
+export function saveTimelineApi(
+  podcastId: string,
+  episodeId: string,
+  timeline: Record<string, unknown>
+): Promise<import("./nleTypes").EpisodeTimeline> {
+  return apiCall<{ timeline: import("./nleTypes").EpisodeTimeline }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/timeline`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(timeline),
+    }
+  ).then((d) => d.timeline);
+}
+
+export function initTimelineApi(
+  podcastId: string,
+  episodeId: string
+): Promise<{ timeline: import("./nleTypes").EpisodeTimeline; created: boolean }> {
+  return apiCall<{
+    timeline: import("./nleTypes").EpisodeTimeline;
+    created: boolean;
+  }>(`${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/timeline/init`, {
+    method: "POST",
+  });
+}
+
+// ============ Media Assets (Aggregated) ============
+
+export const mediaAssetKeys = {
+  all: (podcastId: string, episodeId: string) => ["mediaAssets", podcastId, episodeId] as const,
+};
+
+export function fetchMediaAssets(
+  podcastId: string,
+  episodeId: string
+): Promise<import("./types").MediaItem[]> {
+  return apiCall<{ mediaItems: import("./types").MediaItem[] }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/media-assets`
+  ).then((d) => d.mediaItems);
+}
+
+export function createMediaAssetApi(
+  podcastId: string,
+  episodeId: string,
+  data: {
+    blobUrl: string;
+    name: string;
+    contentType?: string;
+    sizeBytes?: number;
+    category?: string;
+    durationSeconds?: number;
+    width?: number;
+    height?: number;
+    fps?: number;
+  }
+): Promise<Record<string, unknown>> {
+  return apiCall<{ mediaAsset: Record<string, unknown> }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/media-assets`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }
+  ).then((d) => d.mediaAsset);
+}
+
+export function deleteMediaAssetApi(
+  podcastId: string,
+  episodeId: string,
+  assetId: string
+): Promise<void> {
+  return apiCall<{ success: boolean }>(
+    `${getApiBase()}/api/podcasts/${podcastId}/episodes/${episodeId}/media-assets/${assetId}`,
+    { method: "DELETE" }
+  ).then(() => undefined);
+}

@@ -642,3 +642,38 @@ export interface HookAnalysis {
   suggestions: string[];
   predictedRetention: number; // Estimated % who watch past 3s
 }
+
+// ============ Media Manager ============
+
+export type MediaCategory =
+  | "episode-audio"
+  | "camera"
+  | "broll"
+  | "intro"
+  | "outro"
+  | "music"
+  | "sfx"
+  | "graphic";
+
+export interface MediaItem {
+  id: string;
+  source: "media-asset" | "video-source" | "episode-audio" | "branding";
+  sourceId: string; // Original ID in the source table (for mutations)
+  name: string;
+  category: MediaCategory;
+  blobUrl: string;
+  proxyBlobUrl?: string;
+  thumbnailUrl?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  syncOffsetMs?: number;
+  syncMethod?: string;
+  syncConfidence?: number;
+  processingStatus?: "pending" | "processing" | "complete" | "failed";
+  displayOrder: number;
+  createdAt: string;
+}
