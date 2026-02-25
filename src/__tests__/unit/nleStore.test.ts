@@ -617,3 +617,347 @@ describe("resetStore", () => {
     expect(state.redoStack).toEqual([]);
   });
 });
+
+// ---- Duration recalculation ----
+
+describe("Duration recalculation", () => {
+  it("removeItem recalculates duration downward", () => {
+    const track = createDefaultTrack({
+      id: "t1",
+      type: "video-main",
+      name: "V",
+      items: [
+        createDefaultTimelineItem({
+          id: "item-long",
+          trackId: "t1",
+          type: "video",
+          startTime: 0,
+          duration: 60,
+        }),
+        createDefaultTimelineItem({
+          id: "item-short",
+          trackId: "t1",
+          type: "video",
+          startTime: 0,
+          duration: 30,
+        }),
+      ],
+    });
+    seedTimeline({ tracks: [track], duration: 60 });
+
+    getState().removeItem("item-long");
+
+    expect(getState().timeline!.duration).toBe(30);
+  });
+
+  it("removeTrack recalculates duration", () => {
+    const longTrack = createDefaultTrack({
+      id: "t-long",
+      type: "video-main",
+      name: "Long",
+      items: [
+        createDefaultTimelineItem({
+          id: "item-long",
+          trackId: "t-long",
+          type: "video",
+          startTime: 0,
+          duration: 90,
+        }),
+      ],
+    });
+    const shortTrack = createDefaultTrack({
+      id: "t-short",
+      type: "audio-main",
+      name: "Short",
+      items: [
+        createDefaultTimelineItem({
+          id: "item-short",
+          trackId: "t-short",
+          type: "audio",
+          startTime: 0,
+          duration: 45,
+        }),
+      ],
+    });
+    seedTimeline({ tracks: [longTrack, shortTrack], duration: 90 });
+
+    getState().removeTrack("t-long");
+
+    expect(getState().timeline!.duration).toBe(45);
+  });
+
+  it("updateItem recalculates duration when item shortens", () => {
+    const track = createDefaultTrack({
+      id: "t1",
+      type: "video-main",
+      name: "V",
+      items: [
+        createDefaultTimelineItem({
+          id: "item-1",
+          trackId: "t1",
+          type: "video",
+          startTime: 0,
+          duration: 60,
+        }),
+      ],
+    });
+    seedTimeline({ tracks: [track], duration: 60 });
+
+    getState().updateItem("item-1", { duration: 30 });
+
+    expect(getState().timeline!.duration).toBe(30);
+  });
+
+  it("updateItem recalculates duration when item grows", () => {
+    const track = createDefaultTrack({
+      id: "t1",
+      type: "video-main",
+      name: "V",
+      items: [
+        createDefaultTimelineItem({
+          id: "item-1",
+          trackId: "t1",
+          type: "video",
+          startTime: 50,
+          duration: 10, // ends at 60
+        }),
+      ],
+    });
+    seedTimeline({ tracks: [track], duration: 60 });
+
+    getState().updateItem("item-1", { startTime: 80 }); // now ends at 90
+
+    expect(getState().timeline!.duration).toBe(90);
+  });
+});
+
+// ---- Selection cleanup ----
+
+describe("Selection cleanup", () => {
+  it("removeItem cleans up selectedItemIds", () => {
+    const { itemId } = seedTrackWithItems();
+    getState().setSelectedItemIds([itemId]);
+
+    getState().removeItem(itemId);
+
+    expect(getState().selectedItemIds).not.toContain(itemId);
+    expect(getState().selectedItemIds).toEqual([]);
+  });
+
+  it("removeTrack cleans up selectedTrackIds", () => {
+    const track = createDefaultTrack({ id: "t1", type: "video-main", name: "V" });
+    seedTimeline({ tracks: [track] });
+    getState().setSelectedTrackIds(["t1"]);
+
+    getState().removeTrack("t1");
+
+    expect(getState().selectedTrackIds).not.toContain("t1");
+    expect(getState().selectedTrackIds).toEqual([]);
+  });
+
+  it("removeTrack cleans up selectedItemIds for items on that track", () => {
+    const track = createDefaultTrack({
+      id: "t1",
+      type: "video-main",
+      name: "V",
+      items: [
+        createDefaultTimelineItem({
+          id: "item-on-track",
+          trackId: "t1",
+          type: "video",
+          startTime: 0,
+          duration: 30,
+        }),
+      ],
+    });
+    seedTimeline({ tracks: [track] });
+    getState().setSelectedItemIds(["item-on-track"]);
+
+    getState().removeTrack("t1");
+
+    expect(getState().selectedItemIds).not.toContain("item-on-track");
+    expect(getState().selectedItemIds).toEqual([]);
+  });
+});
+
+// ---- moveItem locked track guard ----
+
+describe("moveItem locked track guard", () => {
+  it("moveItem rejects move to locked destination track", () => {
+    const t1 = createDefaultTrack({
+      id: "t1",
+      type: "video-main",
+      name: "Source",
+      items: [
+        createDefaultTimelineItem({
+          id: "item-1",
+          trackId: "t1",
+          type: "video",
+          startTime: 0,
+          duration: 30,
+        }),
+      ],
+    });
+    const t2 = createDefaultTrack({
+      id: "t2",
+      type: "video-overlay",
+      name: "Locked Dest",
+      locked: true,
+    });
+    seedTimeline({ tracks: [t1, t2] });
+
+    getState().moveItem("item-1", 10, "t2");
+
+    const tracks = getState().timeline!.tracks;
+    // Item should remain on source track
+    expect(tracks.find((t) => t.id === "t1")!.items).toHaveLength(1);
+    expect(tracks.find((t) => t.id === "t2")!.items).toHaveLength(0);
+    // startTime still updated even though cross-track move was rejected
+    expect(tracks.find((t) => t.id === "t1")!.items[0].startTime).toBe(10);
+  });
+
+  it("moveItem allows move to unlocked destination track", () => {
+    const t1 = createDefaultTrack({
+      id: "t1",
+      type: "video-main",
+      name: "Source",
+      items: [
+        createDefaultTimelineItem({
+          id: "item-1",
+          trackId: "t1",
+          type: "video",
+          startTime: 0,
+          duration: 30,
+        }),
+      ],
+    });
+    const t2 = createDefaultTrack({
+      id: "t2",
+      type: "video-overlay",
+      name: "Unlocked Dest",
+      locked: false,
+    });
+    seedTimeline({ tracks: [t1, t2] });
+
+    getState().moveItem("item-1", 5, "t2");
+
+    const tracks = getState().timeline!.tracks;
+    expect(tracks.find((t) => t.id === "t1")!.items).toHaveLength(0);
+    expect(tracks.find((t) => t.id === "t2")!.items).toHaveLength(1);
+    expect(tracks.find((t) => t.id === "t2")!.items[0].startTime).toBe(5);
+    expect(tracks.find((t) => t.id === "t2")!.items[0].trackId).toBe("t2");
+  });
+});
+
+// ---- splitItemAtPlayhead copies metadata ----
+
+describe("splitItemAtPlayhead copies metadata", () => {
+  it("split preserves textConfig on right half", () => {
+    const track = createDefaultTrack({
+      id: "t1",
+      type: "text-graphics",
+      name: "Text",
+      items: [
+        createDefaultTimelineItem({
+          id: "text-item",
+          trackId: "t1",
+          type: "text",
+          startTime: 0,
+          duration: 60,
+          sourceIn: 0,
+          sourceOut: 60,
+          textConfig: {
+            text: "Hello World",
+            fontFamily: "Inter",
+            fontSize: 48,
+            fontWeight: 700,
+            color: "#ffffff",
+            animation: "fade-in",
+          },
+        }),
+      ],
+    });
+    seedTimeline({ tracks: [track], duration: 60 });
+    useNleStore.setState({ currentTime: 30 });
+
+    getState().splitItemAtPlayhead("text-item");
+
+    const items = getState().timeline!.tracks[0].items;
+    expect(items).toHaveLength(2);
+    const rightHalf = items[1];
+    expect(rightHalf.textConfig).toBeDefined();
+    expect(rightHalf.textConfig!.text).toBe("Hello World");
+    expect(rightHalf.textConfig!.fontFamily).toBe("Inter");
+    expect(rightHalf.textConfig!.fontSize).toBe(48);
+    expect(rightHalf.textConfig!.animation).toBe("fade-in");
+  });
+
+  it("split preserves transitionOut on right half", () => {
+    const track = createDefaultTrack({
+      id: "t1",
+      type: "video-main",
+      name: "V",
+      items: [
+        createDefaultTimelineItem({
+          id: "trans-item",
+          trackId: "t1",
+          type: "video",
+          startTime: 0,
+          duration: 60,
+          sourceIn: 0,
+          sourceOut: 60,
+          transitionOut: {
+            type: "crossfade",
+            duration: 1,
+          },
+        }),
+      ],
+    });
+    seedTimeline({ tracks: [track], duration: 60 });
+    useNleStore.setState({ currentTime: 30 });
+
+    getState().splitItemAtPlayhead("trans-item");
+
+    const items = getState().timeline!.tracks[0].items;
+    expect(items).toHaveLength(2);
+    const leftHalf = items[0];
+    const rightHalf = items[1];
+    // transitionOut should move to right half, left half should have it cleared
+    expect(rightHalf.transitionOut).toEqual({ type: "crossfade", duration: 1 });
+    expect(leftHalf.transitionOut).toBeUndefined();
+  });
+});
+
+// ---- updateItem/updateTrack identity guards ----
+
+describe("updateItem/updateTrack identity guards", () => {
+  it("updateItem ignores id field in updates", () => {
+    const { itemId } = seedTrackWithItems();
+
+    getState().updateItem(itemId, { id: "bad-id" } as any);
+
+    const item = getState().timeline!.tracks[0].items[0];
+    expect(item.id).toBe(itemId);
+    expect(item.id).not.toBe("bad-id");
+  });
+
+  it("updateItem ignores trackId field in updates", () => {
+    const { itemId } = seedTrackWithItems();
+
+    getState().updateItem(itemId, { trackId: "bad-track" } as any);
+
+    const item = getState().timeline!.tracks[0].items[0];
+    expect(item.trackId).toBe("track-1");
+    expect(item.trackId).not.toBe("bad-track");
+  });
+
+  it("updateTrack ignores id field in updates", () => {
+    const track = createDefaultTrack({ id: "t1", type: "video-main", name: "Video" });
+    seedTimeline({ tracks: [track] });
+
+    getState().updateTrack("t1", { id: "bad-id" } as any);
+
+    expect(getState().timeline!.tracks[0].id).toBe("t1");
+    expect(getState().timeline!.tracks[0].id).not.toBe("bad-id");
+  });
+});
