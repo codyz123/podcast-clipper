@@ -141,6 +141,7 @@ export const PodcastInfoPage: React.FC = () => {
           await updatePodcast({
             name: data.name,
             description: data.description,
+            coverImageUrl: data.coverImage || undefined,
             podcastMetadata: {
               author: data.author,
               category: data.category,

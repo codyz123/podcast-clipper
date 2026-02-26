@@ -15,6 +15,8 @@ import { textSnippetsRouter } from "./routes/text-snippets.js";
 import { generateSnippetRouter } from "./routes/generate-snippet.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { videoSourcesRouter } from "./routes/video-sources.js";
+import { episodeTimelinesRouter } from "./routes/episode-timelines.js";
+import { mediaAssetsRouter } from "./routes/media-assets.js";
 import { youtubeUploadRouter } from "./routes/youtube-upload.js";
 import { instagramUploadRouter } from "./routes/instagram-upload.js";
 import { tiktokUploadRouter } from "./routes/tiktok-upload.js";
@@ -102,6 +104,12 @@ app.use("/api/podcasts", uploadsRouter);
 
 // Video source routes (JWT auth handled internally)
 app.use("/api/podcasts", videoSourcesRouter);
+
+// Episode timeline routes (JWT auth handled internally)
+app.use("/api/podcasts", episodeTimelinesRouter);
+
+// Media asset routes (JWT auth handled internally)
+app.use("/api/podcasts", mediaAssetsRouter);
 
 // Text snippets routes - scoped to podcast (JWT auth handled internally)
 app.use("/api/podcasts", textSnippetsRouter);

@@ -9,5 +9,6 @@ export default defineConfig({
     environment: "node",
     globals: true,
     include: [resolve(__dirname, "src/__tests__/**/*.test.ts")],
+    setupFiles: [resolve(__dirname, "src/__tests__/setup-browser-globals.ts")],
   },
 });

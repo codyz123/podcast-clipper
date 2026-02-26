@@ -61,10 +61,13 @@ const PodcastSettingsPage = lazy(() =>
 const Settings = lazy(() =>
   import("./components/Settings/Settings").then((m) => ({ default: m.Settings }))
 );
+const NleEditor = lazy(() =>
+  import("./components/NleEditor/NleEditor").then((m) => ({ default: m.NleEditor }))
+);
 
 const planningSubStageIds = new Set(["guests", "topics", "notes"]);
 const productionSubStageIds = new Set(["record"]);
-const postProductionSubStageIds = new Set(["transcript"]);
+const postProductionSubStageIds = new Set(["transcript", "nle-editor"]);
 const marketingSubStageIds = new Set(["clips", "editor", "export", "text-content"]);
 
 const stageDefaults: Record<EpisodeStage, string | null> = {
@@ -91,6 +94,7 @@ const subStageToStage: Record<string, EpisodeStage> = {
   notes: "planning",
   record: "production",
   transcript: "post-production",
+  "nle-editor": "post-production",
   clips: "marketing",
   editor: "marketing",
   export: "marketing",
@@ -103,6 +107,7 @@ const subStageToView: Record<string, ViewType> = {
   notes: "planning",
   record: "record",
   transcript: "transcript",
+  "nle-editor": "nle-editor",
   clips: "clips",
   editor: "editor",
   export: "export",
@@ -134,6 +139,7 @@ const subStageToRouteSegment: Record<string, string> = {
   notes: "notes",
   record: "media",
   transcript: "transcribe",
+  "nle-editor": "edit",
   clips: "clips",
   editor: "editor",
   export: "publish",
@@ -149,6 +155,7 @@ const routeSegmentToSubStage: Record<string, string> = {
   media: "record",
   transcript: "transcript",
   transcribe: "transcript",
+  edit: "nle-editor",
   clips: "clips",
   editor: "editor",
   export: "export",
@@ -810,6 +817,8 @@ function App() {
         return <MediaPage goToEpisodeStage={goToEpisodeStage} />;
       case "transcript":
         return <TranscriptEditor />;
+      case "nle-editor":
+        return <NleEditor />;
       case "clips":
         return <ClipSelector />;
       case "editor":
@@ -914,10 +923,16 @@ function App() {
         isDisabled: !currentProject?.audioPath,
       },
       transcript: {
+        label: "Edit Episode",
+        stage: "post-production",
+        subStage: "nle-editor",
+        isDisabled: !currentProject?.audioPath,
+      },
+      "nle-editor": {
         label: "Clips",
         stage: "marketing",
         subStage: "clips",
-        isDisabled: !currentProject?.transcript,
+        isDisabled: false,
       },
       clips: {
         label: "Clips Editor",
