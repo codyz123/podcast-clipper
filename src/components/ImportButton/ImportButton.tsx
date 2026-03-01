@@ -17,6 +17,7 @@ import { useChunkedUpload } from "../../hooks/useChunkedUpload";
 import { useAuthStore } from "../../stores/authStore";
 import { formatDuration } from "../../lib/formats";
 import { cn, generateFileFingerprint } from "../../lib/utils";
+import { getProxiedMediaUrl } from "../../lib/api";
 import WaveSurfer from "wavesurfer.js";
 
 // Google Drive Picker configuration
@@ -459,7 +460,7 @@ export const ImportButton: React.FC<ImportButtonProps> = ({
                 const currentDuration =
                   useProjectStore.getState().currentProject?.audioDuration || 0;
                 updateProject({
-                  audioPath: updatedEpisode.audioBlobUrl,
+                  audioPath: getProxiedMediaUrl(updatedEpisode.audioBlobUrl) || updatedEpisode.audioBlobUrl,
                   // Use best available duration: WaveSurfer's > backend's > initial
                   audioDuration:
                     currentDuration > 0

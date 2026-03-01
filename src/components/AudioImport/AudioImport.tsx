@@ -18,6 +18,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { formatDuration } from "../../lib/formats";
 import { cn, generateFileFingerprint } from "../../lib/utils";
 import WaveSurfer from "wavesurfer.js";
+import { getProxiedMediaUrl } from "../../lib/api";
 
 // Google Drive Picker configuration
 const GOOGLE_SCOPES = "https://www.googleapis.com/auth/drive.readonly";
@@ -466,7 +467,7 @@ export const AudioImport: React.FC<AudioImportProps> = ({ onComplete }) => {
               if (updatedEpisode?.audioBlobUrl) {
                 // Update local state with the backend URL and duration from server
                 updateProject({
-                  audioPath: updatedEpisode.audioBlobUrl,
+                  audioPath: getProxiedMediaUrl(updatedEpisode.audioBlobUrl) || updatedEpisode.audioBlobUrl,
                   audioDuration: updatedEpisode.audioDuration || audioDuration,
                 });
                 console.warn("[AudioImport] Uploaded to backend:", updatedEpisode.audioBlobUrl);

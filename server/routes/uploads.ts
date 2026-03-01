@@ -4,7 +4,7 @@ import { db } from "../db/index.js";
 import { uploadSessions, projects, podcastMembers } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
 import { createMultipartUpload, uploadPart, completeMultipartUpload } from "../lib/r2-storage.js";
-import { validateFile, validateContentType, createSafeStoragePath, MAX_FILE_SIZES } from "../lib/file-security.js";
+import { validateFile, validateContentType, createSafeStoragePath } from "../lib/file-security.js";
 import { logAndSanitizeError } from "../lib/error-sanitizer.js";
 
 const router = Router();
@@ -48,7 +48,7 @@ router.post(
       }
 
       // Validate filename, content type, and size
-      const fileValidation = validateFile(filename, contentType, totalBytes, 'audio');
+      const fileValidation = validateFile(filename, contentType, totalBytes);
       if (!fileValidation.valid) {
         res.status(400).json({ error: fileValidation.error });
         return;

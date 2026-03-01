@@ -34,6 +34,7 @@ export const ALLOWED_MIME_TYPES = {
     'video/avi',           // AVI
     'video/quicktime',     // MOV
     'video/x-msvideo',     // AVI (alternative)
+    'video/x-matroska',    // MKV
   ],
   image: [
     'image/jpeg',          // JPEG
@@ -55,16 +56,16 @@ const EXTENSION_TO_MIME: Record<string, string[]> = {
   '.aac': ['audio/aac', 'audio/mp4'],
   '.flac': ['audio/flac'],
   '.ogg': ['audio/ogg'],
-  '.webm': ['audio/webm'],
+  '.webm': ['audio/webm', 'video/webm'],
   '.aiff': ['audio/x-aiff', 'audio/aiff'],
   '.aif': ['audio/x-aiff', 'audio/aiff'],
   
   // Video  
   '.mp4': ['video/mp4'],
-  '.webm': ['video/webm'],
   '.ogv': ['video/ogg'],
   '.avi': ['video/avi', 'video/x-msvideo'],
   '.mov': ['video/quicktime'],
+  '.mkv': ['video/x-matroska'],
   
   // Images
   '.jpg': ['image/jpeg'],
@@ -126,7 +127,7 @@ export function validateFile(
     // Detect file category if not provided
     let detectedCategory = category;
     if (!detectedCategory) {
-      detectedCategory = detectFileCategory(mimetype, ext);
+      detectedCategory = detectFileCategory(mimetype, ext) ?? undefined;
       if (!detectedCategory) {
         return { valid: false, error: 'Unknown file type' };
       }
