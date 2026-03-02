@@ -75,7 +75,7 @@ function isViableAccentColor(r: number, g: number, b: number): boolean {
 export async function extractBrandColors(imageDataUrl: string): Promise<BrandColors | null> {
   return new Promise((resolve) => {
     const img = new Image();
-    img.crossOrigin = "anonymous";
+    img.crossOrigin = "use-credentials";
 
     img.onload = () => {
       const canvas = document.createElement("canvas");
@@ -306,14 +306,14 @@ function updateFavicon(primaryHsl: string | null): void {
 
     // Revoke old blob URL if it exists
     if (link.href.startsWith("blob:")) {
-      URL.revokeObjectURL(link.href);
+      try { URL.revokeObjectURL(link.href); } catch { // ignore revokeObjectURL errors }
     }
 
     link.href = url;
   } else {
     // Reset to default favicon
     if (link.href.startsWith("blob:")) {
-      URL.revokeObjectURL(link.href);
+      try { URL.revokeObjectURL(link.href); } catch { // ignore revokeObjectURL errors }
     }
     link.href = "/podcastomatic.svg";
   }

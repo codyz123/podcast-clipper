@@ -199,7 +199,8 @@ export const PodcastInfoPage: React.FC = () => {
       handleChange("coverImage", coverImageUrl);
 
       // Extract and save brand colors
-      const colors = await extractBrandColors(coverImageUrl);
+      const proxiedUrl = getProxiedMediaUrl(coverImageUrl);
+      const colors = await extractBrandColors(proxiedUrl || coverImageUrl);
       if (colors) {
         setBrandColors(colors);
         await updatePodcast({
