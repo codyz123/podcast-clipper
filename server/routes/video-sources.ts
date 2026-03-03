@@ -496,10 +496,9 @@ async function processVideoSource(
   if (localMediaIdx !== -1) {
     // Local storage: read file directly from disk
     const relativePath = videoBlobUrl.substring(localMediaIdx + localMediaPrefix.length);
-    const localPath = path.join(process.cwd(), ".context", "local-media", relativePath);
-    const { readFileSync } = await import("node:fs");
-    const videoBuffer = readFileSync(localPath);
-    tempVideoPath = await bufferToTempFile(videoBuffer, "mp4");
+    const localPath = path.join(process.cwd(), LOCAL_MEDIA_ROOT, relativePath);
+    const { copyFileSync } = await import("node:fs");
+    copyFileSync(localPath, tempVideoPath); // stream copy avoids buffering entire file
   } else {
     // R2 or remote: fetch via HTTP
     const response = await fetch(videoBlobUrl);
