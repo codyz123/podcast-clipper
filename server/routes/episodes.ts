@@ -462,7 +462,18 @@ router.post(
         return;
       }
       const userId = req.user.userId;
-      const { text, words, segments, language, name, audioFingerprint, service } = req.body;
+      const {
+        text,
+        words,
+        segments,
+        language,
+        name,
+        audioFingerprint,
+        service,
+        sourceBlobUrl,
+        sourceType,
+        sourceMediaAssetId,
+      } = req.body;
 
       // Verify episode exists
       const [episode] = await db
@@ -486,6 +497,9 @@ router.post(
           name,
           audioFingerprint,
           service,
+          sourceBlobUrl,
+          sourceType,
+          sourceMediaAssetId,
           createdById: userId,
         })
         .returning();
@@ -549,7 +563,7 @@ router.put(
   async (req: Request, res: Response) => {
     try {
       const transcriptId = getParam(req.params.transcriptId);
-      const { text, words, segments } = req.body;
+      const { text, words, segments, sourceBlobUrl, sourceType, sourceMediaAssetId } = req.body;
 
       if (typeof text !== "string") {
         res.status(400).json({ error: "text must be a string" });
@@ -563,6 +577,15 @@ router.put(
       const updateData: Record<string, unknown> = { text, words };
       if (segments !== undefined) {
         updateData.segments = segments;
+      }
+      if (sourceBlobUrl !== undefined) {
+        updateData.sourceBlobUrl = sourceBlobUrl;
+      }
+      if (sourceType !== undefined) {
+        updateData.sourceType = sourceType;
+      }
+      if (sourceMediaAssetId !== undefined) {
+        updateData.sourceMediaAssetId = sourceMediaAssetId;
       }
 
       const [updated] = await db

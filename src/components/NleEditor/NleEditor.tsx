@@ -14,7 +14,7 @@ import {
   VideoIcon,
   FileIcon,
 } from "@radix-ui/react-icons";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useProjectStore } from "../../stores/projectStore";
 import { useNleStore } from "../../stores/nleStore";
 import { useAuthStore } from "../../stores/authStore";
@@ -24,7 +24,7 @@ import { mediaAssetKeys, fetchMediaAssets } from "../../lib/queries";
 import type { NleTool, NleTrackType } from "../../lib/nleTypes";
 import type { MediaItem } from "../../lib/types";
 import { usePlaybackLoop } from "../../hooks/usePlaybackLoop";
-import { getMediaUrl } from "../../lib/api";
+import { authFetch, getApiBase, getMediaUrl } from "../../lib/api";
 import { ProgramMonitor } from "./ProgramMonitor";
 import { InspectorPanel } from "./InspectorPanel";
 import { Button } from "../ui";
@@ -52,6 +52,8 @@ const TRACK_TYPES: Array<{ type: NleTrackType; label: string }> = [
   { type: "captions", label: "Captions" },
   { type: "text-graphics", label: "Text / Graphics" },
 ];
+
+const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 1.5, 2] as const;
 
 // ============ Helpers ============
 
@@ -98,6 +100,7 @@ function resolveItemType(item: MediaItem): "video" | "audio" | "image" {
 export const NleEditor: React.FC = () => {
   const { currentProject } = useProjectStore();
   const currentPodcastId = useAuthStore((s) => s.currentPodcastId);
+  const queryClient = useQueryClient();
 
   const {
     timeline,
@@ -143,6 +146,9 @@ export const NleEditor: React.FC = () => {
     undo,
     redo,
     resetStore,
+    setRenderJobId,
+    setRenderProgress,
+    setRenderStatus,
   } = useNleStore();
 
   // Panel collapse states
@@ -200,7 +206,10 @@ export const NleEditor: React.FC = () => {
   // ---- Fetch media assets for Project Panel ----
   const { data: mediaItems = [], isLoading: isLoadingMedia } = useQuery({
     queryKey: mediaAssetKeys.all(podcastId ?? "", episodeId ?? ""),
-    queryFn: () => fetchMediaAssets(podcastId!, episodeId!),
+    queryFn: () => {
+      if (!podcastId || !episodeId) return Promise.resolve([]);
+      return fetchMediaAssets(podcastId, episodeId);
+    },
     enabled: !!podcastId && !!episodeId,
   });
 
@@ -419,7 +428,10 @@ export const NleEditor: React.FC = () => {
   // ---- Playhead scrub start ----
   const handleRulerMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      const time = getTimeFromClickX(e);
+      const rect = e.currentTarget.getBoundingClientRect();
+      const scrollLeft = timelineScrollRef.current?.scrollLeft ?? 0;
+      const clickX = e.clientX - rect.left + scrollLeft;
+      const time = Math.max(0, Math.min(duration, clickX / zoomLevel));
       setCurrentTime(time);
 
       // If playing, pause during scrub and resume on mouseup
@@ -430,7 +442,7 @@ export const NleEditor: React.FC = () => {
       isScrubbing.current = true;
       e.preventDefault();
     },
-    [isPlaying, setCurrentTime]
+    [isPlaying, setCurrentTime, duration, zoomLevel]
   );
 
   // ---- Keyboard shortcuts ----
@@ -679,11 +691,104 @@ export const NleEditor: React.FC = () => {
     initTimeline(podcastId, episodeId);
   }, [podcastId, episodeId, initTimeline]);
 
+  const handleExportEpisode = useCallback(async () => {
+    if (!currentProject?.id || !timeline) return;
+    if (renderStatus === "rendering") return;
+
+    try {
+      // Ensure current edits are persisted before taking the render snapshot.
+      await saveTimeline();
+      setRenderStatus("rendering");
+      setRenderProgress(0);
+      setRenderJobId(null);
+
+      const response = await authFetch(`${getApiBase()}/api/render/episode`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: currentProject.id,
+          startTime: inPoint ?? 0,
+          endTime: outPoint ?? timeline.duration,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error || `Episode export failed (${response.status})`);
+      }
+
+      const data = (await response.json()) as {
+        jobId?: string;
+        status?: string;
+        progress?: number;
+      };
+      if (!data.jobId) {
+        throw new Error("Episode export did not return a job ID");
+      }
+
+      setRenderJobId(data.jobId);
+      setRenderProgress(typeof data.progress === "number" ? data.progress : 0);
+
+      // Poll job status until completion/failure.
+      while (true) {
+        const statusRes = await authFetch(
+          `${getApiBase()}/api/render/episode/${data.jobId}/status`
+        );
+        if (!statusRes.ok) {
+          const payload = (await statusRes.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error || `Failed to fetch export status (${statusRes.status})`);
+        }
+
+        const statusData = (await statusRes.json()) as {
+          status?: "pending" | "rendering" | "completed" | "failed";
+          progress?: number;
+          errorMessage?: string | null;
+        };
+
+        setRenderProgress(typeof statusData.progress === "number" ? statusData.progress : 0);
+
+        if (statusData.status === "completed") {
+          setRenderStatus("completed");
+          setRenderProgress(100);
+          if (podcastId && episodeId) {
+            await queryClient.invalidateQueries({
+              queryKey: mediaAssetKeys.all(podcastId, episodeId),
+            });
+          }
+          alert("Episode export complete. The file is now available in Media assets.");
+          return;
+        }
+
+        if (statusData.status === "failed") {
+          throw new Error(statusData.errorMessage || "Episode export failed");
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    } catch (error) {
+      setRenderStatus("failed");
+      setRenderProgress(0);
+      alert((error as Error).message || "Episode export failed");
+    }
+  }, [
+    currentProject?.id,
+    timeline,
+    renderStatus,
+    saveTimeline,
+    setRenderStatus,
+    setRenderProgress,
+    setRenderJobId,
+    inPoint,
+    outPoint,
+    podcastId,
+    episodeId,
+    queryClient,
+  ]);
+
   // ---- Playback speed cycle ----
-  const speeds = [0.25, 0.5, 1, 1.5, 2];
   const handleSpeedCycle = useCallback(() => {
-    const idx = speeds.indexOf(playbackSpeed);
-    const next = speeds[(idx + 1) % speeds.length];
+    const idx = PLAYBACK_SPEEDS.indexOf(playbackSpeed as (typeof PLAYBACK_SPEEDS)[number]);
+    const next = PLAYBACK_SPEEDS[(idx + 1) % PLAYBACK_SPEEDS.length];
     setPlaybackSpeed(next);
   }, [playbackSpeed, setPlaybackSpeed]);
 
@@ -943,14 +1048,11 @@ export const NleEditor: React.FC = () => {
           <Button
             className="h-7 text-xs"
             title="Export Episode"
-            onClick={() =>
-              alert(
-                "Episode export is not yet available. Use the Publish step to render individual clips."
-              )
-            }
+            onClick={handleExportEpisode}
+            disabled={renderStatus === "rendering"}
           >
             <DownloadIcon className="mr-1 h-3.5 w-3.5" />
-            Export
+            {renderStatus === "rendering" ? "Exporting..." : "Export"}
           </Button>
         </div>
       </div>

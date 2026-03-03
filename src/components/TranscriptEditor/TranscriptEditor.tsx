@@ -24,7 +24,7 @@ import { useAuthStore } from "../../stores/authStore";
 import { useEpisodes } from "../../hooks/useEpisodes";
 import { usePodcastPeople } from "../../hooks/usePodcastPeople";
 import { SpeakerLineup } from "./SpeakerLineup";
-import { Transcript, Word, SpeakerSegment, PodcastPerson } from "../../lib/types";
+import { Transcript, Word, SpeakerSegment, PodcastPerson, MediaItem } from "../../lib/types";
 import { generateId, cn } from "../../lib/utils";
 import { formatTimestamp, formatRelativeTime } from "../../lib/formats";
 import { authFetch, getMediaUrl } from "../../lib/api";
@@ -35,6 +35,26 @@ interface ProgressState {
   stage: string;
   progress: number;
   message: string;
+  detail?: string;
+}
+
+interface TranscriptionResultPayload {
+  words?: Array<{
+    word: string;
+    start: number;
+    end: number;
+    confidence?: number;
+    probability?: number;
+  }>;
+  text?: string;
+  segments?: SpeakerSegment[];
+  language?: string;
+  service?: string;
+  transcript?: { id?: string; createdAt?: string };
+  stage?: string;
+  error?: string;
+  progress?: number;
+  message?: string;
   detail?: string;
 }
 
@@ -344,6 +364,8 @@ export const TranscriptEditor: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [editingWordIndex, setEditingWordIndex] = useState<number | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [mediaTranscriptionSources, setMediaTranscriptionSources] = useState<MediaItem[]>([]);
+  const [transcriptionSource, setTranscriptionSource] = useState<"multicam" | string>("multicam");
 
   // Transcription guard - ref persists across renders to prevent concurrent requests
   const transcribingRef = useRef(false);
@@ -378,6 +400,128 @@ export const TranscriptEditor: React.FC = () => {
   // Get active transcript (handles both legacy and new format)
   const activeTranscript = getActiveTranscript();
   const transcripts = currentProject?.transcripts || [];
+  const useBackend = !!settings.backendUrl;
+  const isVideoEpisode = currentProject?.mediaType === "video";
+  const hasMulticamSources = (currentProject?.videoSources?.length || 0) > 0;
+
+  const transcriptionSourceOptions = useMemo<
+    Array<{ value: string; label: string; description: string }>
+  >(() => {
+    if (!isVideoEpisode) return [];
+
+    const options: Array<{ value: string; label: string; description: string }> = [];
+    if (hasMulticamSources) {
+      const count = currentProject?.videoSources?.length || 0;
+      options.push({
+        value: "multicam",
+        label: "Multicam Sources",
+        description: `${count} configured video source${count === 1 ? "" : "s"}`,
+      });
+    }
+
+    for (const item of mediaTranscriptionSources) {
+      const kind = item.category === "nle-export" ? "NLE Export" : item.contentType || "Media";
+      options.push({
+        value: item.sourceId,
+        label: item.name,
+        description: kind,
+      });
+    }
+
+    return options;
+  }, [
+    isVideoEpisode,
+    hasMulticamSources,
+    currentProject?.videoSources?.length,
+    mediaTranscriptionSources,
+  ]);
+
+  const selectedMediaSource = useMemo(
+    () => mediaTranscriptionSources.find((item) => item.sourceId === transcriptionSource),
+    [mediaTranscriptionSources, transcriptionSource]
+  );
+
+  const transcriptionSourceDescription = useMemo(() => {
+    if (!isVideoEpisode) {
+      return settings.assemblyaiApiKey
+        ? "Using AssemblyAI with speaker diarization"
+        : "Using OpenAI Whisper for accurate word-level timestamps";
+    }
+
+    if (transcriptionSource === "multicam") {
+      return "Using video source audio tracks with speaker diarization";
+    }
+
+    if (!selectedMediaSource) {
+      return "Select a video or audio media file to transcribe";
+    }
+
+    if (selectedMediaSource.category === "nle-export") {
+      return "Using exported NLE media asset for transcription";
+    }
+
+    if (selectedMediaSource.contentType?.startsWith("video/")) {
+      return "Using selected video media asset audio for transcription";
+    }
+
+    return "Using selected audio media asset for transcription";
+  }, [isVideoEpisode, transcriptionSource, selectedMediaSource, settings.assemblyaiApiKey]);
+
+  // Load media assets as optional transcription sources (standalone uploaded videos/audio).
+  useEffect(() => {
+    const loadMediaSources = async () => {
+      if (!currentPodcastId || !currentProject?.id || !useBackend) {
+        setMediaTranscriptionSources([]);
+        return;
+      }
+
+      try {
+        const response = await authFetch(
+          `${settings.backendUrl}/api/podcasts/${currentPodcastId}/episodes/${currentProject.id}/media-assets`
+        );
+        if (!response.ok) {
+          setMediaTranscriptionSources([]);
+          return;
+        }
+
+        const data = (await response.json()) as { mediaItems?: MediaItem[] };
+        const candidates = (data.mediaItems || []).filter(
+          (item) =>
+            item.source === "media-asset" &&
+            !!item.sourceId &&
+            (!!item.contentType?.startsWith("video/") || !!item.contentType?.startsWith("audio/"))
+        );
+        setMediaTranscriptionSources(candidates);
+      } catch {
+        setMediaTranscriptionSources([]);
+      }
+    };
+
+    void loadMediaSources();
+  }, [currentPodcastId, currentProject?.id, settings.backendUrl, useBackend]);
+
+  // Default source selection for video episodes:
+  // preserve current selection when possible, otherwise choose multicam first, then first media asset.
+  useEffect(() => {
+    if (!isVideoEpisode) {
+      setTranscriptionSource("multicam");
+      return;
+    }
+
+    const available = new Set<string>();
+    if (hasMulticamSources) {
+      available.add("multicam");
+    }
+    for (const source of mediaTranscriptionSources) {
+      available.add(source.sourceId);
+    }
+
+    setTranscriptionSource((prev) => {
+      if (available.has(prev)) return prev;
+      if (hasMulticamSources) return "multicam";
+      return mediaTranscriptionSources[0]?.sourceId ?? "multicam";
+    });
+  }, [isVideoEpisode, hasMulticamSources, mediaTranscriptionSources]);
   const hasTranscript = !!activeTranscript;
   const hasMultipleTranscripts = transcripts.length > 1;
   const timedWords = useMemo(() => {
@@ -406,18 +550,34 @@ export const TranscriptEditor: React.FC = () => {
 
   // Load audio URL from IndexedDB or blob URL
   useEffect(() => {
-    const loadAudio = async () => {
-      if (!currentProject?.id) return;
+    let objectUrl: string | null = null;
+    let cancelled = false;
 
-      // For video episodes, use the mixed audio URL or fall back to a video source's audio
+    const loadAudio = async () => {
+      if (!currentProject?.id) {
+        setAudioUrl(null);
+        return;
+      }
+
+      const transcriptScopedAudio =
+        activeTranscript?.sourceBlobUrl && activeTranscript.sourceType !== "multicam"
+          ? activeTranscript.sourceBlobUrl
+          : null;
+
+      // For video episodes, prefer the selected transcript's source media for sync.
+      // Fall back to mixed or source-track audio when the transcript has no source URL.
       if (currentProject.mediaType === "video") {
-        if (currentProject.mixedAudioBlobUrl) {
+        if (transcriptScopedAudio) {
+          setAudioUrl(transcriptScopedAudio);
+        } else if (currentProject.mixedAudioBlobUrl) {
           setAudioUrl(currentProject.mixedAudioBlobUrl);
         } else {
           // Fall back to first video source with audio
           const fallbackSource = currentProject.videoSources?.find((s) => s.audioBlobUrl);
           if (fallbackSource?.audioBlobUrl) {
             setAudioUrl(fallbackSource.audioBlobUrl);
+          } else {
+            setAudioUrl(null);
           }
         }
         return;
@@ -425,24 +585,39 @@ export const TranscriptEditor: React.FC = () => {
 
       // Try to get blob from IndexedDB first
       const blob = await getAudioBlob(currentProject.id);
+      if (cancelled) return;
       if (blob) {
-        const url = URL.createObjectURL(blob);
-        setAudioUrl(url);
-        return () => URL.revokeObjectURL(url);
+        objectUrl = URL.createObjectURL(blob);
+        setAudioUrl(objectUrl);
+        return;
       }
 
       // Fall back to audioPath if available
-      if (currentProject.audioPath) {
+      if (transcriptScopedAudio) {
+        setAudioUrl(transcriptScopedAudio);
+      } else if (currentProject.audioPath) {
         setAudioUrl(currentProject.audioPath);
+      } else {
+        setAudioUrl(null);
       }
     };
 
-    loadAudio();
+    void loadAudio();
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
   }, [
     currentProject?.id,
     currentProject?.audioPath,
     currentProject?.mixedAudioBlobUrl,
     currentProject?.mediaType,
+    currentProject?.videoSources,
+    activeTranscript?.sourceBlobUrl,
+    activeTranscript?.sourceType,
   ]);
 
   // Click-outside handler for speaker popover
@@ -775,9 +950,6 @@ export const TranscriptEditor: React.FC = () => {
       .filter((seg): seg is SpeakerSegment => seg !== null);
   };
 
-  // Check if backend is configured
-  const useBackend = !!settings.backendUrl;
-
   const startTranscription = async () => {
     // Prevent concurrent transcription requests
     if (transcribingRef.current) {
@@ -789,10 +961,42 @@ export const TranscriptEditor: React.FC = () => {
       return;
     }
 
+    const isVideo = currentProject.mediaType === "video";
+    const selectedMediaAsset = mediaTranscriptionSources.find(
+      (item) => item.sourceId === transcriptionSource
+    );
+    const wantsMediaAssetSource = isVideo && transcriptionSource !== "multicam";
+    const wantsMulticamSource = isVideo && transcriptionSource === "multicam";
+
+    if (isVideo && !useBackend) {
+      setError("Video transcription requires a configured backend.");
+      return;
+    }
+
+    if (wantsMulticamSource && !hasMulticamSources) {
+      setError(
+        mediaTranscriptionSources.length > 0
+          ? "No multicam sources available. Select a media source to transcribe."
+          : "No transcribable video/audio sources found. Upload media first."
+      );
+      return;
+    }
+
+    if (wantsMediaAssetSource && !selectedMediaAsset) {
+      setError("Selected media source is no longer available. Choose another source.");
+      return;
+    }
+
+    const isMediaAssetSource = wantsMediaAssetSource && !!selectedMediaAsset;
+
     // Check auth requirements
     if (useBackend) {
       if (!settings.backendUrl) {
         setError("Please configure the backend URL in Settings");
+        return;
+      }
+      if (isVideo && !accessToken) {
+        setError("Video transcription requires signing in to the backend.");
         return;
       }
       if (!settings.accessCode && !accessToken) {
@@ -818,16 +1022,150 @@ export const TranscriptEditor: React.FC = () => {
     // Create AbortController for this request
     abortControllerRef.current = new AbortController();
 
-    const isVideo = currentProject.mediaType === "video";
-
     setProgressState({
       stage: "preparing",
       progress: 2,
       message: isVideo ? "Preparing video transcription" : "Preparing audio",
-      detail: isVideo ? "Using video source audio tracks..." : "Loading from storage...",
+      detail: isMediaAssetSource
+        ? `Using media asset: ${selectedMediaAsset?.name || "selected source"}...`
+        : isVideo
+          ? "Using multicam video source audio tracks..."
+          : "Loading from storage...",
     });
 
     try {
+      // Video media-asset flow — transcribe a selected media asset directly.
+      if (isMediaAssetSource && useBackend && currentPodcastId && selectedMediaAsset) {
+        const response = await authFetch(
+          `${settings.backendUrl}/api/podcasts/${currentPodcastId}/episodes/${currentProject.id}/transcribe/media-asset`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Accept: "text/event-stream",
+            },
+            body: JSON.stringify({
+              mediaAssetId: selectedMediaAsset.sourceId,
+            }),
+            signal: abortControllerRef.current?.signal,
+          }
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(
+            errorData.error?.message || errorData.error || `API error: ${response.status}`
+          );
+        }
+
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        let transcriptResponse: TranscriptionResultPayload | null = null;
+
+        if (reader) {
+          let buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split("\n\n");
+            buffer = lines.pop() || "";
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              try {
+                const data = JSON.parse(line.slice(6)) as TranscriptionResultPayload;
+                if (data.stage === "error") {
+                  throw new Error(data.error || "Transcription failed");
+                }
+                if (data.stage === "result") {
+                  transcriptResponse = data;
+                } else {
+                  setProgressState({
+                    stage: data.stage || "processing",
+                    progress: data.progress ?? 0,
+                    message: data.message || "Processing transcription",
+                    detail: data.detail,
+                  });
+                }
+              } catch (e) {
+                if (e instanceof SyntaxError) {
+                  console.warn("Failed to parse SSE data:", line);
+                } else {
+                  throw e;
+                }
+              }
+            }
+          }
+        }
+
+        if (!transcriptResponse) {
+          throw new Error("No transcription result received");
+        }
+
+        const rawWords = transcriptResponse.words || [];
+        const { words, indexMap } = buildTranscriptWords(rawWords, transcriptResponse.text);
+        const hadFiltering = Array.isArray(rawWords) && words.length < rawWords.length;
+        const transcriptText =
+          hadFiltering || !transcriptResponse.text
+            ? words.map((w) => w.text).join(" ")
+            : transcriptResponse.text;
+        const rawSegments: SpeakerSegment[] = transcriptResponse.segments || [];
+        const segments = hadFiltering
+          ? remapSegments(rawSegments, indexMap, words.length)
+          : rawSegments;
+
+        const transcript: Transcript = {
+          id: transcriptResponse.transcript?.id || generateId(),
+          projectId: currentProject.id,
+          audioFingerprint: currentProject.audioFingerprint,
+          sourceBlobUrl: selectedMediaAsset.blobUrl,
+          sourceMediaAssetId: selectedMediaAsset.sourceId,
+          sourceType:
+            selectedMediaAsset.category === "nle-export"
+              ? "nle-export"
+              : selectedMediaAsset.contentType?.startsWith("video/")
+                ? "video"
+                : "audio",
+          text: transcriptText,
+          words,
+          segments: segments.length > 0 ? segments : undefined,
+          language: transcriptResponse.language || "en",
+          createdAt: transcriptResponse.transcript?.createdAt || new Date().toISOString(),
+          service: transcriptResponse.service || "assemblyai",
+        };
+
+        addTranscript(transcript);
+
+        // /transcribe/media-asset persists server-side, but keep a fallback sync
+        // if the response did not include a saved transcript ID.
+        if (!transcriptResponse.transcript?.id) {
+          saveTranscript(currentProject.id, {
+            text: transcript.text,
+            words: transcript.words,
+            segments: transcript.segments,
+            language: transcript.language,
+            name: transcript.name,
+            audioFingerprint: transcript.audioFingerprint,
+            service: transcript.service,
+            sourceBlobUrl: transcript.sourceBlobUrl,
+            sourceType: transcript.sourceType,
+            sourceMediaAssetId: transcript.sourceMediaAssetId,
+          }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
+        }
+
+        setProgressState({
+          stage: "complete",
+          progress: 100,
+          message: "Transcription complete",
+          detail: `${words.length.toLocaleString()} words`,
+        });
+
+        return;
+      }
+
       // Video episodes use multicam transcription (server fetches audio from video sources)
       if (isVideo && useBackend) {
         const response = await authFetch(`${settings.backendUrl}/api/transcribe-multicam`, {
@@ -847,7 +1185,7 @@ export const TranscriptEditor: React.FC = () => {
         // Read SSE stream (same format as /api/transcribe)
         const reader = response.body?.getReader();
         const decoder = new TextDecoder();
-        let transcriptResponse: any = null;
+        let transcriptResponse: TranscriptionResultPayload | null = null;
 
         if (reader) {
           let buffer = "";
@@ -863,19 +1201,19 @@ export const TranscriptEditor: React.FC = () => {
             for (const line of lines) {
               if (line.startsWith("data: ")) {
                 try {
-                  const data = JSON.parse(line.slice(6));
+                  const data = JSON.parse(line.slice(6)) as TranscriptionResultPayload;
 
                   if (data.stage === "error") {
-                    throw new Error(data.error);
+                    throw new Error(data.error || "Transcription failed");
                   }
 
                   if (data.stage === "result") {
                     transcriptResponse = data;
                   } else {
                     setProgressState({
-                      stage: data.stage,
-                      progress: data.progress,
-                      message: data.message,
+                      stage: data.stage || "processing",
+                      progress: data.progress ?? 0,
+                      message: data.message || "Processing transcription",
                       detail: data.detail,
                     });
                   }
@@ -913,6 +1251,7 @@ export const TranscriptEditor: React.FC = () => {
           id: generateId(),
           projectId: currentProject.id,
           audioFingerprint: currentProject.audioFingerprint,
+          sourceType: "multicam",
           text: transcriptText,
           words,
           segments: segments.length > 0 ? segments : undefined,
@@ -931,6 +1270,9 @@ export const TranscriptEditor: React.FC = () => {
           name: transcript.name,
           audioFingerprint: transcript.audioFingerprint,
           service: transcript.service,
+          sourceType: transcript.sourceType,
+          sourceBlobUrl: transcript.sourceBlobUrl,
+          sourceMediaAssetId: transcript.sourceMediaAssetId,
         }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
 
         // Mix all speaker audio tracks into a single file for playback
@@ -1140,6 +1482,7 @@ export const TranscriptEditor: React.FC = () => {
           id: generateId(),
           projectId: currentProject.id,
           audioFingerprint: currentProject.audioFingerprint,
+          sourceType: "audio",
           text: transcriptText,
           words,
           segments: segments.length > 0 ? segments : undefined,
@@ -1159,6 +1502,9 @@ export const TranscriptEditor: React.FC = () => {
           name: transcript.name,
           audioFingerprint: transcript.audioFingerprint,
           service: transcript.service,
+          sourceType: transcript.sourceType,
+          sourceBlobUrl: transcript.sourceBlobUrl,
+          sourceMediaAssetId: transcript.sourceMediaAssetId,
         }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
 
         setProgressState({
@@ -1216,6 +1562,7 @@ export const TranscriptEditor: React.FC = () => {
           id: generateId(),
           projectId: currentProject.id,
           audioFingerprint: currentProject.audioFingerprint,
+          sourceType: "audio",
           text: transcriptText,
           words,
           language: transcriptResponse.language || "en",
@@ -1233,6 +1580,9 @@ export const TranscriptEditor: React.FC = () => {
           name: transcript.name,
           audioFingerprint: transcript.audioFingerprint,
           service: transcript.service,
+          sourceType: transcript.sourceType,
+          sourceBlobUrl: transcript.sourceBlobUrl,
+          sourceMediaAssetId: transcript.sourceMediaAssetId,
         }).catch((err) => console.error("[TranscriptEditor] Backend sync failed:", err));
 
         setProgressState({
@@ -1614,6 +1964,59 @@ export const TranscriptEditor: React.FC = () => {
   return (
     <div className="min-h-full">
       <div className="mx-auto max-w-3xl">
+        {isVideoEpisode && useBackend && (
+          <Card variant="default" className="animate-fadeInUp mb-4">
+            <CardContent className="space-y-2 p-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-[hsl(var(--text))]">
+                    Transcription Source
+                  </p>
+                  <p className="text-xs text-[hsl(var(--text-muted))]">
+                    Choose where transcription audio should come from.
+                  </p>
+                </div>
+                <select
+                  value={
+                    transcriptionSourceOptions.some(
+                      (option) => option.value === transcriptionSource
+                    )
+                      ? transcriptionSource
+                      : ""
+                  }
+                  onChange={(e) => setTranscriptionSource(e.target.value)}
+                  disabled={isTranscribing || transcriptionSourceOptions.length === 0}
+                  className={cn(
+                    "min-w-[220px] rounded-md border px-3 py-2 text-sm",
+                    "border-[hsl(var(--glass-border))]",
+                    "bg-[hsl(var(--surface))] text-[hsl(var(--text))]",
+                    "disabled:cursor-not-allowed disabled:opacity-50"
+                  )}
+                >
+                  {transcriptionSourceOptions.length === 0 && (
+                    <option value="">No source available</option>
+                  )}
+                  {transcriptionSourceOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label} · {option.description}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {transcriptionSourceOptions.length === 0 ? (
+                <p className="text-xs text-[hsl(var(--warning))]">
+                  Upload multicam sources or media files before transcribing.
+                </p>
+              ) : (
+                <p className="text-xs text-[hsl(var(--text-muted))]">
+                  {transcriptionSourceDescription}
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Transcription Controls */}
         {!hasTranscript && (
           <div className="animate-blurIn">
@@ -1687,9 +2090,8 @@ export const TranscriptEditor: React.FC = () => {
               </Card>
             ) : (
               <div
-                onClick={startTranscription}
                 className={cn(
-                  "cursor-pointer rounded-xl px-6 py-10 text-center transition-all duration-150",
+                  "rounded-xl px-6 py-10 text-center transition-all duration-150",
                   "border-2 border-dashed",
                   "bg-[hsl(var(--surface)/0.4)]",
                   "border-[hsl(var(--glass-border))]",
@@ -1710,13 +2112,15 @@ export const TranscriptEditor: React.FC = () => {
                   Ready to transcribe
                 </h3>
                 <p className="mx-auto mb-5 max-w-xs text-sm text-[hsl(var(--text-subtle))]">
-                  {currentProject?.mediaType === "video"
-                    ? "Using video source audio tracks with speaker diarization"
-                    : settings.assemblyaiApiKey
-                      ? "Using AssemblyAI with speaker diarization"
-                      : "Using OpenAI Whisper for accurate word-level timestamps"}
+                  {transcriptionSourceDescription}
                 </p>
-                <Button glow>Start Transcription</Button>
+                <Button
+                  glow
+                  onClick={startTranscription}
+                  disabled={isVideoEpisode && useBackend && transcriptionSourceOptions.length === 0}
+                >
+                  Start Transcription
+                </Button>
 
                 {error && (
                   <div
@@ -1800,7 +2204,10 @@ export const TranscriptEditor: React.FC = () => {
                   variant="ghost"
                   size="sm"
                   onClick={startTranscription}
-                  disabled={isTranscribing}
+                  disabled={
+                    isTranscribing ||
+                    (isVideoEpisode && useBackend && transcriptionSourceOptions.length === 0)
+                  }
                   className="text-[hsl(var(--text-subtle))]"
                 >
                   {isTranscribing ? (

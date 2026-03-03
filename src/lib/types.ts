@@ -100,6 +100,9 @@ export interface Transcript {
   id: string;
   projectId: string;
   audioFingerprint?: string; // Links transcript to specific audio file
+  sourceBlobUrl?: string; // Source media URL used for transcription (snapshot)
+  sourceType?: "audio" | "video" | "nle-export" | "multicam";
+  sourceMediaAssetId?: string; // media_assets_v2.id when transcript came from a media asset
   text: string;
   words: Word[];
   segments?: SpeakerSegment[];
@@ -202,6 +205,7 @@ export interface BackgroundConfig {
   gradientDirection?: number;
   imagePath?: string;
   videoPath?: string;
+  videoStartFrame?: number;
 }
 
 export interface SubtitleConfig {
@@ -646,6 +650,7 @@ export interface HookAnalysis {
 // ============ Media Manager ============
 
 export type MediaCategory =
+  | "general"
   | "episode-audio"
   | "camera"
   | "broll"
@@ -653,7 +658,8 @@ export type MediaCategory =
   | "outro"
   | "music"
   | "sfx"
-  | "graphic";
+  | "graphic"
+  | "nle-export";
 
 export interface MediaItem {
   id: string;
