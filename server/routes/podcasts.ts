@@ -28,6 +28,27 @@ function getParam(param: string | string[] | undefined): string {
   return param || "";
 }
 
+function sanitizeCoverImageUrlForResponse(
+  url: string | null | undefined
+): string | null | undefined {
+  if (url === undefined) return undefined;
+  if (url === null) return null;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("blob:")) return null;
+  return trimmed;
+}
+
+function parseCoverImageUrlUpdate(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  // Ignore transient object URLs; they are never valid persisted media URLs.
+  if (trimmed.startsWith("blob:")) return undefined;
+  return trimmed;
+}
+
 // All routes require authentication
 podcastsRouter.use(jwtAuthMiddleware);
 
@@ -51,7 +72,12 @@ podcastsRouter.get("/", async (req: Request, res: Response) => {
       .innerJoin(podcasts, eq(podcasts.id, podcastMembers.podcastId))
       .where(eq(podcastMembers.userId, req.user.userId));
 
-    res.json({ podcasts: userPodcasts });
+    res.json({
+      podcasts: userPodcasts.map((podcast) => ({
+        ...podcast,
+        coverImageUrl: sanitizeCoverImageUrlForResponse(podcast.coverImageUrl),
+      })),
+    });
   } catch (error) {
     console.error("List podcasts error:", error);
     res.status(500).json({ error: "Failed to list podcasts" });
@@ -151,7 +177,10 @@ podcastsRouter.get("/:id", async (req: Request, res: Response) => {
       );
 
     res.json({
-      podcast,
+      podcast: {
+        ...podcast,
+        coverImageUrl: sanitizeCoverImageUrlForResponse(podcast.coverImageUrl),
+      },
       members,
       pendingInvitations: invitations,
       currentUserRole: membership.role,
@@ -171,6 +200,7 @@ podcastsRouter.put("/:id", async (req: Request, res: Response) => {
     }
     const id = getParam(req.params.id);
     const { name, description, coverImageUrl, podcastMetadata, brandColors } = req.body;
+    const safeCoverImageUrl = parseCoverImageUrlUpdate(coverImageUrl);
 
     // Check membership (only owner can update)
     const [membership] = await db
@@ -194,7 +224,7 @@ podcastsRouter.put("/:id", async (req: Request, res: Response) => {
       .set({
         ...(name && { name: name.trim() }),
         ...(description !== undefined && { description: description?.trim() }),
-        ...(coverImageUrl !== undefined && { coverImageUrl }),
+        ...(safeCoverImageUrl !== undefined && { coverImageUrl: safeCoverImageUrl }),
         ...(podcastMetadata !== undefined && { podcastMetadata }),
         ...(brandColors !== undefined && { brandColors }),
         updatedAt: new Date(),
@@ -202,7 +232,12 @@ podcastsRouter.put("/:id", async (req: Request, res: Response) => {
       .where(eq(podcasts.id, id))
       .returning();
 
-    res.json({ podcast: updated });
+    res.json({
+      podcast: {
+        ...updated,
+        coverImageUrl: sanitizeCoverImageUrlForResponse(updated.coverImageUrl),
+      },
+    });
   } catch (error) {
     console.error("Update podcast error:", error);
     res.status(500).json({ error: "Failed to update podcast" });
@@ -251,7 +286,13 @@ podcastsRouter.post(
         .where(eq(podcasts.id, id))
         .returning();
 
-      res.json({ coverImageUrl: url, podcast: updated });
+      res.json({
+        coverImageUrl: sanitizeCoverImageUrlForResponse(url),
+        podcast: {
+          ...updated,
+          coverImageUrl: sanitizeCoverImageUrlForResponse(updated.coverImageUrl),
+        },
+      });
     } catch (error) {
       console.error("Cover upload error:", error);
       const message = error instanceof Error ? error.message : "Unknown error";

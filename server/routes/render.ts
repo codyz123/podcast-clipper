@@ -9,6 +9,7 @@ import { desc, eq, asc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   clips,
+  podcasts,
   projects,
   renderedClips,
   videoSources,
@@ -827,6 +828,46 @@ async function runRenderJob(jobId: string): Promise<void> {
       };
     }
 
+    // Fetch podcast metadata for overlays (e.g. Apple Podcasts CTA)
+    let podcastMeta:
+      | {
+          name: string;
+          coverImageUrl?: string;
+          author?: string;
+          category?: string;
+        }
+      | undefined;
+
+    if (project?.podcastId) {
+      const [podcastRow] = await db
+        .select({
+          name: podcasts.name,
+          coverImageUrl: podcasts.coverImageUrl,
+          podcastMetadata: podcasts.podcastMetadata,
+        })
+        .from(podcasts)
+        .where(eq(podcasts.id, project.podcastId))
+        .limit(1);
+
+      if (podcastRow) {
+        let coverImageUrl = podcastRow.coverImageUrl || undefined;
+        if (coverImageUrl && !coverImageUrl.startsWith("data:")) {
+          try {
+            coverImageUrl = await prefetchImageAsDataUri(coverImageUrl);
+          } catch (e) {
+            console.warn("Failed to pre-fetch podcast cover image, using original URL:", e);
+          }
+        }
+
+        podcastMeta = {
+          name: podcastRow.name,
+          coverImageUrl,
+          author: podcastRow.podcastMetadata?.author,
+          category: podcastRow.podcastMetadata?.category,
+        };
+      }
+    }
+
     // Build base props (shared between audio and multicam)
     const baseProps = {
       audioStartFrame: Math.floor(clipStart * FPS),
@@ -845,6 +886,7 @@ async function runRenderJob(jobId: string): Promise<void> {
       tracks: renderTracks.length > 0 ? renderTracks : undefined,
       groupBoundaries,
       speaker: speakerConfig,
+      podcast: podcastMeta,
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

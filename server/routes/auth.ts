@@ -18,6 +18,16 @@ import { jwtAuthMiddleware } from "../middleware/auth.js";
 
 export const authRouter = Router();
 
+function sanitizeCoverImageUrlForResponse(
+  url: string | null | undefined
+): string | null | undefined {
+  if (url === undefined) return undefined;
+  if (url === null) return null;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("blob:")) return null;
+  return trimmed;
+}
+
 // POST /api/auth/register
 authRouter.post("/register", authRateLimit, async (req: Request, res: Response) => {
   try {
@@ -230,7 +240,13 @@ authRouter.get("/me", jwtAuthMiddleware, async (req: Request, res: Response) => 
       .innerJoin(podcasts, eq(podcasts.id, podcastMembers.podcastId))
       .where(eq(podcastMembers.userId, user.id));
 
-    res.json({ user, podcasts: userPodcasts });
+    res.json({
+      user,
+      podcasts: userPodcasts.map((podcast) => ({
+        ...podcast,
+        coverImageUrl: sanitizeCoverImageUrlForResponse(podcast.coverImageUrl),
+      })),
+    });
   } catch (error) {
     console.error("Get user error:", error);
     res.status(500).json({ error: "Failed to get user" });

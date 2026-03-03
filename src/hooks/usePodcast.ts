@@ -3,6 +3,13 @@ import { useAuthStore } from "../stores/authStore";
 import type { PodcastDetails } from "../lib/authTypes";
 import { getApiBase, authFetch } from "../lib/api";
 
+function sanitizeCoverImageUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("blob:")) return undefined;
+  return trimmed;
+}
+
 export function usePodcast() {
   const { currentPodcastId, setPodcasts } = useAuthStore();
   const [podcast, setPodcast] = useState<PodcastDetails | null>(null);
@@ -27,6 +34,7 @@ export function usePodcast() {
       const data = await res.json();
       setPodcast({
         ...data.podcast,
+        coverImageUrl: sanitizeCoverImageUrl(data.podcast?.coverImageUrl),
         members: data.members,
         pendingInvitations: data.pendingInvitations,
         currentUserRole: data.currentUserRole,

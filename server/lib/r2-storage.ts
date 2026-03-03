@@ -14,21 +14,28 @@ import type { Readable } from "node:stream";
 // Lazy initialization to avoid errors when env vars aren't set
 let r2Client: S3Client | null = null;
 
+function getEnvTrimmed(name: string): string | undefined {
+  const value = process.env[name];
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
 export function isR2Configured(): boolean {
   return Boolean(
-    process.env.R2_ACCOUNT_ID &&
-    process.env.R2_ACCESS_KEY_ID &&
-    process.env.R2_SECRET_ACCESS_KEY &&
-    process.env.R2_BUCKET_NAME &&
-    process.env.R2_PUBLIC_URL
+    getEnvTrimmed("R2_ACCOUNT_ID") &&
+    getEnvTrimmed("R2_ACCESS_KEY_ID") &&
+    getEnvTrimmed("R2_SECRET_ACCESS_KEY") &&
+    getEnvTrimmed("R2_BUCKET_NAME") &&
+    getEnvTrimmed("R2_PUBLIC_URL")
   );
 }
 
 function getR2Client(): S3Client {
   if (!r2Client) {
-    const accountId = process.env.R2_ACCOUNT_ID;
-    const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-    const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
+    const accountId = getEnvTrimmed("R2_ACCOUNT_ID");
+    const accessKeyId = getEnvTrimmed("R2_ACCESS_KEY_ID");
+    const secretAccessKey = getEnvTrimmed("R2_SECRET_ACCESS_KEY");
 
     if (!accountId || !accessKeyId || !secretAccessKey) {
       throw new Error(
@@ -49,7 +56,7 @@ function getR2Client(): S3Client {
 }
 
 function getBucketName(): string {
-  const bucket = process.env.R2_BUCKET_NAME;
+  const bucket = getEnvTrimmed("R2_BUCKET_NAME");
   if (!bucket) {
     throw new Error("R2_BUCKET_NAME environment variable is required");
   }
@@ -60,7 +67,7 @@ function getBucketName(): string {
  * Get the public URL for an R2 object
  */
 export function getR2PublicUrl(key: string): string {
-  const publicUrl = process.env.R2_PUBLIC_URL;
+  const publicUrl = getEnvTrimmed("R2_PUBLIC_URL");
   if (!publicUrl) {
     throw new Error("R2_PUBLIC_URL environment variable is required");
   }
@@ -71,7 +78,7 @@ export function getR2PublicUrl(key: string): string {
  * Extract the key from an R2 public URL
  */
 export function getKeyFromR2Url(url: string): string | null {
-  const publicUrl = process.env.R2_PUBLIC_URL;
+  const publicUrl = getEnvTrimmed("R2_PUBLIC_URL");
   if (!publicUrl || !url.startsWith(publicUrl)) {
     return null;
   }

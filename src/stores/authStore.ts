@@ -19,6 +19,20 @@ interface AuthStore extends AuthState {
   setShowCreatePodcast: (show: boolean) => void;
 }
 
+function sanitizeCoverImageUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("blob:")) return undefined;
+  return trimmed;
+}
+
+function sanitizePodcasts(podcasts: Podcast[]): Podcast[] {
+  return podcasts.map((podcast) => ({
+    ...podcast,
+    coverImageUrl: sanitizeCoverImageUrl(podcast.coverImageUrl),
+  }));
+}
+
 export const useAuthStore = create<AuthStore>()(
   persist(
     (set, get) => ({
@@ -55,6 +69,7 @@ export const useAuthStore = create<AuthStore>()(
             headers: { Authorization: `Bearer ${accessToken}` },
           });
           const { podcasts } = await podcastsRes.json();
+          const safePodcasts = sanitizePodcasts(podcasts as Podcast[]);
 
           set({
             user,
@@ -62,8 +77,8 @@ export const useAuthStore = create<AuthStore>()(
             refreshToken,
             isAuthenticated: true,
             isLoading: false,
-            podcasts,
-            currentPodcastId: podcasts[0]?.id || null,
+            podcasts: safePodcasts,
+            currentPodcastId: safePodcasts[0]?.id || null,
           });
         } catch (error) {
           set({
@@ -95,6 +110,7 @@ export const useAuthStore = create<AuthStore>()(
             headers: { Authorization: `Bearer ${accessToken}` },
           });
           const { podcasts } = await podcastsRes.json();
+          const safePodcasts = sanitizePodcasts(podcasts as Podcast[]);
 
           set({
             user,
@@ -102,8 +118,8 @@ export const useAuthStore = create<AuthStore>()(
             refreshToken,
             isAuthenticated: true,
             isLoading: false,
-            podcasts,
-            currentPodcastId: podcasts[0]?.id || null,
+            podcasts: safePodcasts,
+            currentPodcastId: safePodcasts[0]?.id || null,
           });
         } catch (error) {
           set({
@@ -196,12 +212,18 @@ export const useAuthStore = create<AuthStore>()(
           }
 
           const { user, podcasts } = await res.json();
+          const safePodcasts = sanitizePodcasts(podcasts as Podcast[]);
+          const persistedId = get().currentPodcastId;
+          const resolvedPodcastId =
+            persistedId && safePodcasts.some((p: Podcast) => p.id === persistedId)
+              ? persistedId
+              : safePodcasts[0]?.id || null;
           set({
             user,
             isAuthenticated: true,
             isLoading: false,
-            podcasts,
-            currentPodcastId: get().currentPodcastId || podcasts[0]?.id || null,
+            podcasts: safePodcasts,
+            currentPodcastId: resolvedPodcastId,
           });
         } catch {
           set({
@@ -216,22 +238,58 @@ export const useAuthStore = create<AuthStore>()(
 
       setCurrentPodcast: (id) => set({ currentPodcastId: id }),
 
-      setPodcasts: (podcasts) =>
+      setPodcasts: (podcasts) => {
+        const safePodcasts = sanitizePodcasts(podcasts);
+        const persistedId = get().currentPodcastId;
+        const resolvedPodcastId =
+          persistedId && safePodcasts.some((p) => p.id === persistedId)
+            ? persistedId
+            : safePodcasts[0]?.id || null;
         set({
-          podcasts,
-          currentPodcastId: get().currentPodcastId || podcasts[0]?.id || null,
-        }),
+          podcasts: safePodcasts,
+          currentPodcastId: resolvedPodcastId,
+        });
+      },
 
       setShowCreatePodcast: (show) => set({ showCreatePodcast: show }),
     }),
     {
       name: "podcastomatic-auth",
+      version: 2,
       partialize: (state) => ({
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
         currentPodcastId: state.currentPodcastId,
         podcasts: state.podcasts,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const safePodcasts = sanitizePodcasts(state.podcasts || []);
+        state.podcasts = safePodcasts;
+        if (state.currentPodcastId && !safePodcasts.some((p) => p.id === state.currentPodcastId)) {
+          state.currentPodcastId = safePodcasts[0]?.id || null;
+        }
+      },
+      migrate: (persistedState: unknown, _version: number) => {
+        const state = (persistedState ?? {}) as {
+          accessToken?: string | null;
+          refreshToken?: string | null;
+          currentPodcastId?: string | null;
+          podcasts?: Podcast[];
+        };
+
+        const safePodcasts = sanitizePodcasts((state.podcasts as Podcast[]) || []);
+        const currentPodcastId =
+          state.currentPodcastId && safePodcasts.some((p) => p.id === state.currentPodcastId)
+            ? state.currentPodcastId
+            : safePodcasts[0]?.id || null;
+
+        return {
+          ...state,
+          podcasts: safePodcasts,
+          currentPodcastId,
+        };
+      },
     }
   )
 );
