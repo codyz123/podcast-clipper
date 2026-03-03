@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { readFileSync, copyFileSync, mkdirSync, statSync, writeFileSync, appendFileSync } from "fs";
+import fs, { readFileSync, copyFileSync, mkdirSync, statSync, writeFileSync } from "fs";
 import path from "node:path";
 import { uploadToR2, deleteFromR2ByUrl, listR2Objects, isR2Configured } from "./r2-storage.js";
 import { toISOStringSafe } from "../utils/dates.js";
@@ -536,7 +536,7 @@ export async function uploadLocalPart(
   const offset = session.parts.reduce((sum, part) => sum + part.size, 0);
 
   // Append the part to the file
-  appendFileSync(session.path, body);
+  await fs.promises.appendFile(session.path, body);
 
   // Track this part
   session.parts.push({
