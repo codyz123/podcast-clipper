@@ -1,3 +1,4 @@
+import path from "node:path";
 import { Router, Request, Response } from "express";
 import { eq, and, asc } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -488,13 +489,26 @@ async function processVideoSource(
 ): Promise<void> {
   console.warn(`Processing video source ${sourceId}: ${fileName}`);
 
-  // Download the video to a temp file
-  const response = await fetch(videoBlobUrl);
-  if (!response.ok) {
-    throw new Error(`Failed to download video: ${response.statusText}`);
+  // Get video to a temp file - read directly from disk for local storage
+  let tempVideoPath: string;
+  const localMediaPrefix = "/api/local-media/";
+  const localMediaIdx = videoBlobUrl.indexOf(localMediaPrefix);
+  if (localMediaIdx !== -1) {
+    // Local storage: read file directly from disk
+    const relativePath = videoBlobUrl.substring(localMediaIdx + localMediaPrefix.length);
+    const localPath = path.join(process.cwd(), ".context", "local-media", relativePath);
+    const { readFileSync } = await import("node:fs");
+    const videoBuffer = readFileSync(localPath);
+    tempVideoPath = await bufferToTempFile(videoBuffer, "mp4");
+  } else {
+    // R2 or remote: fetch via HTTP
+    const response = await fetch(videoBlobUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to download video: ${response.statusText}`);
+    }
+    const videoBuffer = Buffer.from(await response.arrayBuffer());
+    tempVideoPath = await bufferToTempFile(videoBuffer, "mp4");
   }
-  const videoBuffer = Buffer.from(await response.arrayBuffer());
-  const tempVideoPath = await bufferToTempFile(videoBuffer, "mp4");
 
   try {
     // Step 1: Extract metadata

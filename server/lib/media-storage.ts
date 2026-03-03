@@ -19,7 +19,7 @@ function getLocalMediaBaseUrl(): string {
   if (process.env.BACKEND_URL) {
     return process.env.BACKEND_URL;
   }
-  const port = process.env.PORT || "3001";
+  const port = process.env.PORT || "3002";
   return `http://localhost:${port}`;
 }
 
