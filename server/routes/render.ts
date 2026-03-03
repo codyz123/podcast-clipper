@@ -9,11 +9,17 @@ import { desc, eq, asc } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
   clips,
+  podcasts,
   projects,
   renderedClips,
   videoSources,
   transcripts,
   podcastPeople,
+  mediaAssets,
+  episodeTimelines,
+  episodeRenderJobs,
+  renderedEpisodes,
+  podcastBrandingAssets,
 } from "../db/schema.js";
 import { uploadMediaFromPath } from "../lib/media-storage.js";
 import { logAndSanitizeError } from "../lib/error-sanitizer.js";
@@ -52,7 +58,7 @@ function cleanupOldRenderFiles(): void {
     const now = Date.now();
     const maxAge = 24 * 60 * 60 * 1000; // 24 hours
 
-    files.forEach(file => {
+    files.forEach((file) => {
       const filePath = path.join(renderDir, file);
       try {
         const stats = fs.statSync(filePath);
@@ -65,7 +71,7 @@ function cleanupOldRenderFiles(): void {
       }
     });
   } catch (error) {
-    console.error('Failed to cleanup old render files:', error);
+    console.error("Failed to cleanup old render files:", error);
   }
 }
 
@@ -76,16 +82,23 @@ setTimeout(cleanupOldRenderFiles, 10000);
 
 const getVideoMetadata = async (filePath: string): Promise<VideoMetadata | null> => {
   try {
-    const result = await runFFprobe([
-      '-v', 'error',
-      '-select_streams', 'v:0',
-      '-show_entries', 'stream=width,height,duration,r_frame_rate',
-      '-of', 'json',
-      filePath
-    ], {
-      timeoutMs: 30000,
-      id: `metadata-${path.basename(filePath)}`
-    });
+    const result = await runFFprobe(
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height,duration,r_frame_rate",
+        "-of",
+        "json",
+        filePath,
+      ],
+      {
+        timeoutMs: 30000,
+        id: `metadata-${path.basename(filePath)}`,
+      }
+    );
 
     const data = JSON.parse(result.stdout) as { streams?: Array<Record<string, string>> };
     const stream = data.streams?.[0];
@@ -148,6 +161,7 @@ type BackgroundConfig = {
   gradientDirection?: number;
   imagePath?: string;
   videoPath?: string;
+  videoStartFrame?: number;
 };
 
 type RenderJob = {
@@ -207,6 +221,331 @@ type RenderOverrides = {
   words?: RawWord[];
   renderScale?: number;
 };
+
+type EpisodeTrackItem = {
+  id: string;
+  type: "video" | "audio" | "image" | "text" | "caption" | "transition";
+  startTime: number;
+  duration: number;
+  sourceIn: number;
+  sourceOut: number;
+  mediaSourceId?: string;
+  mediaSourceType?: "video-source" | "media-asset" | "episode-audio" | "branding";
+  resolvedUrl?: string;
+  positionX?: number;
+  positionY?: number;
+  scale?: number;
+  rotation?: number;
+  opacity?: number;
+  volume?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  speed?: number;
+};
+
+type EpisodeTrack = {
+  id: string;
+  type: string;
+  order: number;
+  muted: boolean;
+  visible: boolean;
+  solo: boolean;
+  volume: number;
+  opacity: number;
+  items: EpisodeTrackItem[];
+};
+
+type EpisodeRenderSnapshot = {
+  timelineId: string;
+  tracks: EpisodeTrack[];
+  background: BackgroundConfig;
+  fps: number;
+  startTime: number;
+  endTime: number;
+  format: "16:9";
+};
+
+function toFiniteNumber(value: unknown, fallback: number): number {
+  return Number.isFinite(value) ? Number(value) : fallback;
+}
+
+function clipTracksToRange(
+  tracks: EpisodeTrack[],
+  startTime: number,
+  endTime: number
+): EpisodeTrack[] {
+  return tracks.map((track) => {
+    const clippedItems = (track.items || []).flatMap((item) => {
+      const itemStart = Math.max(0, toFiniteNumber(item.startTime, 0));
+      const itemDuration = Math.max(0, toFiniteNumber(item.duration, 0));
+      const itemEnd = itemStart + itemDuration;
+
+      const overlapStart = Math.max(itemStart, startTime);
+      const overlapEnd = Math.min(itemEnd, endTime);
+      if (overlapEnd <= overlapStart) return [];
+
+      const speed = toFiniteNumber(item.speed, 1);
+      const safeSpeed = speed > 0 ? speed : 1;
+      const offsetIntoItem = overlapStart - itemStart;
+      const sourceIn = toFiniteNumber(item.sourceIn, 0) + offsetIntoItem * safeSpeed;
+      const duration = overlapEnd - overlapStart;
+      const sourceOut = sourceIn + duration * safeSpeed;
+
+      return [
+        {
+          ...item,
+          startTime: overlapStart - startTime,
+          duration,
+          sourceIn,
+          sourceOut,
+          speed: safeSpeed,
+        },
+      ];
+    });
+
+    return {
+      ...track,
+      items: clippedItems,
+    };
+  });
+}
+
+async function resolveEpisodeMediaMap(
+  projectId: string,
+  podcastId?: string | null
+): Promise<{
+  map: Map<string, string>;
+  episodeAudioUrl: string;
+}> {
+  const [project] = await db.select().from(projects).where(eq(projects.id, projectId));
+  if (!project) {
+    throw new Error("Episode not found");
+  }
+
+  const [sources, assets, brandingAssets] = await Promise.all([
+    db
+      .select({
+        id: videoSources.id,
+        videoBlobUrl: videoSources.videoBlobUrl,
+        audioBlobUrl: videoSources.audioBlobUrl,
+      })
+      .from(videoSources)
+      .where(eq(videoSources.projectId, projectId)),
+    db
+      .select({
+        id: mediaAssets.id,
+        blobUrl: mediaAssets.blobUrl,
+      })
+      .from(mediaAssets)
+      .where(eq(mediaAssets.projectId, projectId)),
+    podcastId
+      ? db
+          .select({
+            id: podcastBrandingAssets.id,
+            blobUrl: podcastBrandingAssets.blobUrl,
+          })
+          .from(podcastBrandingAssets)
+          .where(eq(podcastBrandingAssets.podcastId, podcastId))
+      : Promise.resolve([] as Array<{ id: string; blobUrl: string }>),
+  ]);
+
+  const map = new Map<string, string>();
+  for (const source of sources) {
+    if (source.videoBlobUrl) map.set(source.id, source.videoBlobUrl);
+  }
+  for (const asset of assets) {
+    if (asset.blobUrl) map.set(asset.id, asset.blobUrl);
+  }
+  for (const branding of brandingAssets) {
+    if (branding.blobUrl) map.set(branding.id, branding.blobUrl);
+  }
+
+  const episodeAudioUrl = project.mixedAudioBlobUrl || project.audioBlobUrl || "";
+  if (episodeAudioUrl) {
+    map.set(projectId, episodeAudioUrl);
+  }
+
+  return { map, episodeAudioUrl };
+}
+
+function attachResolvedUrls(
+  tracks: EpisodeTrack[],
+  mediaUrlMap: Map<string, string>,
+  episodeAudioUrl: string
+): EpisodeTrack[] {
+  return tracks.map((track) => ({
+    ...track,
+    items: (track.items || []).map((item) => {
+      let resolvedUrl = item.resolvedUrl || "";
+      if (!resolvedUrl && item.mediaSourceId) {
+        resolvedUrl = mediaUrlMap.get(item.mediaSourceId) || "";
+      }
+      if (!resolvedUrl && item.mediaSourceType === "episode-audio") {
+        resolvedUrl = episodeAudioUrl;
+      }
+
+      return {
+        ...item,
+        resolvedUrl: resolvedUrl || undefined,
+      };
+    }),
+  }));
+}
+
+async function updateEpisodeJob(
+  jobId: string,
+  updates: Partial<{
+    status: string;
+    progress: number;
+    currentChunk: number | null;
+    totalChunks: number | null;
+    errorMessage: string | null;
+    blobUrl: string | null;
+    sizeBytes: number | null;
+    completedAt: Date | null;
+  }>
+) {
+  await db
+    .update(episodeRenderJobs)
+    .set({
+      ...updates,
+      updatedAt: new Date(),
+    })
+    .where(eq(episodeRenderJobs.id, jobId));
+}
+
+async function runEpisodeRenderJob(jobId: string): Promise<void> {
+  try {
+    const [job] = await db.select().from(episodeRenderJobs).where(eq(episodeRenderJobs.id, jobId));
+    if (!job) return;
+
+    const snapshot = job.timelineSnapshot as EpisodeRenderSnapshot;
+    if (!snapshot || !snapshot.tracks || !snapshot.background) {
+      throw new Error("Episode render job has invalid timeline snapshot");
+    }
+
+    await updateEpisodeJob(jobId, {
+      status: "rendering",
+      progress: 0,
+      errorMessage: null,
+    });
+
+    const [project] = await db.select().from(projects).where(eq(projects.id, job.projectId));
+    if (!project) {
+      throw new Error("Episode not found");
+    }
+
+    const { map: mediaUrlMap, episodeAudioUrl } = await resolveEpisodeMediaMap(
+      job.projectId,
+      project.podcastId
+    );
+    const hydratedTracks = attachResolvedUrls(snapshot.tracks, mediaUrlMap, episodeAudioUrl);
+
+    const renderDurationSeconds = Math.max(0.1, snapshot.endTime - snapshot.startTime);
+    const renderFps = Math.max(1, Math.round(toFiniteNumber(snapshot.fps, FPS)));
+    const durationInFrames = Math.max(1, Math.ceil(renderDurationSeconds * renderFps));
+
+    const props = {
+      tracks: hydratedTracks,
+      background: snapshot.background || DEFAULT_BACKGROUND,
+      durationInFrames,
+      fps: renderFps,
+    };
+
+    const renderDir = path.join(process.cwd(), ".context", "renders");
+    fs.mkdirSync(renderDir, { recursive: true });
+    const safeTimestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const outputName = `episode-${job.projectId}-${safeTimestamp}-${crypto.randomUUID()}.mp4`;
+    const outputPath = path.join(renderDir, outputName);
+
+    const serveUrl = await getBundle();
+    const composition = await selectComposition({
+      serveUrl,
+      id: "EpisodeVideo-16-9",
+      inputProps: props,
+    });
+
+    let lastProgress = -1;
+    await renderMedia({
+      serveUrl,
+      composition,
+      codec: "h264",
+      outputLocation: outputPath,
+      inputProps: props,
+      crf: 18,
+      pixelFormat: "yuv420p",
+      onProgress: (progress) => {
+        const nextProgress = Math.round(progress.progress * 100);
+        if (nextProgress === lastProgress) return;
+        lastProgress = nextProgress;
+        void updateEpisodeJob(jobId, { progress: nextProgress });
+      },
+    });
+
+    verifyRender(outputPath, {
+      duration: renderDurationSeconds,
+      width: composition.width,
+      height: composition.height,
+    });
+
+    const { url, size } = await uploadMediaFromPath(
+      outputPath,
+      outputName,
+      "video/mp4",
+      `rendered/episodes/${job.projectId}`
+    );
+
+    fs.unlinkSync(outputPath);
+
+    const [renderedEpisode] = await db
+      .insert(renderedEpisodes)
+      .values({
+        projectId: job.projectId,
+        timelineId: snapshot.timelineId,
+        name: `Episode Export ${new Date().toLocaleString()}`,
+        format: snapshot.format,
+        blobUrl: url,
+        sizeBytes: size,
+        durationSeconds: renderDurationSeconds,
+      })
+      .returning({ id: renderedEpisodes.id });
+
+    const [asset] = await db
+      .insert(mediaAssets)
+      .values({
+        projectId: job.projectId,
+        type: "video",
+        name: `Episode Export ${new Date().toLocaleString()}`,
+        category: "nle-export",
+        blobUrl: url,
+        contentType: "video/mp4",
+        sizeBytes: size,
+        durationSeconds: renderDurationSeconds,
+        width: composition.width,
+        height: composition.height,
+        fps: renderFps,
+      })
+      .returning({ id: mediaAssets.id });
+
+    await updateEpisodeJob(jobId, {
+      status: "completed",
+      progress: 100,
+      blobUrl: url,
+      sizeBytes: size,
+      completedAt: new Date(),
+      errorMessage: null,
+    });
+
+    console.warn(
+      `[EpisodeRender] Completed job ${jobId} -> renderedEpisode=${renderedEpisode.id} mediaAsset=${asset.id}`
+    );
+  } catch (error) {
+    await updateEpisodeJob(jobId, {
+      status: "failed",
+      errorMessage: (error as Error).message,
+    });
+  }
+}
 
 function getCompositionId(format: string, isMulticam: boolean = false): string {
   const prefix = isMulticam ? "MulticamClipVideo" : "ClipVideo";
@@ -301,7 +640,6 @@ async function runRenderJob(jobId: string): Promise<void> {
     }
 
     const [project] = await db.select().from(projects).where(eq(projects.id, clip.projectId));
-    const isMulticam = project?.mediaType === "video";
 
     const overrides = job.overrides;
     const overrideTracks = overrides?.tracks;
@@ -335,6 +673,8 @@ async function runRenderJob(jobId: string): Promise<void> {
 
     const background =
       overrideBackground || (clip.background as BackgroundConfig | undefined) || DEFAULT_BACKGROUND;
+    const isVideoBackground = background.type === "video" && !!background.videoPath;
+    const isMulticam = project?.mediaType === "video" && !isVideoBackground;
 
     const subtitleOverride = overrides?.subtitle as SubtitleConfig | undefined;
     const subtitleConfig = subtitleOverride || toSubtitleConfig(captionStyle);
@@ -487,19 +827,24 @@ async function runRenderJob(jobId: string): Promise<void> {
       }
 
       // Build frame-based speaker clips
-      const speakerClips = (speakerTrack.clips as Array<TrackClipInput & { assetId?: string }>)
-        .filter((c) => c.assetId)
-        .map((c) => {
-          const startSeconds = Math.max(0, c.startTime ?? 0);
-          const durationSec = Math.max(0, c.duration ?? 0);
-          return {
+      const speakerClips = (
+        speakerTrack.clips as Array<TrackClipInput & { assetId?: string }>
+      ).flatMap((c) => {
+        const speakerLabel = c.assetId;
+        if (!speakerLabel) return [];
+
+        const startSeconds = Math.max(0, c.startTime ?? 0);
+        const durationSec = Math.max(0, c.duration ?? 0);
+        return [
+          {
             startFrame: Math.floor(startSeconds * FPS),
             endFrame: Math.floor(startSeconds * FPS) + Math.ceil(durationSec * FPS),
-            speakerLabel: c.assetId!,
+            speakerLabel,
             personId: c.assetUrl || undefined,
-            colorIndex: orderedLabels.indexOf(c.assetId!),
-          };
-        });
+            colorIndex: orderedLabels.indexOf(speakerLabel),
+          },
+        ];
+      });
 
       // Collect referenced person IDs
       const referencedPersonIds = new Set(speakerClips.map((c) => c.personId).filter(Boolean));
@@ -534,19 +879,65 @@ async function runRenderJob(jobId: string): Promise<void> {
       };
     }
 
+    // Fetch podcast metadata for overlays (e.g. Apple Podcasts CTA)
+    let podcastMeta:
+      | {
+          name: string;
+          coverImageUrl?: string;
+          author?: string;
+          category?: string;
+        }
+      | undefined;
+
+    if (project?.podcastId) {
+      const [podcastRow] = await db
+        .select({
+          name: podcasts.name,
+          coverImageUrl: podcasts.coverImageUrl,
+          podcastMetadata: podcasts.podcastMetadata,
+        })
+        .from(podcasts)
+        .where(eq(podcasts.id, project.podcastId))
+        .limit(1);
+
+      if (podcastRow) {
+        let coverImageUrl = podcastRow.coverImageUrl || undefined;
+        if (coverImageUrl && !coverImageUrl.startsWith("data:")) {
+          try {
+            coverImageUrl = await prefetchImageAsDataUri(coverImageUrl);
+          } catch (e) {
+            console.warn("Failed to pre-fetch podcast cover image, using original URL:", e);
+          }
+        }
+
+        podcastMeta = {
+          name: podcastRow.name,
+          coverImageUrl,
+          author: podcastRow.podcastMetadata?.author,
+          category: podcastRow.podcastMetadata?.category,
+        };
+      }
+    }
+
     // Build base props (shared between audio and multicam)
     const baseProps = {
       audioStartFrame: Math.floor(clipStart * FPS),
       audioEndFrame: Math.ceil(clipEnd * FPS),
       words: wordTimings,
       format: job.format,
-      background,
+      background: isVideoBackground
+        ? {
+            ...background,
+            videoStartFrame: Math.floor(clipStart * FPS),
+          }
+        : background,
       subtitle: subtitleConfig,
       durationInFrames,
       fps: FPS,
       tracks: renderTracks.length > 0 ? renderTracks : undefined,
       groupBoundaries,
       speaker: speakerConfig,
+      podcast: podcastMeta,
     };
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -654,13 +1045,19 @@ async function runRenderJob(jobId: string): Promise<void> {
         transitionDurationFrames: multicamLayout?.transitionDurationFrames || 3,
       };
     } else {
-      // Standard audio-only render
-      if (!project?.audioBlobUrl) {
+      // Standard audio-only render, or single-video background mode
+      const resolvedAudioUrl =
+        (isVideoBackground ? background.videoPath || "" : "") ||
+        project?.mixedAudioBlobUrl ||
+        project?.audioBlobUrl ||
+        "";
+      if (!resolvedAudioUrl && !isVideoBackground) {
         throw new Error("Episode audio is missing");
       }
       props = {
         ...baseProps,
-        audioUrl: project.audioBlobUrl,
+        // For single-video clips we still prefer explicit audio track, but allow empty as fallback.
+        audioUrl: resolvedAudioUrl,
       };
     }
 
@@ -724,14 +1121,19 @@ async function runRenderJob(jobId: string): Promise<void> {
       sizeBytes: size,
     });
   } catch (error) {
-    const sanitizedError = logAndSanitizeError(error as Error, 'Render Job', process.env.NODE_ENV === 'development');
+    const sanitizedError = logAndSanitizeError(
+      error as Error,
+      "Render Job",
+      process.env.NODE_ENV === "development"
+    );
     setJob(jobId, {
       status: "failed",
-      errorMessage: typeof sanitizedError.error === 'string' ? sanitizedError.error : 'Render failed',
+      errorMessage:
+        typeof sanitizedError.error === "string" ? sanitizedError.error : "Render failed",
     });
   } finally {
     // Cleanup temporary files
-    tempFilesToCleanup.forEach(filePath => {
+    tempFilesToCleanup.forEach((filePath) => {
       try {
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
@@ -834,7 +1236,11 @@ router.post("/render/clip", async (req: Request, res: Response) => {
 
     res.json({ jobId, status: job.status, progress: job.progress, reused: false });
   } catch (error) {
-    const errorResponse = logAndSanitizeError(error as Error, 'Render Clip', process.env.NODE_ENV === 'development');
+    const errorResponse = logAndSanitizeError(
+      error as Error,
+      "Render Clip",
+      process.env.NODE_ENV === "development"
+    );
     res.status(500).json(errorResponse);
   }
 });
@@ -848,6 +1254,142 @@ router.get("/render/clip/:jobId/status", async (req: Request, res: Response) => 
   }
 
   res.json(job);
+});
+
+router.post("/render/episode", async (req: Request, res: Response) => {
+  try {
+    const { projectId, startTime, endTime } = req.body as {
+      projectId?: string;
+      startTime?: number;
+      endTime?: number;
+    };
+
+    if (!projectId) {
+      res.status(400).json({ error: "projectId is required" });
+      return;
+    }
+
+    const [timeline] = await db
+      .select()
+      .from(episodeTimelines)
+      .where(eq(episodeTimelines.projectId, projectId));
+
+    if (!timeline) {
+      res.status(404).json({ error: "Episode timeline not found. Initialize timeline first." });
+      return;
+    }
+
+    const timelineTracks = Array.isArray(timeline.tracks)
+      ? (timeline.tracks as EpisodeTrack[])
+      : [];
+    const derivedDuration = timelineTracks.reduce((maxTrack, track) => {
+      const trackMax = (track.items || []).reduce((maxItem, item) => {
+        const itemStart = Math.max(0, toFiniteNumber(item.startTime, 0));
+        const itemDuration = Math.max(0, toFiniteNumber(item.duration, 0));
+        return Math.max(maxItem, itemStart + itemDuration);
+      }, 0);
+      return Math.max(maxTrack, trackMax);
+    }, 0);
+    const totalDuration = Math.max(
+      0.1,
+      toFiniteNumber(timeline.duration, 0) > 0
+        ? toFiniteNumber(timeline.duration, 0)
+        : derivedDuration
+    );
+
+    const safeStart = Math.max(0, Math.min(totalDuration, toFiniteNumber(startTime, 0)));
+    const requestedEnd = toFiniteNumber(endTime, totalDuration);
+    const safeEnd = Math.max(safeStart + 0.1, Math.min(totalDuration, requestedEnd));
+
+    const existing = await db
+      .select()
+      .from(episodeRenderJobs)
+      .where(eq(episodeRenderJobs.projectId, projectId))
+      .orderBy(desc(episodeRenderJobs.createdAt));
+    const inflight = existing.find((row) => row.status === "pending" || row.status === "rendering");
+    if (inflight) {
+      const inflightSnapshot = inflight.timelineSnapshot as EpisodeRenderSnapshot | undefined;
+      const sameRange = Boolean(
+        inflightSnapshot &&
+        Math.abs(toFiniteNumber(inflightSnapshot.startTime, -1) - safeStart) < 0.001 &&
+        Math.abs(toFiniteNumber(inflightSnapshot.endTime, -1) - safeEnd) < 0.001
+      );
+
+      if (!sameRange) {
+        res.status(409).json({
+          error: "Another episode export is already in progress. Wait for it to finish.",
+          jobId: inflight.id,
+          status: inflight.status,
+          progress: inflight.progress,
+        });
+        return;
+      }
+
+      res.json({
+        jobId: inflight.id,
+        status: inflight.status,
+        progress: inflight.progress,
+        blobUrl: inflight.blobUrl,
+        sizeBytes: inflight.sizeBytes,
+        reused: true,
+      });
+      return;
+    }
+
+    const clippedTracks = clipTracksToRange(timelineTracks, safeStart, safeEnd);
+    const snapshot: EpisodeRenderSnapshot = {
+      timelineId: timeline.id,
+      tracks: clippedTracks,
+      background: (timeline.background as BackgroundConfig | undefined) || DEFAULT_BACKGROUND,
+      fps: toFiniteNumber(timeline.fps, FPS),
+      startTime: safeStart,
+      endTime: safeEnd,
+      format: "16:9",
+    };
+
+    const [job] = await db
+      .insert(episodeRenderJobs)
+      .values({
+        projectId,
+        timelineSnapshot: snapshot,
+        status: "pending",
+        progress: 0,
+      })
+      .returning({
+        id: episodeRenderJobs.id,
+        status: episodeRenderJobs.status,
+        progress: episodeRenderJobs.progress,
+      });
+
+    void runEpisodeRenderJob(job.id);
+
+    res.json({
+      jobId: job.id,
+      status: job.status,
+      progress: job.progress,
+      reused: false,
+    });
+  } catch (error) {
+    console.error("Failed to render episode:", error);
+    res.status(500).json({ error: (error as Error).message });
+  }
+});
+
+router.get("/render/episode/:jobId/status", async (req: Request, res: Response) => {
+  try {
+    const jobId = req.params.jobId as string;
+    const [job] = await db.select().from(episodeRenderJobs).where(eq(episodeRenderJobs.id, jobId));
+
+    if (!job) {
+      res.status(404).json({ error: "Episode render job not found" });
+      return;
+    }
+
+    res.json(job);
+  } catch (error) {
+    console.error("Failed to fetch episode render job status:", error);
+    res.status(500).json({ error: (error as Error).message });
+  }
 });
 
 // List rendered clips for a project

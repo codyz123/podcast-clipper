@@ -51,35 +51,31 @@ export const sessions = pgTable(
 
 // ============ Podcasts ============
 
-export const podcasts = pgTable(
-  "podcasts", 
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    name: varchar("name", { length: 255 }).notNull(),
-    description: text("description"),
-    createdById: uuid("created_by_id")
-      .references(() => users.id)
-      .notNull(),
-    coverImageUrl: text("cover_image_url"),
-    podcastMetadata: jsonb("podcast_metadata").$type<{
-      showName?: string;
-      author?: string;
-      category?: string;
-      language?: string;
-      explicit?: boolean;
-      email?: string;
-      website?: string;
-    }>(),
-    brandColors: jsonb("brand_colors").$type<{
-      primary?: string;
-      secondary?: string;
-      accent?: string;
-    }>(),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  },
-  (table) => [index("podcasts_created_by_id_idx").on(table.createdById)]
-);
+export const podcasts = pgTable("podcasts", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  createdById: uuid("created_by_id")
+    .references(() => users.id)
+    .notNull(),
+  coverImageUrl: text("cover_image_url"),
+  podcastMetadata: jsonb("podcast_metadata").$type<{
+    showName?: string;
+    author?: string;
+    category?: string;
+    language?: string;
+    explicit?: boolean;
+    email?: string;
+    website?: string;
+  }>(),
+  brandColors: jsonb("brand_colors").$type<{
+    primary?: string;
+    secondary?: string;
+    accent?: string;
+  }>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 export const podcastMembers = pgTable(
   "podcast_members",
@@ -206,10 +202,7 @@ export const projects = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [
-    index("projects_v2_podcast_id_idx").on(table.podcastId),
-    index("projects_v2_created_by_id_idx").on(table.createdById)
-  ]
+  (table) => [index("projects_v2_podcast_id_idx").on(table.podcastId)]
 );
 
 // ============ Upload Sessions (Multipart) ============
@@ -399,12 +392,16 @@ export const transcripts = pgTable(
       }>
     >(),
     service: varchar("service", { length: 50 }),
+    sourceBlobUrl: text("source_blob_url"),
+    sourceType: varchar("source_type", { length: 20 }),
+    sourceMediaAssetId: uuid("source_media_asset_id"),
     createdById: uuid("created_by_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
     index("transcripts_project_id_idx").on(table.projectId),
-    index("transcripts_audio_fingerprint_idx").on(table.audioFingerprint)
+    index("transcripts_source_type_idx").on(table.sourceType),
+    index("transcripts_source_media_asset_id_idx").on(table.sourceMediaAssetId),
   ]
 );
 
@@ -508,6 +505,10 @@ export const mediaAssets = pgTable(
     width: integer("width"),
     height: integer("height"),
     metadata: jsonb("metadata"),
+    category: varchar("category", { length: 50 }).default("general").notNull(),
+    thumbnailUrl: text("thumbnail_url"),
+    displayOrder: integer("display_order").default(0).notNull(),
+    fps: real("fps"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("media_assets_v2_project_id_idx").on(table.projectId)]
@@ -528,6 +529,87 @@ export const renderedClips = pgTable(
     renderedAt: timestamp("rendered_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [index("rendered_clips_v2_clip_id_idx").on(table.clipId)]
+);
+
+// ============ Episode Timelines ============
+
+export const episodeTimelines = pgTable(
+  "episode_timelines",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .references(() => projects.id, { onDelete: "cascade" })
+      .notNull()
+      .unique(),
+    tracks: jsonb("tracks").notNull().default([]),
+    duration: real("duration").default(0).notNull(),
+    fps: integer("fps").default(30).notNull(),
+    multicamConfig: jsonb("multicam_config"),
+    captionStyle: jsonb("caption_style"),
+    background: jsonb("background")
+      .default({
+        type: "gradient",
+        gradientColors: ["#667eea", "#764ba2"],
+        gradientDirection: 135,
+      })
+      .notNull(),
+    markers: jsonb("markers").default([]).notNull(),
+    clipMarkers: jsonb("clip_markers").default([]),
+    format: varchar("format", { length: 10 }).default("16:9").notNull(),
+    version: integer("version").default(1).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("episode_timelines_project_id_idx").on(table.projectId)]
+);
+
+// ============ Rendered Episodes ============
+
+export const renderedEpisodes = pgTable(
+  "rendered_episodes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .references(() => projects.id, { onDelete: "cascade" })
+      .notNull(),
+    timelineId: uuid("timeline_id").references(() => episodeTimelines.id, {
+      onDelete: "set null",
+    }),
+    name: varchar("name", { length: 255 }),
+    format: varchar("format", { length: 50 }).notNull(),
+    blobUrl: text("blob_url").notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    durationSeconds: real("duration_seconds"),
+    renderedAt: timestamp("rendered_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [index("rendered_episodes_project_id_idx").on(table.projectId)]
+);
+
+// ============ Episode Render Jobs ============
+
+export const episodeRenderJobs = pgTable(
+  "episode_render_jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .references(() => projects.id, { onDelete: "cascade" })
+      .notNull(),
+    timelineSnapshot: jsonb("timeline_snapshot").notNull(),
+    status: varchar("status", { length: 20 }).default("pending").notNull(),
+    progress: integer("progress").default(0).notNull(),
+    currentChunk: integer("current_chunk").default(0),
+    totalChunks: integer("total_chunks"),
+    errorMessage: text("error_message"),
+    blobUrl: text("blob_url"),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    index("episode_render_jobs_project_id_idx").on(table.projectId),
+    index("episode_render_jobs_status_idx").on(table.status),
+  ]
 );
 
 // ============ YouTube Uploads ============
@@ -953,6 +1035,31 @@ export const xUploadsRelations = relations(xUploads, ({ one }) => ({
   }),
 }));
 
+export const episodeTimelinesRelations = relations(episodeTimelines, ({ one }) => ({
+  project: one(projects, {
+    fields: [episodeTimelines.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const renderedEpisodesRelations = relations(renderedEpisodes, ({ one }) => ({
+  project: one(projects, {
+    fields: [renderedEpisodes.projectId],
+    references: [projects.id],
+  }),
+  timeline: one(episodeTimelines, {
+    fields: [renderedEpisodes.timelineId],
+    references: [episodeTimelines.id],
+  }),
+}));
+
+export const episodeRenderJobsRelations = relations(episodeRenderJobs, ({ one }) => ({
+  project: one(projects, {
+    fields: [episodeRenderJobs.projectId],
+    references: [projects.id],
+  }),
+}));
+
 export const uploadEventsRelations = relations(uploadEvents, () => ({}));
 
 export const oauthTokensRelations = relations(oauthTokens, ({ one }) => ({
@@ -1004,3 +1111,9 @@ export type PodcastPerson = typeof podcastPeople.$inferSelect;
 export type NewPodcastPerson = typeof podcastPeople.$inferInsert;
 export type VideoSource = typeof videoSources.$inferSelect;
 export type NewVideoSource = typeof videoSources.$inferInsert;
+export type EpisodeTimeline = typeof episodeTimelines.$inferSelect;
+export type NewEpisodeTimeline = typeof episodeTimelines.$inferInsert;
+export type RenderedEpisode = typeof renderedEpisodes.$inferSelect;
+export type NewRenderedEpisode = typeof renderedEpisodes.$inferInsert;
+export type EpisodeRenderJob = typeof episodeRenderJobs.$inferSelect;
+export type NewEpisodeRenderJob = typeof episodeRenderJobs.$inferInsert;

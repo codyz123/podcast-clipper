@@ -2,6 +2,7 @@ import express, { ErrorRequestHandler } from "express";
 import cors from "cors";
 import multer from "multer";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { transcribeRouter } from "./routes/transcribe.js";
 import { analyzeClipsRouter } from "./routes/analyze-clips.js";
 import { oauthRouter } from "./routes/oauth.js";
@@ -15,6 +16,8 @@ import { textSnippetsRouter } from "./routes/text-snippets.js";
 import { generateSnippetRouter } from "./routes/generate-snippet.js";
 import { uploadsRouter } from "./routes/uploads.js";
 import { videoSourcesRouter } from "./routes/video-sources.js";
+import { episodeTimelinesRouter } from "./routes/episode-timelines.js";
+import { mediaAssetsRouter } from "./routes/media-assets.js";
 import { youtubeUploadRouter } from "./routes/youtube-upload.js";
 import { instagramUploadRouter } from "./routes/instagram-upload.js";
 import { tiktokUploadRouter } from "./routes/tiktok-upload.js";
@@ -61,8 +64,31 @@ app.get("/api/media/*", async (req, res) => {
       return;
     }
 
-    const { getFromR2 } = await import("./lib/r2-storage.js");
-    const { body, contentType, contentLength } = await getFromR2(key);
+    const { getFromR2, getR2PublicUrl } = await import("./lib/r2-storage.js");
+
+    let body: Readable;
+    let contentType = "application/octet-stream";
+    let contentLength = 0;
+
+    try {
+      const r2Object = await getFromR2(key);
+      body = r2Object.body;
+      contentType = r2Object.contentType;
+      contentLength = r2Object.contentLength;
+    } catch (r2Error) {
+      // Fallback for misconfigured credentials in dev: fetch from public URL.
+      const publicUrl = getR2PublicUrl(key);
+      const publicResponse = await fetch(publicUrl);
+      if (!publicResponse.ok || !publicResponse.body) {
+        throw r2Error;
+      }
+      body = Readable.fromWeb(
+        publicResponse.body as unknown as Parameters<typeof Readable.fromWeb>[0]
+      );
+      contentType = publicResponse.headers.get("content-type") || contentType;
+      const lengthHeader = publicResponse.headers.get("content-length");
+      contentLength = lengthHeader ? Number.parseInt(lengthHeader, 10) || 0 : 0;
+    }
 
     res.setHeader("Content-Type", contentType);
     if (contentLength) {
@@ -102,6 +128,12 @@ app.use("/api/podcasts", uploadsRouter);
 
 // Video source routes (JWT auth handled internally)
 app.use("/api/podcasts", videoSourcesRouter);
+
+// Episode timeline routes (JWT auth handled internally)
+app.use("/api/podcasts", episodeTimelinesRouter);
+
+// Media asset routes (JWT auth handled internally)
+app.use("/api/podcasts", mediaAssetsRouter);
 
 // Text snippets routes - scoped to podcast (JWT auth handled internally)
 app.use("/api/podcasts", textSnippetsRouter);

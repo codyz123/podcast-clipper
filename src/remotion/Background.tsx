@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill } from "remotion";
+import { AbsoluteFill, Video } from "remotion";
 import { BackgroundConfig } from "../lib/types";
 
 interface BackgroundProps {
@@ -7,6 +7,19 @@ interface BackgroundProps {
 }
 
 export const Background: React.FC<BackgroundProps> = ({ config }) => {
+  if (config.type === "video" && config.videoPath) {
+    return (
+      <AbsoluteFill>
+        <Video
+          src={config.videoPath}
+          startFrom={config.videoStartFrame ?? 0}
+          muted
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      </AbsoluteFill>
+    );
+  }
+
   const getBackgroundStyle = (): React.CSSProperties => {
     switch (config.type) {
       case "solid":
@@ -27,7 +40,6 @@ export const Background: React.FC<BackgroundProps> = ({ config }) => {
           backgroundPosition: "center",
         };
       case "video":
-        // Video backgrounds would need a separate Video component
         return {
           backgroundColor: "#000000",
         };

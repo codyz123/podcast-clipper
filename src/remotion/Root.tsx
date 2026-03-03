@@ -2,6 +2,7 @@ import React from "react";
 import { Composition } from "remotion";
 import { ClipVideo } from "./Composition";
 import { MulticamClipVideo } from "./MulticamComposition";
+import { EpisodeComposition, type EpisodeCompositionProps } from "./EpisodeComposition";
 import { VIDEO_FORMATS, VideoFormat, BackgroundConfig, SubtitleConfig } from "../lib/types";
 import { ClipVideoProps, MulticamClipVideoProps, WordTiming } from "./types";
 
@@ -65,10 +66,19 @@ const createMulticamDefaultProps = (format: VideoFormat): MulticamClipVideoProps
   transitionDurationFrames: 3,
 });
 
+const createEpisodeDefaultProps = (): EpisodeCompositionProps => ({
+  tracks: [],
+  background: defaultBackground,
+  durationInFrames: 180,
+  fps: 30,
+});
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const ClipVideoComponent = ClipVideo as any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const MulticamClipVideoComponent = MulticamClipVideo as any;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const EpisodeCompositionComponent = EpisodeComposition as any;
 
 export const RemotionRoot: React.FC = () => {
   return (
@@ -157,6 +167,17 @@ export const RemotionRoot: React.FC = () => {
         width={VIDEO_FORMATS["4:5"].width}
         height={VIDEO_FORMATS["4:5"].height}
         defaultProps={createMulticamDefaultProps("4:5")}
+      />
+
+      {/* Full episode export (NLE timeline) */}
+      <Composition
+        id="EpisodeVideo-16-9"
+        component={EpisodeCompositionComponent}
+        calculateMetadata={calculateMetadata}
+        fps={30}
+        width={VIDEO_FORMATS["16:9"].width}
+        height={VIDEO_FORMATS["16:9"].height}
+        defaultProps={createEpisodeDefaultProps()}
       />
     </>
   );

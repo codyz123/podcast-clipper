@@ -5,8 +5,14 @@ import { AssemblyAI } from "assemblyai";
 import { tmpdir } from "os";
 import { join } from "path";
 import { readFile, writeFile } from "fs/promises";
+import { createWriteStream } from "node:fs";
 import { randomUUID } from "crypto";
-import { eq, asc } from "drizzle-orm";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
+import { eq, asc, and } from "drizzle-orm";
 import { needsConversion } from "../lib/audio-formats.js";
 import {
   convertToWav,
@@ -17,11 +23,13 @@ import {
 } from "../lib/audio-converter.js";
 import { bufferToTempFile } from "../lib/video-processing.js";
 import { db } from "../db/index.js";
-import { videoSources, podcastPeople } from "../db/schema.js";
+import { videoSources, podcastPeople, mediaAssets, transcripts } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
-import { validateFile, sanitizeFilename } from "../lib/file-security.js";
+import { getParam, verifyPodcastAccess } from "../middleware/podcast-access.js";
+import { getFromR2, getKeyFromR2Url } from "../lib/r2-storage.js";
 
 const router = Router();
+const execFileAsync = promisify(execFile);
 
 // Use disk storage for large files to avoid memory issues
 const storage = multer.diskStorage({
@@ -34,15 +42,6 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 * 1024 }, // 10GB limit
-  fileFilter: (req, file, cb) => {
-    // Basic validation at upload time
-    const validation = validateFile(file.originalname, file.mimetype, 0, 'audio');
-    if (!validation.valid) {
-      cb(new Error(validation.error || 'Invalid file'));
-    } else {
-      cb(null, true);
-    }
-  }
 });
 
 // OpenAI Whisper file size limit
@@ -78,6 +77,53 @@ interface ProgressEvent {
  */
 function sendProgress(res: Response, event: ProgressEvent) {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+function inferSourceType(
+  contentType: string | null | undefined
+): "audio" | "video" | "multicam" | "nle-export" {
+  if (contentType?.startsWith("video/")) return "video";
+  if (contentType?.startsWith("audio/")) return "audio";
+  return "audio";
+}
+
+async function streamR2ToTempFile(blobUrl: string, extension: string): Promise<string> {
+  const key = getKeyFromR2Url(blobUrl);
+  const outputPath = join(tmpdir(), `${randomUUID()}-${extension}`);
+  if (key) {
+    const { body } = await getFromR2(key);
+    await pipeline(body, createWriteStream(outputPath));
+    return outputPath;
+  }
+
+  // Fallback for non-R2 URLs (e.g. local dev media URLs)
+  const response = await fetch(blobUrl);
+  if (!response.ok || !response.body) {
+    throw new Error(`Failed to download media asset: HTTP ${response.status}`);
+  }
+  await pipeline(
+    Readable.fromWeb(response.body as unknown as NodeReadableStream),
+    createWriteStream(outputPath)
+  );
+  return outputPath;
+}
+
+async function extractAudioToTempPath(inputPath: string): Promise<string> {
+  const outputPath = join(tmpdir(), `${randomUUID()}-audio.wav`);
+  await execFileAsync("ffmpeg", [
+    "-i",
+    inputPath,
+    "-vn",
+    "-acodec",
+    "pcm_s16le",
+    "-ar",
+    "16000",
+    "-ac",
+    "1",
+    outputPath,
+    "-y",
+  ]);
+  return outputPath;
 }
 
 // ============ AssemblyAI Transcription ============
@@ -462,6 +508,189 @@ async function transcribeWithWhisper(
   }
 }
 
+// ============ Media Asset Transcription ============
+
+router.post(
+  "/podcasts/:podcastId/episodes/:episodeId/transcribe/media-asset",
+  jwtAuthMiddleware,
+  verifyPodcastAccess,
+  async (req: Request, res: Response) => {
+    const podcastId = getParam(req.params.podcastId);
+    const episodeId = getParam(req.params.episodeId);
+    const { mediaAssetId, name, service } = req.body as {
+      mediaAssetId?: string;
+      name?: string;
+      service?: "assemblyai" | "openai-whisper";
+    };
+
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    if (!mediaAssetId) {
+      res.status(400).json({ error: "mediaAssetId is required" });
+      return;
+    }
+
+    const useStreaming = req.headers.accept === "text/event-stream";
+    if (useStreaming) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
+      res.flushHeaders();
+    }
+
+    const progress = (event: ProgressEvent) => {
+      if (useStreaming) sendProgress(res, event);
+    };
+
+    const filesToCleanup: string[] = [];
+    try {
+      const [asset] = await db
+        .select()
+        .from(mediaAssets)
+        .where(and(eq(mediaAssets.id, mediaAssetId), eq(mediaAssets.projectId, episodeId)))
+        .limit(1);
+
+      if (!asset) {
+        if (useStreaming) {
+          res.write(
+            `data: ${JSON.stringify({ stage: "error", error: "Media asset not found" })}\n\n`
+          );
+          res.end();
+          return;
+        }
+        res.status(404).json({ error: "Media asset not found" });
+        return;
+      }
+
+      if (!asset.contentType?.startsWith("video/") && !asset.contentType?.startsWith("audio/")) {
+        throw new Error("Media asset must be audio or video");
+      }
+
+      progress({
+        stage: "validating",
+        progress: 2,
+        message: "Validating media asset",
+        detail: `${podcastId}:${episodeId}`,
+      });
+
+      progress({
+        stage: "downloading",
+        progress: 8,
+        message: "Downloading source media",
+      });
+
+      const mediaPath = await streamR2ToTempFile(
+        asset.blobUrl,
+        asset.contentType.startsWith("video/") ? "video" : "audio"
+      );
+      filesToCleanup.push(mediaPath);
+
+      let audioPath = mediaPath;
+      if (asset.contentType.startsWith("video/")) {
+        progress({
+          stage: "extracting",
+          progress: 18,
+          message: "Extracting audio from video",
+        });
+        audioPath = await extractAudioToTempPath(mediaPath);
+        filesToCleanup.push(audioPath);
+      }
+
+      const assemblyaiKey = process.env.ASSEMBLYAI_API_KEY;
+      const useAssemblyAI =
+        service === "assemblyai" ? true : service === "openai-whisper" ? false : !!assemblyaiKey;
+
+      let result: {
+        text: string;
+        words: WordTimestamp[];
+        segments: SpeakerSegment[];
+        language: string;
+        duration: number;
+      };
+
+      if (useAssemblyAI) {
+        result = await transcribeWithAssemblyAI(audioPath, progress, assemblyaiKey);
+      } else {
+        const whisperResult = await transcribeWithWhisper(
+          audioPath,
+          asset.name,
+          asset.contentType,
+          asset.sizeBytes || 0,
+          progress
+        );
+        result = whisperResult;
+      }
+
+      progress({
+        stage: "persisting",
+        progress: 96,
+        message: "Saving transcript",
+      });
+
+      const [saved] = await db
+        .insert(transcripts)
+        .values({
+          projectId: episodeId,
+          text: result.text,
+          words: result.words.map((w) => ({
+            text: w.word,
+            start: w.start,
+            end: w.end,
+            confidence: w.confidence ?? 1,
+          })),
+          segments: result.segments,
+          language: result.language,
+          name: name || null,
+          service: useAssemblyAI ? "assemblyai" : "openai-whisper",
+          sourceBlobUrl: asset.blobUrl,
+          sourceType:
+            asset.category === "nle-export" ? "nle-export" : inferSourceType(asset.contentType),
+          sourceMediaAssetId: asset.id,
+          createdById: req.user.userId,
+        })
+        .returning();
+
+      const responsePayload = {
+        stage: "result",
+        task: "transcribe",
+        language: result.language,
+        duration: result.duration,
+        text: result.text,
+        words: result.words,
+        segments: result.segments,
+        service: useAssemblyAI ? "assemblyai" : "openai-whisper",
+        transcript: saved,
+      };
+
+      if (useStreaming) {
+        sendProgress(res, {
+          stage: "complete",
+          progress: 100,
+          message: "Transcription complete",
+          detail: `${result.words.length} words`,
+        });
+        res.write(`data: ${JSON.stringify(responsePayload)}\n\n`);
+        res.end();
+      } else {
+        res.json(responsePayload);
+      }
+    } catch (error) {
+      console.error("Media asset transcription error:", error);
+      const errorMessage = error instanceof Error ? error.message : "Transcription failed";
+      if (useStreaming) {
+        res.write(`data: ${JSON.stringify({ stage: "error", error: errorMessage })}\n\n`);
+        res.end();
+      } else {
+        res.status(500).json({ error: errorMessage });
+      }
+    } finally {
+      await cleanupTempFiles(...filesToCleanup);
+    }
+  }
+);
+
 // ============ Main Route ============
 
 router.post("/transcribe", upload.single("file"), async (req: Request, res: Response) => {
@@ -511,19 +740,6 @@ router.post("/transcribe", upload.single("file"), async (req: Request, res: Resp
     const mimetype = req.file.mimetype || "";
     const originalName = req.file.originalname || "audio";
     const fileSizeMB = req.file.size / 1024 / 1024;
-
-    // Validate file security
-    const fileValidation = validateFile(originalName, mimetype, req.file.size, 'audio');
-    if (!fileValidation.valid) {
-      progress({
-        stage: "error",
-        progress: 0,
-        message: "File validation failed",
-        detail: fileValidation.error,
-      });
-      res.status(400).json({ error: fileValidation.error });
-      return;
-    }
 
     progress({
       stage: "received",
@@ -665,6 +881,10 @@ async function transcribeSingleSource(
   if (!source.audioBlobUrl) {
     throw new Error(`Source ${source.label} has no audio`);
   }
+  const resolvedApiKey = apiKey || process.env.ASSEMBLYAI_API_KEY;
+  if (!resolvedApiKey) {
+    throw new Error("ASSEMBLYAI_API_KEY is not configured");
+  }
 
   // Download audio to temp file
   const response = await fetch(source.audioBlobUrl);
@@ -673,7 +893,7 @@ async function transcribeSingleSource(
   const tempPath = await bufferToTempFile(buffer, "wav");
 
   try {
-    const client = new AssemblyAI({ apiKey: apiKey || process.env.ASSEMBLYAI_API_KEY! });
+    const client = new AssemblyAI({ apiKey: resolvedApiKey });
 
     progress({
       stage: "uploading",
@@ -875,7 +1095,7 @@ router.post("/transcribe-multicam", jwtAuthMiddleware, async (req: Request, res:
   res.flushHeaders();
 
   const progress = (event: ProgressEvent) => {
-    console.info(
+    console.warn(
       `[multicam-transcribe] [${event.stage}] ${event.progress}% - ${event.message}${event.detail ? ` (${event.detail})` : ""}`
     );
     sendProgress(res, event);

@@ -121,10 +121,25 @@ export function buildPlayerProps(input: BuildPlayerPropsInput): BuildPlayerProps
   }
 
   // Background with fallback
-  const background: BackgroundConfig = clip.background || {
-    type: "solid",
-    color: "#000000",
-  };
+  const background: BackgroundConfig = clip.background
+    ? {
+        ...clip.background,
+        videoPath:
+          clip.background.type === "video" && clip.background.videoPath
+            ? getMediaUrl(clip.background.videoPath)
+            : clip.background.videoPath,
+        videoStartFrame:
+          clip.background.type === "video" ? Math.floor(clip.startTime * FPS) : undefined,
+      }
+    : {
+        type: "solid",
+        color: "#000000",
+      };
+
+  // For video-background clips, fall back to the video file's own audio when
+  // the project-level audio track is not available.
+  const resolvedAudioUrl =
+    background.type === "video" ? background.videoPath || audioUrl || "" : audioUrl || "";
 
   // Track data conversion (time-based → frame-based)
   const tracks = buildTrackData(clip);
@@ -137,8 +152,15 @@ export function buildPlayerProps(input: BuildPlayerPropsInput): BuildPlayerProps
   const audioStartFrame = Math.floor(clip.startTime * FPS);
   const audioEndFrame = Math.ceil(clip.endTime * FPS);
 
+  const resolvedPodcast = podcast
+    ? {
+        ...podcast,
+        coverImageUrl: getMediaUrl(podcast.coverImageUrl),
+      }
+    : undefined;
+
   const props: ClipVideoProps = {
-    audioUrl,
+    audioUrl: resolvedAudioUrl,
     audioStartFrame,
     audioEndFrame,
     words,
@@ -148,7 +170,7 @@ export function buildPlayerProps(input: BuildPlayerPropsInput): BuildPlayerProps
     durationInFrames,
     fps: FPS,
     tracks: tracks.length > 0 ? tracks : undefined,
-    podcast,
+    podcast: resolvedPodcast,
     groupBoundaries,
     speaker,
   };
@@ -273,15 +295,19 @@ function buildSpeakerConfig(
     if (c.assetId && !labels.includes(c.assetId)) labels.push(c.assetId);
   }
 
-  const speakerClips: SpeakerClipData[] = speakerTrack.clips
-    .filter((c) => c.assetId)
-    .map((c) => ({
-      startFrame: Math.floor(c.startTime * FPS),
-      endFrame: Math.ceil((c.startTime + c.duration) * FPS),
-      speakerLabel: c.assetId!,
-      personId: c.assetUrl || undefined, // assetUrl stores personId
-      colorIndex: labels.indexOf(c.assetId!),
-    }));
+  const speakerClips: SpeakerClipData[] = speakerTrack.clips.flatMap((c) => {
+    const speakerLabel = c.assetId;
+    if (!speakerLabel) return [];
+    return [
+      {
+        startFrame: Math.floor(c.startTime * FPS),
+        endFrame: Math.ceil((c.startTime + c.duration) * FPS),
+        speakerLabel,
+        personId: c.assetUrl || undefined, // assetUrl stores personId
+        colorIndex: labels.indexOf(speakerLabel),
+      },
+    ];
+  });
 
   const people: SpeakerPerson[] = (speakerPeople || [])
     .filter((p) => speakerClips.some((c) => c.personId === p.id))

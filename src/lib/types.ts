@@ -100,6 +100,9 @@ export interface Transcript {
   id: string;
   projectId: string;
   audioFingerprint?: string; // Links transcript to specific audio file
+  sourceBlobUrl?: string; // Source media URL used for transcription (snapshot)
+  sourceType?: "audio" | "video" | "nle-export" | "multicam";
+  sourceMediaAssetId?: string; // media_assets_v2.id when transcript came from a media asset
   text: string;
   words: Word[];
   segments?: SpeakerSegment[];
@@ -202,6 +205,7 @@ export interface BackgroundConfig {
   gradientDirection?: number;
   imagePath?: string;
   videoPath?: string;
+  videoStartFrame?: number;
 }
 
 export interface SubtitleConfig {
@@ -641,4 +645,41 @@ export interface HookAnalysis {
   weaknesses: string[];
   suggestions: string[];
   predictedRetention: number; // Estimated % who watch past 3s
+}
+
+// ============ Media Manager ============
+
+export type MediaCategory =
+  | "general"
+  | "episode-audio"
+  | "camera"
+  | "broll"
+  | "intro"
+  | "outro"
+  | "music"
+  | "sfx"
+  | "graphic"
+  | "nle-export";
+
+export interface MediaItem {
+  id: string;
+  source: "media-asset" | "video-source" | "episode-audio" | "branding";
+  sourceId: string; // Original ID in the source table (for mutations)
+  name: string;
+  category: MediaCategory;
+  blobUrl: string;
+  proxyBlobUrl?: string;
+  thumbnailUrl?: string;
+  contentType?: string;
+  sizeBytes?: number;
+  durationSeconds?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  syncOffsetMs?: number;
+  syncMethod?: string;
+  syncConfidence?: number;
+  processingStatus?: "pending" | "processing" | "complete" | "failed";
+  displayOrder: number;
+  createdAt: string;
 }

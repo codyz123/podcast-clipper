@@ -52,6 +52,14 @@ export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNav
 
   // Get current podcast and workspace name
   const currentPodcast = podcasts.find((p) => p.id === currentPodcastId);
+  const safeCoverFromPodcast =
+    currentPodcast?.coverImageUrl && !currentPodcast.coverImageUrl.startsWith("blob:")
+      ? currentPodcast.coverImageUrl
+      : undefined;
+  const safeCoverFromWorkspace =
+    podcastMetadata.coverImage && !podcastMetadata.coverImage.startsWith("blob:")
+      ? podcastMetadata.coverImage
+      : undefined;
   const workspaceName = currentPodcast?.name || podcastMetadata.name || "My Podcast";
 
   // Sidebar is expanded if pinned OR hovered
@@ -92,15 +100,15 @@ export const WorkspaceNav: React.FC<WorkspaceNavProps> = ({ activeSection, onNav
               title={!showExpanded ? workspaceName : undefined}
             >
               {/* Workspace icon/avatar - show cover image if available */}
-              {currentPodcast?.coverImageUrl ? (
+              {safeCoverFromPodcast ? (
                 <img
-                  src={getMediaUrl(currentPodcast.coverImageUrl)}
+                  src={getMediaUrl(safeCoverFromPodcast)}
                   alt={workspaceName}
                   className="h-5 w-5 flex-shrink-0 rounded object-cover"
                 />
-              ) : podcastMetadata.coverImage ? (
+              ) : safeCoverFromWorkspace ? (
                 <img
-                  src={getMediaUrl(podcastMetadata.coverImage)}
+                  src={getMediaUrl(safeCoverFromWorkspace)}
                   alt={workspaceName}
                   className="h-5 w-5 flex-shrink-0 rounded object-cover"
                 />

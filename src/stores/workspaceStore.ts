@@ -114,8 +114,11 @@ export const useWorkspaceStore = create<WorkspaceState>()(
     }),
     {
       name: "podcastomatic-workspace",
-      version: 2,
+      version: 3,
       onRehydrateStorage: () => (state) => {
+        if (state?.podcastMetadata?.coverImage?.startsWith("blob:")) {
+          state.podcastMetadata.coverImage = undefined;
+        }
         // Apply brand colors when store is rehydrated from localStorage
         if (state?.brandColors) {
           applyBrandColors(state.brandColors);
@@ -126,6 +129,18 @@ export const useWorkspaceStore = create<WorkspaceState>()(
         if (version < 2) {
           // Add brandColors for stores created before v2
           return { ...state, brandColors: null };
+        }
+        if (version < 3) {
+          const coverImage = state?.podcastMetadata?.coverImage;
+          if (coverImage?.startsWith("blob:")) {
+            return {
+              ...state,
+              podcastMetadata: {
+                ...state.podcastMetadata,
+                coverImage: undefined,
+              },
+            };
+          }
         }
         return state;
       },
