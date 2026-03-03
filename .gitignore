@@ -37,3 +37,6 @@ dist-server
 playwright-report/
 test-results/
 .vercel
+
+# Context+ MCP cache
+.mcp_data/

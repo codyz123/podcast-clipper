@@ -3,7 +3,17 @@ import { eq, and } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { uploadSessions, projects, podcastMembers } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
-import { createMultipartUpload, uploadPart, completeMultipartUpload } from "../lib/r2-storage.js";
+import {
+  createMultipartUpload,
+  uploadPart,
+  completeMultipartUpload,
+  isR2Configured,
+} from "../lib/r2-storage.js";
+import {
+  createLocalMultipartUpload,
+  uploadLocalPart,
+  completeLocalMultipartUpload,
+} from "../lib/media-storage.js";
 import { validateFile, validateContentType, createSafeStoragePath } from "../lib/file-security.js";
 import { logAndSanitizeError } from "../lib/error-sanitizer.js";
 
@@ -61,7 +71,11 @@ router.post(
       }
 
       // Use sanitized filename
-      const sanitizedFilename = fileValidation.sanitizedFilename!;
+      const sanitizedFilename = fileValidation.sanitizedFilename;
+      if (!sanitizedFilename) {
+        res.status(400).json({ error: "Could not sanitize filename" });
+        return;
+      }
 
       // Verify episode exists
       const [episode] = await db
@@ -76,10 +90,18 @@ router.post(
       const chunkSize = calculateChunkSize(totalBytes);
       const totalParts = Math.ceil(totalBytes / chunkSize);
       const timestamp = Date.now();
-      const pathname = createSafeStoragePath('podcasts', podcastId, 'episodes', episodeId, `${timestamp}-${sanitizedFilename}`);
+      const pathname = createSafeStoragePath(
+        "podcasts",
+        podcastId,
+        "episodes",
+        episodeId,
+        `${timestamp}-${sanitizedFilename}`
+      );
 
-      // Initialize R2 multipart upload
-      const { key, uploadId } = await createMultipartUpload(pathname, contentType);
+      // Initialize multipart upload (R2 or local storage)
+      const { key, uploadId } = isR2Configured()
+        ? await createMultipartUpload(pathname, contentType)
+        : await createLocalMultipartUpload(pathname, contentType);
 
       // Store session in database
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
@@ -109,7 +131,11 @@ router.post(
         expiresAt: expiresAt.toISOString(),
       });
     } catch (error) {
-      const errorResponse = logAndSanitizeError(error as Error, 'Upload Init', process.env.NODE_ENV === 'development');
+      const errorResponse = logAndSanitizeError(
+        error as Error,
+        "Upload Init",
+        process.env.NODE_ENV === "development"
+      );
       res.status(500).json(errorResponse);
     }
   }
@@ -170,8 +196,10 @@ router.post(
         return;
       }
 
-      // Upload to R2
-      const part = await uploadPart(session.blobKey, session.uploadId, partNumber, chunk);
+      // Upload part (R2 or local storage)
+      const part = isR2Configured()
+        ? await uploadPart(session.blobKey, session.uploadId, partNumber, chunk)
+        : await uploadLocalPart(session.blobKey, session.uploadId, partNumber, chunk);
 
       // Update session
       const updatedParts = [...(session.completedParts || []), { partNumber, etag: part.etag }];
@@ -193,7 +221,11 @@ router.post(
         progress: Math.round((updatedParts.length / session.totalParts) * 100),
       });
     } catch (error) {
-      const errorResponse = logAndSanitizeError(error as Error, 'Part Upload', process.env.NODE_ENV === 'development');
+      const errorResponse = logAndSanitizeError(
+        error as Error,
+        "Part Upload",
+        process.env.NODE_ENV === "development"
+      );
       res.status(500).json(errorResponse);
     }
   }
@@ -240,8 +272,10 @@ router.post(
         (a, b) => a.partNumber - b.partNumber
       );
 
-      // Complete multipart upload
-      const result = await completeMultipartUpload(session.blobKey, session.uploadId, sortedParts);
+      // Complete multipart upload (R2 or local storage)
+      const result = isR2Configured()
+        ? await completeMultipartUpload(session.blobKey, session.uploadId, sortedParts)
+        : await completeLocalMultipartUpload(session.blobKey, session.uploadId, sortedParts);
 
       // Update session as completed
       await db
@@ -268,14 +302,19 @@ router.post(
         size: session.totalBytes,
       });
     } catch (error) {
-      const errorResponse = logAndSanitizeError(error as Error, 'Complete Upload', process.env.NODE_ENV === 'development');
+      const errorResponse = logAndSanitizeError(
+        error as Error,
+        "Complete Upload",
+        process.env.NODE_ENV === "development"
+      );
 
       // Mark as failed (store sanitized error message)
       await db
         .update(uploadSessions)
         .set({
           status: "failed",
-          errorMessage: typeof errorResponse.error === 'string' ? errorResponse.error : 'Upload failed',
+          errorMessage:
+            typeof errorResponse.error === "string" ? errorResponse.error : "Upload failed",
           updatedAt: new Date(),
         })
         .where(eq(uploadSessions.id, sessionId));

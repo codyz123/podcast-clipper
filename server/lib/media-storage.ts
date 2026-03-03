@@ -1,5 +1,5 @@
 import { neon } from "@neondatabase/serverless";
-import { readFileSync, copyFileSync, mkdirSync, statSync, writeFileSync } from "fs";
+import { readFileSync, copyFileSync, mkdirSync, statSync, writeFileSync, appendFileSync } from "fs";
 import path from "node:path";
 import { uploadToR2, deleteFromR2ByUrl, listR2Objects, isR2Configured } from "./r2-storage.js";
 import { toISOStringSafe } from "../utils/dates.js";
@@ -31,6 +31,17 @@ function getLocalMediaPath(folder: string, filename: string): { key: string; pat
   return {
     key,
     path: path.join(dir, safeFilename),
+  };
+}
+
+// Create nested directory structure for complex keys
+function getLocalMediaPathFromKey(key: string): { key: string; path: string } {
+  const fullPath = path.join(LOCAL_MEDIA_ROOT, key);
+  const dir = path.dirname(fullPath);
+  mkdirSync(dir, { recursive: true });
+  return {
+    key,
+    path: fullPath,
   };
 }
 
@@ -466,6 +477,94 @@ export async function deleteMediaAsset(id: string): Promise<void> {
   }
 
   await sql`DELETE FROM media_assets WHERE id = ${id}`;
+}
+
+// ============ Local Storage Fallback for Multipart Upload ============
+
+// In-memory store for tracking local multipart uploads
+const localMultipartSessions = new Map<
+  string,
+  {
+    key: string;
+    path: string;
+    contentType: string;
+    parts: Array<{ partNumber: number; size: number; offset: number }>;
+  }
+>();
+
+// Create a multipart upload session (local storage fallback)
+export async function createLocalMultipartUpload(
+  key: string,
+  contentType: string
+): Promise<{ uploadId: string; key: string }> {
+  const uploadId = `local-${Date.now()}-${Math.random().toString(36)}`;
+  const localPath = getLocalMediaPathFromKey(key);
+
+  localMultipartSessions.set(uploadId, {
+    key,
+    path: localPath.path,
+    contentType,
+    parts: [],
+  });
+
+  return { uploadId, key };
+}
+
+// Upload a part (local storage fallback)
+export async function uploadLocalPart(
+  key: string,
+  uploadId: string,
+  partNumber: number,
+  body: Buffer
+): Promise<{ etag: string; partNumber: number }> {
+  const session = localMultipartSessions.get(uploadId);
+  if (!session) {
+    throw new Error(`Upload session not found: ${uploadId}`);
+  }
+
+  // Calculate offset for this part based on existing parts
+  const offset = session.parts.reduce((sum, part) => sum + part.size, 0);
+
+  // Append the part to the file
+  appendFileSync(session.path, body);
+
+  // Track this part
+  session.parts.push({
+    partNumber,
+    size: body.length,
+    offset,
+  });
+
+  // Generate a fake etag
+  const etag = `"${partNumber}-${body.length}-${Date.now()}"`;
+
+  return { etag, partNumber };
+}
+
+// Complete multipart upload (local storage fallback)
+export async function completeLocalMultipartUpload(
+  key: string,
+  uploadId: string,
+  parts: Array<{ etag: string; partNumber: number }>
+): Promise<{ url: string }> {
+  const session = localMultipartSessions.get(uploadId);
+  if (!session) {
+    throw new Error(`Upload session not found: ${uploadId}`);
+  }
+
+  // Verify all parts are present
+  const expectedParts = session.parts.length;
+  if (parts.length !== expectedParts) {
+    throw new Error(`Expected ${expectedParts} parts, got ${parts.length}`);
+  }
+
+  // Generate local URL
+  const url = buildLocalMediaUrl(session.key);
+
+  // Cleanup session
+  localMultipartSessions.delete(uploadId);
+
+  return { url };
 }
 
 // Save rendered clip

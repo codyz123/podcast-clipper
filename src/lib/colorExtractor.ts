@@ -306,14 +306,22 @@ function updateFavicon(primaryHsl: string | null): void {
 
     // Revoke old blob URL if it exists
     if (link.href.startsWith("blob:")) {
-      try { URL.revokeObjectURL(link.href); } catch { // ignore revokeObjectURL errors }
+      try {
+        URL.revokeObjectURL(link.href);
+      } catch {
+        /* ignore revokeObjectURL errors */
+      }
     }
 
     link.href = url;
   } else {
     // Reset to default favicon
     if (link.href.startsWith("blob:")) {
-      try { URL.revokeObjectURL(link.href); } catch { // ignore revokeObjectURL errors }
+      try {
+        URL.revokeObjectURL(link.href);
+      } catch {
+        /* ignore revokeObjectURL errors */
+      }
     }
     link.href = "/podcastomatic.svg";
   }
@@ -323,7 +331,7 @@ function updateFavicon(primaryHsl: string | null): void {
  * Create a very dark tinted background color from an HSL value
  * Takes the hue from the brand color and creates a nearly-black version
  */
-function createTintedBackground(hsl: string): string {
+export function createTintedBackground(hsl: string): string {
   // Parse "H S% L%" format
   const match = hsl.match(/(\d+)\s+(\d+)%?\s+(\d+)%?/);
   if (!match) return "260 30% 4%"; // fallback to default

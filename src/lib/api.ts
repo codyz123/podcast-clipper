@@ -8,7 +8,7 @@ import { useAuthStore } from "../stores/authStore";
  * Get the API base URL from settings
  */
 export function getApiBase(): string {
-  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3002";
+  return useSettingsStore.getState().settings.backendUrl || "http://localhost:3003";
 }
 
 /**

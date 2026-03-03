@@ -113,7 +113,7 @@ const SETTINGS_VERSION = 5;
 const isProduction = window.location.hostname !== "localhost";
 const DEFAULT_BACKEND_URL = isProduction
   ? "https://podcastomatic-api-production.up.railway.app"
-  : "http://localhost:3002";
+  : "http://localhost:3003";
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
