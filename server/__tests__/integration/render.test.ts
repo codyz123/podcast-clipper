@@ -61,6 +61,12 @@ vi.mock("../../db/index.js", () => {
     clips_v2: [],
     projects_v2: [],
     rendered_clips_v2: [],
+    episode_timelines: [],
+    episode_render_jobs: [],
+    rendered_episodes: [],
+    media_assets_v2: [],
+    video_sources: [],
+    podcast_branding_assets: [],
   };
 
   const getTableName = (table: any): string => {
@@ -217,5 +223,90 @@ describe("Render routes", () => {
     expect(finalStatus.body.status).toBe("completed");
     expect(finalStatus.body.progress).toBe(100);
     expect(finalStatus.body.renderedClipUrl).toBe("https://r2.example.com/rendered.mp4");
+  });
+
+  it("renders episode export and reports DB-backed job status", async () => {
+    const projectId = "project-episode-1";
+
+    dbModule.db._test.tables.projects_v2.push({
+      id: projectId,
+      podcastId: "podcast-1",
+      audioBlobUrl: "https://r2.example.com/audio.mp3",
+      mixedAudioBlobUrl: "https://r2.example.com/mixed.mp3",
+    });
+    dbModule.db._test.tables.episode_timelines.push({
+      id: "timeline-1",
+      projectId,
+      duration: 6,
+      fps: 30,
+      background: {
+        type: "gradient",
+        gradientColors: ["#000000", "#111111"],
+        gradientDirection: 90,
+      },
+      tracks: [
+        {
+          id: "track-video-main",
+          type: "video-main",
+          order: 0,
+          muted: false,
+          visible: true,
+          solo: false,
+          volume: 1,
+          opacity: 1,
+          items: [
+            {
+              id: "item-1",
+              type: "video",
+              startTime: 0,
+              duration: 6,
+              sourceIn: 0,
+              sourceOut: 6,
+              resolvedUrl: "https://r2.example.com/source.mp4",
+              speed: 1,
+            },
+          ],
+        },
+      ],
+    });
+
+    const initRes = await request(app)
+      .post("/api/render/episode")
+      .set("x-access-code", "test-access-code")
+      .send({ projectId, startTime: 0, endTime: 4 });
+
+    expect(initRes.status).toBe(200);
+    expect(initRes.body.jobId).toBeDefined();
+
+    const jobId = initRes.body.jobId as string;
+
+    for (let i = 0; i < 10; i += 1) {
+      if (renderGate.resolve) break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const midStatus = await request(app)
+      .get(`/api/render/episode/${jobId}/status`)
+      .set("x-access-code", "test-access-code");
+
+    expect(midStatus.status).toBe(200);
+    expect(midStatus.body.status).toBe("rendering");
+    expect(midStatus.body.progress).toBe(40);
+
+    renderGate.resolve?.();
+
+    let finalStatus = midStatus;
+    for (let i = 0; i < 10; i += 1) {
+      finalStatus = await request(app)
+        .get(`/api/render/episode/${jobId}/status`)
+        .set("x-access-code", "test-access-code");
+      if (finalStatus.body.status === "completed") break;
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(finalStatus.status).toBe(200);
+    expect(finalStatus.body.status).toBe("completed");
+    expect(finalStatus.body.progress).toBe(100);
+    expect(finalStatus.body.blobUrl).toBe("https://r2.example.com/rendered.mp4");
   });
 });

@@ -40,6 +40,12 @@ interface ResumableSession {
   progress?: number;
 }
 
+export interface UploadCompleteOptions {
+  target?: "audio" | "media-asset" | "video-source";
+  category?: string;
+  name?: string;
+}
+
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 
@@ -85,7 +91,10 @@ export function useChunkedUpload(podcastId: string | null, episodeId: string | n
   }, [podcastId, episodeId]);
 
   const upload = useCallback(
-    async (file: File): Promise<{ url: string; size: number } | null> => {
+    async (
+      file: File,
+      options?: UploadCompleteOptions
+    ): Promise<{ url: string; size: number; mediaAssetId?: string } | null> => {
       if (!podcastId || !episodeId) {
         setProgress((p) => ({
           ...p,
@@ -246,7 +255,12 @@ export function useChunkedUpload(podcastId: string | null, episodeId: string | n
 
         const completeRes = await fetch(`${baseUrl}/${session.sessionId}/complete`, {
           method: "POST",
-          headers,
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target: options?.target,
+            category: options?.category,
+            name: options?.name,
+          }),
         });
 
         if (!completeRes.ok) {

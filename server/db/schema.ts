@@ -392,10 +392,17 @@ export const transcripts = pgTable(
       }>
     >(),
     service: varchar("service", { length: 50 }),
+    sourceBlobUrl: text("source_blob_url"),
+    sourceType: varchar("source_type", { length: 20 }),
+    sourceMediaAssetId: uuid("source_media_asset_id"),
     createdById: uuid("created_by_id").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [index("transcripts_project_id_idx").on(table.projectId)]
+  (table) => [
+    index("transcripts_project_id_idx").on(table.projectId),
+    index("transcripts_source_type_idx").on(table.sourceType),
+    index("transcripts_source_media_asset_id_idx").on(table.sourceMediaAssetId),
+  ]
 );
 
 // ============ Clips ============

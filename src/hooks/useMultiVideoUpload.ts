@@ -123,7 +123,8 @@ export function useMultiVideoUpload(podcastId: string | null, episodeId: string 
         // Complete upload
         const completeRes = await fetch(`${baseUrl}/${sessionId}/complete`, {
           method: "POST",
-          headers,
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ target: "video-source" }),
         });
 
         if (!completeRes.ok) {

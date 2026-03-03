@@ -118,6 +118,9 @@ export function saveTranscriptApi(
     name?: string;
     audioFingerprint?: string;
     service?: string;
+    sourceBlobUrl?: string;
+    sourceType?: "audio" | "video" | "nle-export" | "multicam";
+    sourceMediaAssetId?: string;
   }
 ): Promise<Transcript> {
   return apiCall<{ transcript: Transcript }>(

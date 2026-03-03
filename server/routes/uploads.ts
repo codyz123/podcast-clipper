@@ -1,11 +1,64 @@
 import { Router, Request, Response } from "express";
 import { eq, and } from "drizzle-orm";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { db } from "../db/index.js";
-import { uploadSessions, projects, podcastMembers } from "../db/schema.js";
+import { uploadSessions, projects, podcastMembers, mediaAssets } from "../db/schema.js";
 import { jwtAuthMiddleware } from "../middleware/auth.js";
 import { createMultipartUpload, uploadPart, completeMultipartUpload } from "../lib/r2-storage.js";
 
 const router = Router();
+const execFileAsync = promisify(execFile);
+
+type UploadTarget = "audio" | "media-asset" | "video-source";
+
+function parseTarget(value: unknown): UploadTarget {
+  if (value === "media-asset" || value === "video-source") {
+    return value;
+  }
+  return "audio";
+}
+
+async function probeVideoMetadata(
+  url: string
+): Promise<{ durationSeconds?: number; width?: number; height?: number; fps?: number } | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      "ffprobe",
+      [
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height,r_frame_rate",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "json",
+        url,
+      ],
+      { timeout: 10_000 }
+    );
+    const data = JSON.parse(stdout) as {
+      streams?: Array<{ width?: number; height?: number; r_frame_rate?: string }>;
+      format?: { duration?: string };
+    };
+    const stream = data.streams?.[0];
+    const [num, den] = (stream?.r_frame_rate || "0/1").split("/").map((part) => Number(part) || 0);
+    const fps = den > 0 ? num / den : undefined;
+    const duration = data.format?.duration ? Number.parseFloat(data.format.duration) : undefined;
+    return {
+      durationSeconds: Number.isFinite(duration) ? duration : undefined,
+      width: stream?.width,
+      height: stream?.height,
+      fps: Number.isFinite(fps) ? fps : undefined,
+    };
+  } catch (error) {
+    console.warn("Video metadata probe failed:", error);
+    return null;
+  }
+}
 
 // Chunk size calculation (5MB min, 50MB max, target ~1000 parts)
 function calculateChunkSize(totalBytes: number): number {
@@ -22,6 +75,23 @@ async function verifyAccess(userId: string, podcastId: string): Promise<boolean>
     .from(podcastMembers)
     .where(and(eq(podcastMembers.podcastId, podcastId), eq(podcastMembers.userId, userId)));
   return !!membership;
+}
+
+function hasVideoExtension(filename: string): boolean {
+  return /\.(mp4|mov|mkv|webm|avi)$/i.test(filename);
+}
+
+function isVideoUpload(contentType: string, filename: string): boolean {
+  const normalized = (contentType || "").toLowerCase();
+  return normalized.startsWith("video/") || hasVideoExtension(filename);
+}
+
+function inferAssetTypeFromUpload(contentType: string, filename: string): string {
+  if (isVideoUpload(contentType, filename)) return "video";
+  const normalized = (contentType || "").toLowerCase();
+  if (normalized.startsWith("audio/")) return "audio";
+  if (normalized.startsWith("image/")) return "image";
+  return "unknown";
 }
 
 // POST /api/podcasts/:podcastId/episodes/:episodeId/uploads/init
@@ -108,11 +178,22 @@ router.post(
   jwtAuthMiddleware,
   async (req: Request, res: Response) => {
     try {
+      const podcastId = req.params.podcastId as string;
+      const episodeId = req.params.episodeId as string;
       const sessionId = req.params.sessionId as string;
       const partNumber = parseInt(req.params.partNumber as string, 10);
 
-      if (isNaN(partNumber) || partNumber < 0) {
+      if (isNaN(partNumber) || partNumber < 1) {
         res.status(400).json({ error: "Invalid part number" });
+        return;
+      }
+
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      if (!(await verifyAccess(req.user.userId, podcastId))) {
+        res.status(403).json({ error: "Access denied" });
         return;
       }
 
@@ -133,8 +214,20 @@ router.post(
         res.status(404).json({ error: "Upload session not found" });
         return;
       }
+      if (session.podcastId !== podcastId || session.episodeId !== episodeId) {
+        res.status(403).json({ error: "Upload session does not belong to this episode" });
+        return;
+      }
+      if (session.createdById !== req.user.userId) {
+        res.status(403).json({ error: "Upload session does not belong to this user" });
+        return;
+      }
       if (session.status !== "uploading") {
         res.status(400).json({ error: `Session status is ${session.status}` });
+        return;
+      }
+      if (partNumber > session.totalParts) {
+        res.status(400).json({ error: "Part number exceeds expected total parts" });
         return;
       }
       if (new Date() > session.expiresAt) {
@@ -191,10 +284,29 @@ router.post(
   "/:podcastId/episodes/:episodeId/uploads/:sessionId/complete",
   jwtAuthMiddleware,
   async (req: Request, res: Response) => {
+    const podcastId = req.params.podcastId as string;
     const sessionId = req.params.sessionId as string;
     const episodeId = req.params.episodeId as string;
+    const target = parseTarget((req.body as { target?: string } | undefined)?.target);
+    const category =
+      typeof (req.body as { category?: unknown } | undefined)?.category === "string"
+        ? ((req.body as { category?: string }).category || "").trim() || undefined
+        : undefined;
+    const customName =
+      typeof (req.body as { name?: unknown } | undefined)?.name === "string"
+        ? ((req.body as { name?: string }).name || "").trim() || undefined
+        : undefined;
 
     try {
+      if (!req.user) {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+      if (!(await verifyAccess(req.user.userId, podcastId))) {
+        res.status(403).json({ error: "Access denied" });
+        return;
+      }
+
       const [session] = await db
         .select()
         .from(uploadSessions)
@@ -202,6 +314,88 @@ router.post(
 
       if (!session) {
         res.status(404).json({ error: "Session not found" });
+        return;
+      }
+      if (session.podcastId !== podcastId || session.episodeId !== episodeId) {
+        res.status(403).json({ error: "Upload session does not belong to this episode" });
+        return;
+      }
+      if (session.createdById !== req.user.userId) {
+        res.status(403).json({ error: "Upload session does not belong to this user" });
+        return;
+      }
+
+      // Idempotent completion
+      if (session.status === "completed" && session.blobUrl) {
+        let existingAssetId: string | undefined;
+        if (target === "audio") {
+          await db
+            .update(projects)
+            .set({
+              audioBlobUrl: session.blobUrl,
+              audioFileName: session.filename,
+              updatedAt: new Date(),
+            })
+            .where(eq(projects.id, episodeId));
+        }
+
+        if (target === "media-asset") {
+          const videoUpload = isVideoUpload(session.contentType, session.filename);
+
+          if (videoUpload) {
+            await db
+              .update(projects)
+              .set({
+                mediaType: "video",
+                updatedAt: new Date(),
+              })
+              .where(eq(projects.id, episodeId));
+          }
+
+          const [asset] = await db
+            .select({ id: mediaAssets.id })
+            .from(mediaAssets)
+            .where(
+              and(eq(mediaAssets.projectId, episodeId), eq(mediaAssets.blobUrl, session.blobUrl))
+            )
+            .limit(1);
+          if (asset) {
+            existingAssetId = asset.id;
+          } else {
+            const isVideo = isVideoUpload(session.contentType, session.filename);
+            const metadata = isVideo ? await probeVideoMetadata(session.blobUrl) : null;
+            const [created] = await db
+              .insert(mediaAssets)
+              .values({
+                projectId: episodeId,
+                type: inferAssetTypeFromUpload(session.contentType, session.filename),
+                name: customName || session.filename,
+                blobUrl: session.blobUrl,
+                contentType: session.contentType,
+                sizeBytes: session.totalBytes,
+                durationSeconds: metadata?.durationSeconds ?? null,
+                width: metadata?.width ?? null,
+                height: metadata?.height ?? null,
+                fps: metadata?.fps ?? null,
+                category: category || "general",
+              })
+              .returning({ id: mediaAssets.id });
+            existingAssetId = created.id;
+          }
+        }
+
+        res.json({
+          url: session.blobUrl,
+          size: session.totalBytes,
+          target,
+          mediaAssetId: existingAssetId,
+          reused: true,
+        });
+        return;
+      }
+
+      if (session.status !== "uploading" && session.status !== "completing") {
+        res.status(400).json({ error: `Session status is ${session.status}` });
         return;
       }
 
@@ -240,33 +434,67 @@ router.post(
         })
         .where(eq(uploadSessions.id, sessionId));
 
-      // Update episode with new audio
-      await db
-        .update(projects)
-        .set({
-          audioBlobUrl: result.url,
-          audioFileName: session.filename,
-          updatedAt: new Date(),
-        })
-        .where(eq(projects.id, episodeId));
+      let mediaAssetId: string | undefined;
+      if (target === "audio") {
+        await db
+          .update(projects)
+          .set({
+            audioBlobUrl: result.url,
+            audioFileName: session.filename,
+            updatedAt: new Date(),
+          })
+          .where(eq(projects.id, episodeId));
+      } else if (target === "media-asset") {
+        const videoUpload = isVideoUpload(session.contentType, session.filename);
+        if (videoUpload) {
+          await db
+            .update(projects)
+            .set({
+              mediaType: "video",
+              updatedAt: new Date(),
+            })
+            .where(eq(projects.id, episodeId));
+        }
+
+        const [existingAsset] = await db
+          .select({ id: mediaAssets.id })
+          .from(mediaAssets)
+          .where(and(eq(mediaAssets.projectId, episodeId), eq(mediaAssets.blobUrl, result.url)))
+          .limit(1);
+
+        if (existingAsset) {
+          mediaAssetId = existingAsset.id;
+        } else {
+          const isVideo = isVideoUpload(session.contentType, session.filename);
+          const metadata = isVideo ? await probeVideoMetadata(result.url) : null;
+          const [asset] = await db
+            .insert(mediaAssets)
+            .values({
+              projectId: episodeId,
+              type: inferAssetTypeFromUpload(session.contentType, session.filename),
+              name: customName || session.filename,
+              blobUrl: result.url,
+              contentType: session.contentType,
+              sizeBytes: session.totalBytes,
+              durationSeconds: metadata?.durationSeconds ?? null,
+              width: metadata?.width ?? null,
+              height: metadata?.height ?? null,
+              fps: metadata?.fps ?? null,
+              category: category || "general",
+            })
+            .returning({ id: mediaAssets.id });
+          mediaAssetId = asset.id;
+        }
+      }
 
       res.json({
         url: result.url,
         size: session.totalBytes,
+        target,
+        mediaAssetId,
       });
     } catch (error) {
       console.error("Complete upload error:", error);
-
-      // Mark as failed
-      await db
-        .update(uploadSessions)
-        .set({
-          status: "failed",
-          errorMessage: String(error),
-          updatedAt: new Date(),
-        })
-        .where(eq(uploadSessions.id, sessionId));
-
       res.status(500).json({ error: "Failed to complete upload" });
     }
   }
@@ -277,7 +505,18 @@ router.get(
   "/:podcastId/episodes/:episodeId/uploads/:sessionId/status",
   jwtAuthMiddleware,
   async (req: Request, res: Response) => {
+    const podcastId = req.params.podcastId as string;
+    const episodeId = req.params.episodeId as string;
     const sessionId = req.params.sessionId as string;
+
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    if (!(await verifyAccess(req.user.userId, podcastId))) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
 
     const [session] = await db
       .select()
@@ -286,6 +525,14 @@ router.get(
 
     if (!session) {
       res.status(404).json({ error: "Session not found" });
+      return;
+    }
+    if (session.podcastId !== podcastId || session.episodeId !== episodeId) {
+      res.status(403).json({ error: "Upload session does not belong to this episode" });
+      return;
+    }
+    if (session.createdById !== req.user.userId) {
+      res.status(403).json({ error: "Upload session does not belong to this user" });
       return;
     }
 
@@ -308,12 +555,17 @@ router.get(
   "/:podcastId/episodes/:episodeId/uploads/resume",
   jwtAuthMiddleware,
   async (req: Request, res: Response) => {
+    const podcastId = req.params.podcastId as string;
     const episodeId = req.params.episodeId as string;
     if (!req.user) {
       res.status(401).json({ error: "Authentication required" });
       return;
     }
     const userId = req.user.userId;
+    if (!(await verifyAccess(userId, podcastId))) {
+      res.status(403).json({ error: "Access denied" });
+      return;
+    }
 
     const [session] = await db
       .select()

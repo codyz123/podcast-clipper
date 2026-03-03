@@ -53,6 +53,9 @@ export interface Episode {
 export interface Transcript {
   id: string;
   projectId: string;
+  sourceBlobUrl?: string;
+  sourceType?: "audio" | "video" | "nle-export" | "multicam";
+  sourceMediaAssetId?: string;
   text: string;
   words: Array<{
     text: string;
@@ -325,6 +328,9 @@ export function useEpisodes() {
         name?: string;
         audioFingerprint?: string;
         service?: string;
+        sourceBlobUrl?: string;
+        sourceType?: "audio" | "video" | "nle-export" | "multicam";
+        sourceMediaAssetId?: string;
       }
     ): Promise<Transcript | null> => {
       if (!currentPodcastId) return null;

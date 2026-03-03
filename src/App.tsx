@@ -21,6 +21,7 @@ import { useEditorStore } from "./stores/editorStore";
 import { usePublishStore } from "./stores/publishStore";
 import { usePodcast } from "./hooks/usePodcast";
 import { useEpisodes } from "./hooks/useEpisodes";
+import { useChunkedUpload } from "./hooks/useChunkedUpload";
 import { episodeToProject } from "./lib/episodeToProject";
 import { episodeKeys, fetchEpisodeDetail } from "./lib/queries";
 import { applyBrandColors, parseBrandColorsFromStorage } from "./lib/colorExtractor";
@@ -247,12 +248,54 @@ function MediaPage({
   goToEpisodeStage: (episodeId: string, stage: EpisodeStage, subStep?: string) => void;
 }) {
   const { currentProject } = useProjectStore();
+  const updateProject = useProjectStore((s) => s.updateProject);
+  const currentPodcastId = useAuthStore((s) => s.currentPodcastId);
   const [mode, setMode] = useState<"audio" | "video">("audio");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+  const {
+    upload: uploadMediaAsset,
+    progress: mediaUploadProgress,
+    isUploading: isMediaUploading,
+  } = useChunkedUpload(currentPodcastId, currentProject?.id ?? null);
 
   // Auto-detect mode from episode data when it loads
   useEffect(() => {
     if (currentProject?.mediaType === "video") setMode("video");
   }, [currentProject?.mediaType]);
+
+  const handleMediaAssetUpload = useCallback(
+    async (file: File) => {
+      if (!currentProject?.id) return;
+      setUploadError(null);
+      const result = await uploadMediaAsset(file, {
+        target: "media-asset",
+        category: "general",
+      });
+      if (!result) {
+        setUploadError("Video upload failed. Please try again.");
+        return;
+      }
+
+      const isVideoUpload =
+        file.type.startsWith("video/") || /\.(mp4|mov|mkv|webm|avi)$/i.test(file.name);
+      if (isVideoUpload) {
+        updateProject({ mediaType: "video" });
+      }
+      goToEpisodeStage(currentProject.id, "post-production", "transcript");
+    },
+    [currentProject?.id, goToEpisodeStage, updateProject, uploadMediaAsset]
+  );
+
+  const onUploadInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      await handleMediaAssetUpload(file);
+      e.target.value = "";
+    },
+    [handleMediaAssetUpload]
+  );
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -292,12 +335,46 @@ function MediaPage({
           }
         />
       ) : (
-        <VideoImport
-          onImportComplete={() =>
-            currentProject?.id &&
-            goToEpisodeStage(currentProject.id, "post-production", "transcript")
-          }
-        />
+        <div className="space-y-4">
+          <VideoImport
+            onImportComplete={() =>
+              currentProject?.id &&
+              goToEpisodeStage(currentProject.id, "post-production", "transcript")
+            }
+          />
+          <div className="rounded-lg border border-[hsl(var(--border-subtle))] bg-[hsl(var(--surface-1))] p-4">
+            <p className="text-sm font-medium text-[hsl(var(--text))]">Upload Video File</p>
+            <p className="mt-1 text-xs text-[hsl(var(--text-muted))]">
+              Upload a standalone video file as an episode media asset (not a multicam source).
+            </p>
+            <div className="mt-3 flex items-center gap-3">
+              <button
+                type="button"
+                className="rounded-md bg-[hsl(var(--surface-3))] px-3 py-2 text-sm text-[hsl(var(--text))] transition-colors hover:bg-[hsl(var(--surface-4))] disabled:opacity-50"
+                disabled={isMediaUploading}
+                onClick={() => uploadInputRef.current?.click()}
+              >
+                {isMediaUploading ? "Uploading..." : "Choose Video"}
+              </button>
+              <span className="text-xs text-[hsl(var(--text-muted))]">
+                MP4, MOV, MKV, WebM, AVI
+              </span>
+            </div>
+            <input
+              ref={uploadInputRef}
+              type="file"
+              accept=".mp4,.mov,.mkv,.webm,.avi"
+              className="hidden"
+              onChange={onUploadInputChange}
+            />
+            {isMediaUploading && (
+              <p className="mt-2 text-xs text-[hsl(var(--text-muted))]">
+                {mediaUploadProgress.status} · {mediaUploadProgress.percentage}%
+              </p>
+            )}
+            {uploadError && <p className="mt-2 text-xs text-[hsl(var(--error))]">{uploadError}</p>}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -606,10 +683,31 @@ function App() {
     enabled: !!currentPodcastId && !!resolvedEpisodeId && isAuthenticated && !authLoading,
   });
 
+  const lastEpisodeSyncKeyRef = useRef<string | null>(null);
+
   // Sync fetched episode data to projectStore
   useEffect(() => {
     if (!episodeDetail) return;
-    if (currentProject?.id === episodeDetail.id) return;
+    const episodeTranscripts = episodeDetail.transcripts ?? [];
+    const episodeClips = episodeDetail.clips ?? [];
+    const episodeVideoSources = episodeDetail.videoSources ?? [];
+
+    const detailSyncKey = [
+      episodeDetail.id,
+      episodeDetail.updatedAt || "",
+      episodeDetail.mediaType || "",
+      episodeTranscripts.length,
+      episodeClips.length,
+      episodeVideoSources.length,
+    ].join("|");
+
+    if (
+      currentProject?.id === episodeDetail.id &&
+      lastEpisodeSyncKeyRef.current === detailSyncKey
+    ) {
+      return;
+    }
+    lastEpisodeSyncKeyRef.current = detailSyncKey;
 
     // Preserve the user's active transcript selection across reloads
     const storeState = useProjectStore.getState();
@@ -949,13 +1047,7 @@ function App() {
     };
 
     return steps[activeSubStage] || null;
-  }, [
-    hasEpisodeContext,
-    activeSubStage,
-    currentProject?.audioPath,
-    currentProject?.transcript,
-    currentProject?.clips?.length,
-  ]);
+  }, [hasEpisodeContext, activeSubStage, currentProject?.audioPath, currentProject?.clips?.length]);
 
   const episodesList = episodes.map((e) => ({ id: e.id, name: e.name }));
 

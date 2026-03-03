@@ -129,25 +129,60 @@ export const ClipSelector: React.FC = () => {
   // Load audio from IndexedDB
   useEffect(() => {
     let objectUrl: string | null = null;
+    let cancelled = false;
 
     const loadAudio = async () => {
-      if (!currentProject?.id) return;
+      if (!currentProject?.id) {
+        setAudioUrl(null);
+        return;
+      }
+
+      const transcriptScopedAudio =
+        transcript?.sourceBlobUrl && transcript.sourceType !== "multicam"
+          ? transcript.sourceBlobUrl
+          : null;
 
       const blob = await getAudioBlob(currentProject.id);
+      if (cancelled) return;
       if (blob) {
         objectUrl = URL.createObjectURL(blob);
         setAudioUrl(objectUrl);
+        return;
       }
+
+      // Fallback chain for episodes loaded from backend without IndexedDB blobs.
+      if (isVideoEpisode) {
+        const fallbackSource = currentProject.videoSources?.find((s) => s.audioBlobUrl);
+        setAudioUrl(
+          transcriptScopedAudio ||
+            currentProject.mixedAudioBlobUrl ||
+            fallbackSource?.audioBlobUrl ||
+            currentProject.audioPath ||
+            null
+        );
+        return;
+      }
+
+      setAudioUrl(transcriptScopedAudio || currentProject.audioPath || null);
     };
 
-    loadAudio();
+    void loadAudio();
 
     return () => {
+      cancelled = true;
       if (objectUrl) {
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [currentProject?.id]);
+  }, [
+    currentProject?.id,
+    currentProject?.audioPath,
+    currentProject?.mixedAudioBlobUrl,
+    currentProject?.videoSources,
+    isVideoEpisode,
+    transcript?.sourceBlobUrl,
+    transcript?.sourceType,
+  ]);
 
   // Sync clips to backend when they change (debounced)
   const clipsRef = useRef(clips);
@@ -795,6 +830,9 @@ Return ONLY valid JSON in this exact format (no other text):
 
       let addedCount = 0;
       const startingClipNumber = clips.length + 1;
+      const shouldAttachVideoBackground =
+        (transcript.sourceType === "video" || transcript.sourceType === "nle-export") &&
+        !!transcript.sourceBlobUrl;
       segments.forEach(
         (segment: {
           start_time: number;
@@ -850,6 +888,12 @@ Return ONLY valid JSON in this exact format (no other text):
               startTime,
               endTime
             ),
+            background: shouldAttachVideoBackground
+              ? {
+                  type: "video",
+                  videoPath: transcript.sourceBlobUrl,
+                }
+              : undefined,
             clippabilityScore,
             isManual: false,
           });
@@ -897,6 +941,9 @@ Return ONLY valid JSON in this exact format (no other text):
     );
 
     const clipNumber = clips.length + 1;
+    const shouldAttachVideoBackground =
+      (transcript.sourceType === "video" || transcript.sourceType === "nle-export") &&
+      !!transcript.sourceBlobUrl;
     addClip({
       projectId: currentProject.id,
       name: `Clip ${clipNumber}`,
@@ -905,6 +952,12 @@ Return ONLY valid JSON in this exact format (no other text):
       transcript: segmentWords.map((w) => w.text).join(" "),
       words: segmentWords,
       segments: computeClipSegments(transcript.segments, transcript.words, start, end),
+      background: shouldAttachVideoBackground
+        ? {
+            type: "video",
+            videoPath: transcript.sourceBlobUrl,
+          }
+        : undefined,
       isManual: true,
     });
 
