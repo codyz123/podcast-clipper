@@ -119,7 +119,12 @@ export async function uploadMedia(
 ): Promise<{ url: string; size: number }> {
   if (isR2Configured()) {
     const key = `${folder}/${Date.now()}-${filename}`;
-    return uploadToR2(key, file, contentType);
+    try {
+      return uploadToR2(key, file, contentType);
+    } catch (error) {
+      // Keep local dev usable even if remote storage credentials are invalid.
+      console.warn("[Media] R2 upload failed, falling back to local storage:", error);
+    }
   }
 
   const local = getLocalMediaPath(folder, filename);
@@ -141,7 +146,12 @@ export async function uploadMediaFromPath(
   if (isR2Configured()) {
     const key = `${folder}/${Date.now()}-${filename}`;
     const fileBuffer = readFileSync(filePath);
-    return uploadToR2(key, fileBuffer, contentType);
+    try {
+      return uploadToR2(key, fileBuffer, contentType);
+    } catch (error) {
+      // Keep local dev usable even if remote storage credentials are invalid.
+      console.warn("[Media] R2 upload-from-path failed, falling back to local storage:", error);
+    }
   }
 
   const local = getLocalMediaPath(folder, filename);

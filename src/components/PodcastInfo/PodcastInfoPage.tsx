@@ -20,6 +20,13 @@ import { getApiBase, getMediaUrl } from "../../lib/api";
 import { ConfirmationDialog } from "../ui/ConfirmationDialog";
 import type { PodcastPerson, BrandingAssetCategory } from "../../lib/types";
 
+function sanitizeCoverImageUrl(url: string | undefined | null): string {
+  if (!url) return "";
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.startsWith("blob:")) return "";
+  return trimmed;
+}
+
 // Categories based on Apple Podcasts categories
 const PODCAST_CATEGORIES = [
   "Arts",
@@ -98,6 +105,7 @@ export const PodcastInfoPage: React.FC = () => {
   // Initialize form from backend data when podcast loads
   useEffect(() => {
     if (podcast) {
+      const coverImage = sanitizeCoverImageUrl(podcast.coverImageUrl);
       const newMetadata = {
         name: podcast.name || "",
         description: podcast.description || "",
@@ -107,7 +115,7 @@ export const PodcastInfoPage: React.FC = () => {
         category: podcast.podcastMetadata?.category || "Technology",
         language: podcast.podcastMetadata?.language || "en",
         explicit: podcast.podcastMetadata?.explicit || false,
-        coverImage: podcast.coverImageUrl || "",
+        coverImage,
       };
       setMetadata(newMetadata);
       setIsDirty(false);
@@ -138,10 +146,11 @@ export const PodcastInfoPage: React.FC = () => {
         if (!isOwner) return;
         setSaveStatus("saving");
         try {
+          const safeCoverImage = sanitizeCoverImageUrl(data.coverImage);
           await updatePodcast({
             name: data.name,
             description: data.description,
-            coverImageUrl: data.coverImage || undefined,
+            coverImageUrl: safeCoverImage || undefined,
             podcastMetadata: {
               author: data.author,
               category: data.category,
@@ -197,10 +206,14 @@ export const PodcastInfoPage: React.FC = () => {
       }
 
       const { coverImageUrl } = await res.json();
-      handleChange("coverImage", coverImageUrl);
+      const safeCoverImageUrl = sanitizeCoverImageUrl(coverImageUrl);
+      if (!safeCoverImageUrl) {
+        throw new Error("Upload succeeded but returned an invalid cover URL");
+      }
+      handleChange("coverImage", safeCoverImageUrl);
 
       // Extract and save brand colors
-      const colors = await extractBrandColors(coverImageUrl);
+      const colors = await extractBrandColors(safeCoverImageUrl);
       if (colors) {
         setBrandColors(colors);
         await updatePodcast({
@@ -258,6 +271,9 @@ export const PodcastInfoPage: React.FC = () => {
     if (!file) return;
     await uploadPhoto(personId, file);
   };
+
+  const displayCoverImage =
+    sanitizeCoverImageUrl(metadata.coverImage) || sanitizeCoverImageUrl(podcast?.coverImageUrl);
 
   const handleUploadAsset = async () => {
     if (!selectedAssetFile || !newAssetName.trim()) return;
@@ -320,9 +336,9 @@ export const PodcastInfoPage: React.FC = () => {
                     "border-2 border-dashed border-[hsl(var(--border-subtle))]"
                   )}
                 >
-                  {metadata.coverImage ? (
+                  {displayCoverImage ? (
                     <img
-                      src={getMediaUrl(metadata.coverImage)}
+                      src={getMediaUrl(displayCoverImage)}
                       alt="Podcast cover"
                       className="h-full w-full object-cover"
                     />
@@ -362,7 +378,7 @@ export const PodcastInfoPage: React.FC = () => {
                       <ImageIcon className="h-4 w-4" />
                       {isUploadingCover
                         ? "Uploading..."
-                        : metadata.coverImage
+                        : displayCoverImage
                           ? "Change Cover"
                           : "Upload Cover"}
                       <input
@@ -373,7 +389,7 @@ export const PodcastInfoPage: React.FC = () => {
                         className="hidden"
                       />
                     </label>
-                    {metadata.coverImage && (
+                    {displayCoverImage && (
                       <button
                         onClick={handleRemoveCoverImage}
                         className={cn(
@@ -389,7 +405,7 @@ export const PodcastInfoPage: React.FC = () => {
                   </div>
 
                   {/* Brand Colors Preview */}
-                  {brandColors && metadata.coverImage && (
+                  {brandColors && displayCoverImage && (
                     <div className="mt-4 border-t border-[hsl(var(--border-subtle))] pt-4">
                       <p className="mb-2 text-xs text-[hsl(var(--text-ghost))]">
                         Brand colors (auto-detected)

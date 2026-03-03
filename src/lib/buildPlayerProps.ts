@@ -152,6 +152,13 @@ export function buildPlayerProps(input: BuildPlayerPropsInput): BuildPlayerProps
   const audioStartFrame = Math.floor(clip.startTime * FPS);
   const audioEndFrame = Math.ceil(clip.endTime * FPS);
 
+  const resolvedPodcast = podcast
+    ? {
+        ...podcast,
+        coverImageUrl: getMediaUrl(podcast.coverImageUrl),
+      }
+    : undefined;
+
   const props: ClipVideoProps = {
     audioUrl: resolvedAudioUrl,
     audioStartFrame,
@@ -163,7 +170,7 @@ export function buildPlayerProps(input: BuildPlayerPropsInput): BuildPlayerProps
     durationInFrames,
     fps: FPS,
     tracks: tracks.length > 0 ? tracks : undefined,
-    podcast,
+    podcast: resolvedPodcast,
     groupBoundaries,
     speaker,
   };
