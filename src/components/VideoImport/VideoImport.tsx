@@ -67,6 +67,7 @@ export const VideoImport: React.FC<VideoImportProps> = ({ onImportComplete }) =>
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const addMoreInputRef = useRef<HTMLInputElement>(null);
+  const inflightFingerprintsRef = useRef<Set<string>>(new Set());
 
   // Invalidate both video sources and episode detail queries after any mutation
   const invalidateSources = useCallback(() => {
@@ -92,8 +93,9 @@ export const VideoImport: React.FC<VideoImportProps> = ({ onImportComplete }) =>
 
       const fingerprints = await Promise.all(selectedFiles.map(computeFileFingerprint));
 
-      // Check against already-queued files (client-side)
+      // Check against already-queued files (client-side) + in-flight uploads
       const queuedFingerprints = new Set(files.map((f) => f.fingerprint));
+      const inflightFps = inflightFingerprintsRef.current;
 
       // Check against DB via server
       let dbDuplicates = new Set<string>();
@@ -102,10 +104,15 @@ export const VideoImport: React.FC<VideoImportProps> = ({ onImportComplete }) =>
         dbDuplicates = new Set(dupes);
       }
 
-      return selectedFiles.filter((_, i) => {
+      const result = selectedFiles.filter((_, i) => {
         const fp = fingerprints[i];
-        return !dbDuplicates.has(fp) && !queuedFingerprints.has(fp);
+        if (dbDuplicates.has(fp) || queuedFingerprints.has(fp) || inflightFps.has(fp)) {
+          return false;
+        }
+        inflightFps.add(fp); // Mark as in-flight immediately
+        return true;
       });
+      return result;
     },
     [files, currentPodcastId, episodeId]
   );
@@ -121,6 +128,11 @@ export const VideoImport: React.FC<VideoImportProps> = ({ onImportComplete }) =>
       if (newFiles.length === 0) return; // All duplicates — existing sources already visible
 
       await uploadAll(newFiles);
+      // Clear in-flight tracking for completed uploads
+      for (const f of newFiles) {
+        const fp = await computeFileFingerprint(f);
+        inflightFingerprintsRef.current.delete(fp);
+      }
       invalidateSources();
     },
     [uploadAll, dedupeFiles, invalidateSources]
